@@ -129,20 +129,38 @@ public final class ApusTelemetryAddon implements Runnable {
         access.set(fallback);
         RenderManagerAccess fallbackFinal = fallback;
 
+        // BlueMapAPI.callConsumers() catches per-consumer but rethrows the collected
+        // failures out of registerInstance(), which BlueMap's own startup calls. A failure
+        // in this consumer must never propagate there -- per spec §7.2, progress reporting
+        // must never affect the render itself -- so every Throwable is caught, logged, and
+        // swallowed here.
         BlueMapAPI.onEnable(api -> {
-            RenderManagerAccess resolved = BlueMapRenderManagerAccess.createOrNull(api);
-            if (resolved != null) {
-                access.set(resolved);
-            } else {
-                System.err.println(
-                        "[apus-telemetry] no plugin instance available; falling back to log-tail progress parsing");
+            try {
+                RenderManagerAccess resolved = BlueMapRenderManagerAccess.createOrNull(api);
+                if (resolved != null) {
+                    access.set(resolved);
+                } else {
+                    System.err.println(
+                            "[apus-telemetry] no plugin instance available; falling back to log-tail progress"
+                                    + " parsing");
+                    access.set(fallbackFinal);
+                }
+            } catch (Throwable t) {
+                System.err.println("[apus-telemetry] onEnable handler failed, keeping the log-tail fallback: " + t);
                 access.set(fallbackFinal);
             }
         });
         // The log-tail fallback keeps working regardless of the API's own lifecycle (it reads
         // BlueMap's logger, not the API), so fall back to it instead of losing progress
-        // reporting entirely once the API-backed instance goes away.
-        BlueMapAPI.onDisable(api -> access.set(fallbackFinal));
+        // reporting entirely once the API-backed instance goes away. Same encapsulation
+        // rationale as onEnable above: this must never disrupt BlueMap's own shutdown.
+        BlueMapAPI.onDisable(api -> {
+            try {
+                access.set(fallbackFinal);
+            } catch (Throwable t) {
+                System.err.println("[apus-telemetry] onDisable handler failed: " + t);
+            }
+        });
 
         Runtime.getRuntime().addShutdownHook(new Thread(this::stop, "apus-telemetry-shutdown"));
     }
