@@ -55,6 +55,23 @@ public class WorldSource extends CustomResource<WorldSourceSpec, WorldSourceStat
         /** "auto" makes the ingest job detect the layout (vanilla/Paper/multiverse/...) itself. */
         private String layout = "auto";
 
+        /**
+         * The Minecraft version this world runs under, e.g. {@code "1.21.10"} -- recorded
+         * verbatim into {@code manifest.minecraftVersion} for every bundle ingested from this
+         * selector.
+         *
+         * <p><b>Why this lives here instead of being read from {@code level.dat}.</b> {@code
+         * level.dat} is NBT, not JSON/plain text, and this project intentionally does not carry
+         * an NBT parsing dependency (see {@code ingest/README.md}'s connector-only dependency
+         * policy). Since {@code level.dat} is bundled starting from this same fix (see the
+         * ingest layer's D1 fix), a future change could still read it back out once an NBT
+         * reader exists -- but a required manifest field cannot stay permanently unset waiting
+         * for that; a user-supplied value the tenant already knows (the version they run) is the
+         * simplest correct answer available today. {@code null}/unset means the field is left
+         * absent on the bundle, exactly as it always has been -- this is purely additive.
+         */
+        private String minecraftVersion;
+
         public String getName() {
             return name;
         }
@@ -69,6 +86,14 @@ public class WorldSource extends CustomResource<WorldSourceSpec, WorldSourceStat
 
         public void setLayout(String layout) {
             this.layout = layout;
+        }
+
+        public String getMinecraftVersion() {
+            return minecraftVersion;
+        }
+
+        public void setMinecraftVersion(String minecraftVersion) {
+            this.minecraftVersion = minecraftVersion;
         }
     }
 }

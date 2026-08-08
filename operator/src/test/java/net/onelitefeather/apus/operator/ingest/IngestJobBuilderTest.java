@@ -103,6 +103,7 @@ class IngestJobBuilderTest {
                 "APUS_SOURCE_VERSION",
                 "APUS_BUNDLE_BUCKET",
                 "APUS_BUNDLE_TENANT",
+                "APUS_BUNDLE_SOURCE_NAME",
                 "APUS_BUNDLE_WORLD_ID",
                 "APUS_BUNDLE_VERSION",
                 "APUS_S3_ENDPOINT",
@@ -116,6 +117,10 @@ class IngestJobBuilderTest {
         assertEquals("world", env.get("APUS_WORLD_NAME").getValue());
         assertEquals("2026-08-01T00-00-00Z.zip", env.get("APUS_SOURCE_VERSION").getValue());
         assertEquals("friends", env.get("APUS_BUNDLE_TENANT").getValue(), "tenant recovered from the namespace");
+        assertEquals(
+                "survival-source",
+                env.get("APUS_BUNDLE_SOURCE_NAME").getValue(),
+                "bundle path must be scoped by the owning source's name (see BundlePath)");
         assertEquals("world", env.get("APUS_BUNDLE_WORLD_ID").getValue());
         assertEquals(
                 "survival-source-world-v1",
@@ -125,6 +130,34 @@ class IngestJobBuilderTest {
         assertEquals("survival/", env.get("APUS_SOURCE_S3_PREFIX").getValue());
         assertEquals("http://minio.example.svc:9000", env.get("APUS_SOURCE_S3_ENDPOINT").getValue());
         assertEquals("bukkit", env.get("APUS_LAYOUT").getValue(), "layout comes from the matching WorldSelector");
+    }
+
+    @Test
+    void mcVersionIsOmittedWhenTheMatchingWorldSelectorDoesNotConfigureOne() {
+        Job job = IngestJobBuilder.build(
+                ingest("i1", "v1"), s3Source("survival-source"), OperatorConfig.defaults());
+
+        assertNull(envOf(job).get("APUS_MC_VERSION"), "no minecraftVersion configured on the WorldSelector");
+    }
+
+    @Test
+    void mcVersionIsPassedThroughFromTheMatchingWorldSelector() {
+        WorldSource source = s3Source("survival-source");
+        source.getSpec().getWorlds().get(0).setMinecraftVersion("1.21.10");
+
+        Job job = IngestJobBuilder.build(ingest("i1", "v1"), source, OperatorConfig.defaults());
+
+        assertEquals("1.21.10", envOf(job).get("APUS_MC_VERSION").getValue());
+    }
+
+    @Test
+    void theIngestContainerHasAnEphemeralStorageRequestAndLimit() {
+        Job job = IngestJobBuilder.build(
+                ingest("i1", "v1"), s3Source("survival-source"), OperatorConfig.defaults());
+
+        var resources = job.getSpec().getTemplate().getSpec().getContainers().get(0).getResources();
+        assertNotNull(resources.getRequests().get("ephemeral-storage"), "no volume is mounted for the work directory");
+        assertNotNull(resources.getLimits().get("ephemeral-storage"));
     }
 
     @Test

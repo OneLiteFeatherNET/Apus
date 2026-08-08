@@ -23,9 +23,13 @@ import io.fabric8.kubernetes.api.model.EnvVar;
 import io.fabric8.kubernetes.api.model.EnvVarBuilder;
 import io.fabric8.kubernetes.api.model.OwnerReference;
 import io.fabric8.kubernetes.api.model.OwnerReferenceBuilder;
+import io.fabric8.kubernetes.api.model.Quantity;
+import io.fabric8.kubernetes.api.model.ResourceRequirements;
+import io.fabric8.kubernetes.api.model.ResourceRequirementsBuilder;
 import io.fabric8.kubernetes.api.model.batch.v1.Job;
 import io.fabric8.kubernetes.api.model.batch.v1.JobBuilder;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import net.onelitefeather.apus.operator.OperatorConfig;
@@ -57,6 +61,15 @@ import net.onelitefeather.apus.operator.api.WorldSource;
  * builder uses the {@link WorldIngest}'s own resource name: {@link WorldSourceReconciler} already
  * mints a fresh, unique name per discovered source version, so reusing it costs nothing extra and
  * keeps the ingest run and the bundle it produces traceable to each other by the same string.
+ *
+ * <p><b>Bounded ephemeral storage.</b> The ingest container mounts no volume for its work
+ * directory or the archive it extracts -- both land on the container's writable layer, backed by
+ * the node's own disk. {@code Archives}' own configurable total-bytes/entry-count limits (see
+ * {@code ingest/README.md}) stop a hostile "archive bomb" from writing unbounded data, but without
+ * a Kubernetes-level {@code ephemeral-storage} resource limit too, even a *legitimate* large world
+ * could still starve the node's disk for every other pod scheduled on it. This builder therefore
+ * always sets both a request and a limit for it, as defense in depth alongside the application-level
+ * check, not instead of it.
  */
 public final class IngestJobBuilder {
 
@@ -76,6 +89,14 @@ public final class IngestJobBuilder {
     private static final String AUTO_LAYOUT = "auto";
     private static final String TYPE_S3 = "s3";
     private static final String TYPE_PTERODACTYL = "pterodactyl";
+
+    /**
+     * Ephemeral-storage request/limit for the ingest container -- see the class Javadoc's
+     * "Bounded ephemeral storage" section for why this exists at all.
+     */
+    private static final String EPHEMERAL_STORAGE_REQUEST = "2Gi";
+
+    private static final String EPHEMERAL_STORAGE_LIMIT = "10Gi";
 
     /** Secret data key expected on the bundle destination credentials secret. */
     private static final String BUNDLE_ACCESS_KEY = "AWS_ACCESS_KEY_ID";
@@ -113,6 +134,7 @@ public final class IngestJobBuilder {
                 .withName(CONTAINER_NAME)
                 .withImage(config.ingestImage())
                 .withEnv(env(ingest, source, config))
+                .withResources(resources())
                 .withTerminationMessagePolicy(TERMINATION_MESSAGE_POLICY)
                 .build();
 
@@ -157,6 +179,21 @@ public final class IngestJobBuilder {
         return labels;
     }
 
+    /**
+     * The ingest container's {@code ephemeral-storage} request/limit -- see the class Javadoc's
+     * "Bounded ephemeral storage" section.
+     */
+    private static ResourceRequirements resources() {
+        Map<String, Quantity> quantities = new LinkedHashMap<>();
+        quantities.put("ephemeral-storage", new Quantity(EPHEMERAL_STORAGE_REQUEST));
+        Map<String, Quantity> limits = new LinkedHashMap<>();
+        limits.put("ephemeral-storage", new Quantity(EPHEMERAL_STORAGE_LIMIT));
+        return new ResourceRequirementsBuilder()
+                .withRequests(quantities)
+                .withLimits(limits)
+                .build();
+    }
+
     private static OwnerReference ownerReference(WorldIngest ingest) {
         return new OwnerReferenceBuilder()
                 .withApiVersion(OWNER_API_VERSION)
@@ -187,6 +224,11 @@ public final class IngestJobBuilder {
         env.add(literal("APUS_SOURCE_VERSION", ingest.getSpec().getSourceVersion()));
         env.add(literal("APUS_BUNDLE_BUCKET", config.bundleBucket()));
         env.add(literal("APUS_BUNDLE_TENANT", tenantNameForNamespace(namespace)));
+        // Scopes the bundle path by the owning source's name, not just worldId -- see
+        // net.onelitefeather.apus.ingest.BundlePath's Javadoc for why worldId alone (the
+        // Minecraft world's own directory name, commonly the vanilla default "world") is not
+        // enough to keep two different sources' bundles from colliding on the same prefix.
+        env.add(literal("APUS_BUNDLE_SOURCE_NAME", source.getMetadata().getName()));
         env.add(literal("APUS_BUNDLE_WORLD_ID", worldName));
         env.add(literal("APUS_BUNDLE_VERSION", bundleVersion));
         env.add(literal("APUS_S3_ENDPOINT", config.bundleS3Endpoint()));
@@ -198,6 +240,10 @@ public final class IngestJobBuilder {
             env.add(literal("APUS_S3_REGION", config.bundleS3Region()));
         }
         env.add(literal("APUS_LAYOUT", layoutFor(source, worldName)));
+        String minecraftVersion = minecraftVersionFor(source, worldName);
+        if (minecraftVersion != null && !minecraftVersion.isBlank()) {
+            env.add(literal("APUS_MC_VERSION", minecraftVersion));
+        }
 
         switch (source.getSpec().getType()) {
             case TYPE_S3 -> env.addAll(s3SourceEnv(source));
@@ -262,6 +308,21 @@ public final class IngestJobBuilder {
             }
         }
         return AUTO_LAYOUT;
+    }
+
+    /**
+     * The Minecraft version configured on the matching {@link WorldSource.WorldSelector}, or
+     * {@code null} if no selector matches or none was configured -- see {@link
+     * WorldSource.WorldSelector#getMinecraftVersion()} for why this is a user-supplied field
+     * rather than read from {@code level.dat}.
+     */
+    private static String minecraftVersionFor(WorldSource source, String worldName) {
+        for (WorldSource.WorldSelector selector : source.getSpec().getWorlds()) {
+            if (worldName != null && worldName.equals(selector.getName())) {
+                return selector.getMinecraftVersion();
+            }
+        }
+        return null;
     }
 
     /**
