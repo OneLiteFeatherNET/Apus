@@ -30,6 +30,16 @@ public class WorldSourceStatus {
     private String lastSeenVersion;
     private BundleRef latestBundle = new BundleRef();
     private String lastPollTime;
+
+    /**
+     * The optimistic lock {@code WorldIngestReconciler} claims before submitting an ingest Job,
+     * so two {@code WorldIngest} runs for this source never write to the bundle bucket at once.
+     * Exactly mirrors {@link BlueMapMapStatus#getLatestRender()} -- see {@code
+     * BlueMapRenderReconciler}'s class Javadoc for why an optimistic {@code updateStatus()} on
+     * the referenced resource (not the run itself) is the only race-free way to enforce this.
+     */
+    private ActiveIngest activeIngest = new ActiveIngest();
+
     private List<Condition> conditions = new ArrayList<>();
 
     public String getLastSeenVersion() {
@@ -56,11 +66,41 @@ public class WorldSourceStatus {
         this.lastPollTime = lastPollTime;
     }
 
+    public ActiveIngest getActiveIngest() {
+        return activeIngest;
+    }
+
+    public void setActiveIngest(ActiveIngest activeIngest) {
+        this.activeIngest = activeIngest;
+    }
+
     public List<Condition> getConditions() {
         return conditions;
     }
 
     public void setConditions(List<Condition> conditions) {
         this.conditions = conditions;
+    }
+
+    /** The most recent {@link WorldIngest} triggered for this source. */
+    public static class ActiveIngest {
+        private String name;
+        private String phase;
+
+        public String getName() {
+            return name;
+        }
+
+        public void setName(String name) {
+            this.name = name;
+        }
+
+        public String getPhase() {
+            return phase;
+        }
+
+        public void setPhase(String phase) {
+            this.phase = phase;
+        }
     }
 }
