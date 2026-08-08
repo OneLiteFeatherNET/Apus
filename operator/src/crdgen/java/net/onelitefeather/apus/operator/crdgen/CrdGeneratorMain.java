@@ -24,6 +24,7 @@ import io.fabric8.kubernetes.api.model.HasMetadata;
 import java.io.File;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Generates CRD YAML manifests from the {@link io.fabric8.kubernetes.client.CustomResource}
@@ -66,10 +67,18 @@ public final class CrdGeneratorMain {
         List<String> classpathElements =
                 Arrays.asList(System.getProperty("java.class.path").split(File.pathSeparator));
 
+        // This module also carries client-side models of CRDs that Rook already owns (see
+        // the net.onelitefeather.apus.operator.rook package): ObjectBucketClaim,
+        // CephObjectStoreUser. Those extend CustomResource and carry @Group/@Version just
+        // like our own resources, so the scanner would otherwise happily emit YAML for them
+        // -- which would then fight with Rook's own CRDs in the cluster. Restricting the
+        // scan to the package that holds Apus's own resources keeps the two worlds apart
+        // without relying on the Rook classes staying accidentally unannotated.
         CustomResourceCollector collector = new CustomResourceCollector()
                 .withParentClassLoader(Thread.currentThread().getContextClassLoader())
                 .withClasspathElements(classpathElements)
-                .withFileToScan(classesDirs);
+                .withFileToScan(classesDirs)
+                .withIncludePackages(Set.of("net.onelitefeather.apus.operator.api"));
 
         List<Class<? extends HasMetadata>> customResourceClasses = collector.findCustomResourceClasses();
         if (customResourceClasses.isEmpty()) {

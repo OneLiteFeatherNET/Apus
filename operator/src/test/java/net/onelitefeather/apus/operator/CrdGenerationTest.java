@@ -126,4 +126,47 @@ class CrdGenerationTest {
         assertFalse(all.contains("objectbucket.io"), "unexpected objectbucket.io CRD found:\n" + all);
         assertFalse(all.contains("ceph.rook.io"), "unexpected ceph.rook.io CRD found:\n" + all);
     }
+
+    @Test
+    void doesNotGenerateCrdsForForeignResources() throws IOException {
+        String all = readAllCrds();
+
+        // Rook owns these CRDs; shipping our own copy would fight with Rook's.
+        assertTrue(!all.contains("objectbucket.io"), "must not generate Rook CRDs:\n" + all);
+        assertTrue(!all.contains("ceph.rook.io"), "must not generate Rook CRDs:\n" + all);
+    }
+
+    @Test
+    void generatesTheBlueMapMapCrdWithExpectedIdentity() {
+        CustomResourceDefinition crd = loadCrd("bluemapmaps.bluemap.onelitefeather.net-v1.yml");
+
+        assertEquals("bluemap.onelitefeather.net", crd.getSpec().getGroup());
+        assertEquals("BlueMapMap", crd.getSpec().getNames().getKind());
+        assertEquals("bluemapmaps", crd.getSpec().getNames().getPlural());
+    }
+
+    @Test
+    void blueMapMapIsNamespaceScoped() {
+        CustomResourceDefinition crd = loadCrd("bluemapmaps.bluemap.onelitefeather.net-v1.yml");
+
+        // Unlike Tenant, a map belongs to exactly one tenant namespace and must never
+        // be creatable across tenant boundaries.
+        assertEquals("Namespaced", crd.getSpec().getScope(), "BlueMapMap must be namespace-scoped");
+    }
+
+    @Test
+    void generatesTheBlueMapRenderCrdWithExpectedIdentity() {
+        CustomResourceDefinition crd = loadCrd("bluemaprenders.bluemap.onelitefeather.net-v1.yml");
+
+        assertEquals("bluemap.onelitefeather.net", crd.getSpec().getGroup());
+        assertEquals("BlueMapRender", crd.getSpec().getNames().getKind());
+        assertEquals("bluemaprenders", crd.getSpec().getNames().getPlural());
+    }
+
+    @Test
+    void blueMapRenderIsNamespaceScoped() {
+        CustomResourceDefinition crd = loadCrd("bluemaprenders.bluemap.onelitefeather.net-v1.yml");
+
+        assertEquals("Namespaced", crd.getSpec().getScope(), "BlueMapRender must be namespace-scoped");
+    }
 }
