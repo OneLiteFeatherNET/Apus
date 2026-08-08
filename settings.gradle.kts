@@ -1,6 +1,6 @@
 rootProject.name = "Apus"
 
-include("telemetry-addon")
+include("telemetry-addon", "runner")
 
 dependencyResolutionManagement {
     repositories {

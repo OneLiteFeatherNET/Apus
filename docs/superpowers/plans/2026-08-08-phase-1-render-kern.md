@@ -105,7 +105,7 @@ root-path: "survival"
 force-path-style: true
 ```
 
-> **Zu verifizieren in Task 7:** Sowohl die kebab-case-Abbildung als auch der Wert von `storage-type` (`themeinerlp:s3` folgt aus `new Key("themeinerlp", "s3")` in `S3StorageAddon`) sind aus dem Quellcode abgeleitet, nicht aus einer Dokumentation. Task 7 prüft beides gegen einen echten Lauf und korrigiert dieses Dokument bei Abweichung.
+> **Verifiziert in Task 7:** Der Integrationstest `runner/src/test/java/net/onelitefeather/apus/runner/RenderEndToEndTest.java` rendert die Fixture-Welt aus MinIO gegen einen echten BlueMap-CLI-Lauf mit `themeinerlp:s3` als Storage-Typ und den kebab-case-Feldnamen oben — **unverändert, wie ursprünglich angenommen**. Die BlueMap-Logausgabe bestätigt `Initializing Storage: 's3' (Type: 'themeinerlp:s3')`, und der Render endet mit Exit-Code 0. Zusätzlich bestätigt durch Quellcode-Review: `StorageConfig.storageType` in `bluemap-common` wird über `@Setting`-freies Configurate-Object-Mapping auf `storage-type` abgebildet (siehe `de.bluecolored.bluemap.common.config.storage.StorageConfig`), und `Key.parse(key, Key.BLUEMAP_NAMESPACE)` erwartet exakt das `namespace:value`-Format `themeinerlp:s3` aus `new Key("themeinerlp", "s3")` in `S3StorageAddon`. `render-config.sh` musste dafür nicht geändert werden.
 
 ---
 

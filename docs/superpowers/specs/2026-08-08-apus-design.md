@@ -475,6 +475,22 @@ als ConfigMap (plus Secret für Zugangsdaten):
 Nutzer schreiben kein HOCON. Wer Sonderfälle braucht, setzt gezielt
 `bluemap.config.overrides` oder referenziert eine eigene ConfigMap.
 
+**Verifiziertes Format von `storages/s3.conf`** (Phase 1, Task 7 — per Integrationstest
+gegen einen echten BlueMap-CLI-Lauf und Quellcode-Review von `S3StorageConfiguration`
+bestätigt; der Operator muss in Phase 2 exakt diese Schlüssel erzeugen):
+
+```hocon
+storage-type: "themeinerlp:s3"
+bucket-name: "..."
+region: "..."
+access-key-id: "..."
+secret-access-key: "..."
+endpoint-url: "..."
+compression: "gzip"
+root-path: "..."
+force-path-style: true
+```
+
 ### 9.3 Asset-Cache
 
 BlueMap lädt für Texturen und Modelle die Minecraft-Client-JAR. In ephemeren Pods geschähe
