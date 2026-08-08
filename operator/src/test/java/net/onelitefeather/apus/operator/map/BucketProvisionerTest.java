@@ -26,6 +26,7 @@ import io.fabric8.kubernetes.api.model.ObjectMetaBuilder;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.server.mock.EnableKubernetesMockClient;
 import java.util.Optional;
+import java.util.UUID;
 import net.onelitefeather.apus.operator.OperatorConfig;
 import net.onelitefeather.apus.operator.api.BlueMapMap;
 import net.onelitefeather.apus.operator.api.Labels;
@@ -104,6 +105,28 @@ class BucketProvisionerTest {
                 .withName("survival-overworld")
                 .get();
         assertEquals(Labels.MANAGED_BY_VALUE, claim.getMetadata().getLabels().get(Labels.MANAGED_BY));
+    }
+
+    @Test
+    void labelsTheClaimWithTheOwningMapNameAndUid() {
+        // BlueMapMapReconciler (Task 6) relies on these labels to tell "this claim already
+        // belongs to me" apart from "someone else's leftover claim reused this name" -- the
+        // exact ownership check that was missing for Tenant/CephObjectStoreUser until it was
+        // found to let cross-tenant adoption happen.
+        BucketProvisioner provisioner = new BucketProvisioner(client, OperatorConfig.defaults());
+        BlueMapMap map = map();
+        map.getMetadata().setUid(UUID.randomUUID().toString());
+
+        provisioner.ensureBucket(map, "apus-friends");
+
+        ObjectBucketClaim claim = client.resources(ObjectBucketClaim.class)
+                .inNamespace("bluemap-friends")
+                .withName("survival-overworld")
+                .get();
+        assertEquals("survival-overworld", claim.getMetadata().getLabels().get(Labels.MAP));
+        assertEquals(
+                map.getMetadata().getUid(),
+                claim.getMetadata().getLabels().get(Labels.MAP_UID));
     }
 
     @Test

@@ -19,6 +19,7 @@ package net.onelitefeather.apus.operator.map;
 
 import io.fabric8.kubernetes.api.model.ObjectMetaBuilder;
 import io.fabric8.kubernetes.client.KubernetesClient;
+import java.util.Map;
 import java.util.Optional;
 import net.onelitefeather.apus.operator.OperatorConfig;
 import net.onelitefeather.apus.operator.api.BlueMapMap;
@@ -87,7 +88,7 @@ public final class BucketProvisioner {
             claim.setMetadata(new ObjectMetaBuilder()
                     .withName(name)
                     .withNamespace(namespace)
-                    .withLabels(Labels.standard("bluemap-bucket-claim", name))
+                    .withLabels(claimLabels(map, name))
                     .build());
             claim.getSpec().setBucketName(bucketName);
             claim.getSpec().setStorageClassName(config.bucketStorageClass());
@@ -101,5 +102,23 @@ public final class BucketProvisioner {
             return Optional.of(existing);
         }
         return Optional.empty();
+    }
+
+    /**
+     * Labels a newly created claim with both the standard {@code managed-by} set and the
+     * owning map's name and UID, mirroring {@code TenantReconciler}'s {@code tenantLabels()}.
+     * {@link net.onelitefeather.apus.operator.map.BlueMapMapReconciler} relies on the UID label
+     * to distinguish "this claim already belongs to me" from "a claim with this name already
+     * exists but was created by something else" before it ever writes to an existing claim --
+     * exactly the check that was found missing for the tenant namespace and Ceph user.
+     */
+    private static Map<String, String> claimLabels(BlueMapMap map, String name) {
+        Map<String, String> labels = Labels.standard("bluemap-bucket-claim", name);
+        labels.put(Labels.MAP, name);
+        String mapUid = map.getMetadata().getUid();
+        if (mapUid != null && !mapUid.isBlank()) {
+            labels.put(Labels.MAP_UID, mapUid);
+        }
+        return labels;
     }
 }

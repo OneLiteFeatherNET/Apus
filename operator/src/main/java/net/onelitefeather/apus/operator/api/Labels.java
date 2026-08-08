@@ -56,6 +56,20 @@ public final class Labels {
      */
     public static final String TENANT_UID = "apus.onelitefeather.net/tenant-uid";
 
+    /**
+     * The {@code BlueMapMap} a per-map resource (e.g. an {@code ObjectBucketClaim}) belongs
+     * to, by name. Mirrors {@link #TENANT}: not unique on its own once a map can be deleted
+     * and recreated with the same name -- see {@link #MAP_UID}.
+     */
+    public static final String MAP = "apus.onelitefeather.net/map";
+
+    /**
+     * The UID of the owning {@code BlueMapMap} resource. Mirrors {@link #TENANT_UID}: a map
+     * name can be reused after deletion, but its UID never is, so ownership checks must
+     * compare this label, not just {@link #MAP}.
+     */
+    public static final String MAP_UID = "apus.onelitefeather.net/map-uid";
+
     private Labels() {}
 
     /**
