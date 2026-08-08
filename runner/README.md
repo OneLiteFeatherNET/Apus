@@ -47,20 +47,65 @@ docker run --rm -p 8099:8099 \
   -e APUS_MC_VERSION=1.21.10 \
   -e APUS_WORLD_S3_URL=s3://bundles/worlds/demo/survival/v1/overworld \
   -e APUS_MAP_BUCKET=apus-maps \
+  -e APUS_MAP_PREFIX=survival \
   -e APUS_S3_ENDPOINT=http://minio:9000 \
   -e APUS_S3_ACCESS_KEY=... \
   -e APUS_S3_SECRET_KEY=... \
+  -e APUS_S3_REGION=us-east-1 \
+  -e APUS_RENDER_THREADS=4 \
+  -e APUS_FORCE_RENDER=false \
+  -e APUS_TELEMETRY_PORT=8099 \
   apus/runner:dev
 ```
 
 Progress is available at `http://localhost:8099/progress` while the render runs.
+
+### Environment variables
+
+This is the full contract the image accepts, and the interface that a future Phase 2
+Kubernetes operator will drive (see `docs/superpowers/specs/2026-08-08-apus-design.md`
+§7.4).
+
+| Variable | Required | Default | Meaning |
+|---|---|---|---|
+| `APUS_MAP_ID` | yes | — | Map id, e.g. `overworld`. Used as a path segment (`maps/<id>.conf`); must match `^[a-z0-9_-]+$`, `render-config.sh` rejects anything else with exit code `5` |
+| `APUS_DIMENSION` | yes | — | `minecraft:overworld`, `minecraft:the_nether`, `minecraft:the_end` |
+| `APUS_MC_VERSION` | yes | — | Minecraft version, e.g. `1.21.10` |
+| `APUS_WORLD_S3_URL` | yes | — | Source of the world, e.g. `s3://bundles/worlds/demo/survival/v1/overworld` |
+| `APUS_MAP_BUCKET` | yes | — | Destination bucket for the rendered map |
+| `APUS_MAP_PREFIX` | no | `.` | Prefix inside the destination bucket |
+| `APUS_S3_ENDPOINT` | yes | — | e.g. `http://minio:9000` |
+| `APUS_S3_ACCESS_KEY` | yes | — | Access key |
+| `APUS_S3_SECRET_KEY` | yes | — | Secret key |
+| `APUS_S3_REGION` | no | `us-east-1` | |
+| `APUS_RENDER_THREADS` | no | `2` | Passed to BlueMap's `render-thread-count` |
+| `APUS_FORCE_RENDER` | no | `false` | `true` adds `-f`/`--force-render` to the BlueMap CLI invocation |
+| `APUS_TELEMETRY_PORT` | no | `8099` | Port the telemetry HTTP server binds to |
 
 ## Exit codes
 
 Inherited from the BlueMap CLI: `0` success, `1` configuration or IO error,
 `2` missing Minecraft resources. `bundle-sync.sh` adds `3` when the synced world
 contains no `region/` directory, and `4` when `APUS_WORLD_S3_URL` is missing the
-`s3://` prefix or has no path after it.
+`s3://` prefix or has no path after it. `render-config.sh` adds `5` when
+`APUS_MAP_ID` fails validation.
+
+## Integration tests
+
+`runner/src/test/java/net/onelitefeather/apus/runner/` contains two container-based
+integration tests (`RenderEndToEndTest`, `TelemetryContractTest`) that start MinIO plus
+the `apus/runner` image via Testcontainers and run a full BlueMap render against the
+fixture world in `testdata/mini-world`. They are **not** part of `./gradlew build` or
+`check` — each run takes minutes and requires the image to already exist. Run them
+explicitly:
+
+```bash
+./gradlew :telemetry-addon:shadowJar
+docker build -f runner/Dockerfile -t apus/runner:dev .
+./gradlew :runner:integrationTest
+```
+
+Pass `-Dapus.runner.image=<tag>` to `integrationTest` to test a different image tag.
 
 ## Telemetry
 

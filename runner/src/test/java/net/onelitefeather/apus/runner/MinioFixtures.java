@@ -31,8 +31,9 @@ import org.testcontainers.utility.DockerImageName;
  *
  * <p>Both {@link RenderEndToEndTest} and {@link TelemetryContractTest} need the exact same
  * fixture world seeded into the exact same bucket layout before a runner container can
- * start against it. Kept in one place so the two tests cannot silently drift apart on
- * bucket names, paths, or credentials.
+ * start against it, and both start the {@code apus/runner} image against MinIO with the same
+ * required environment variables. Kept in one place so the two tests cannot silently drift
+ * apart on bucket names, paths, credentials, or which environment variables the image needs.
  */
 final class MinioFixtures {
 
@@ -41,6 +42,11 @@ final class MinioFixtures {
     static final String WORLD_BUCKET = "bundles";
     static final String MAP_BUCKET = "maps";
     static final String WORLD_PATH = "worlds/demo/v1";
+
+    // Pinned instead of "latest": the mc image is used to seed/verify fixtures across both
+    // integration tests, and an unpinned "latest" could change behavior under us without
+    // warning. Same release as runner/Dockerfile's mc binary, so both stay in lockstep.
+    private static final DockerImageName MC_IMAGE = DockerImageName.parse("minio/mc:RELEASE.2025-08-13T08-35-41Z");
 
     private MinioFixtures() {}
 
@@ -64,7 +70,7 @@ final class MinioFixtures {
      * {@code bundles/worlds/demo/v1}, using a throwaway {@code minio/mc} container.
      */
     static void seedFixtureWorld(Network network) {
-        try (GenericContainer<?> seeder = new GenericContainer<>(DockerImageName.parse("minio/mc:latest"))
+        try (GenericContainer<?> seeder = new GenericContainer<>(MC_IMAGE)
                 .withNetwork(network)
                 .withFileSystemBind(fixture().toString(), "/fixture", BindMode.READ_ONLY)
                 .withCreateContainerCmdModifier(cmd -> cmd.withEntrypoint("/bin/sh"))
@@ -78,5 +84,36 @@ final class MinioFixtures {
                 .waitingFor(Wait.forLogMessage(".*SEEDED.*", 1).withStartupTimeout(Duration.ofMinutes(3)))) {
             seeder.start();
         }
+    }
+
+    /** Runs {@code command} in a throwaway {@code minio/mc} container on {@code network}. */
+    static GenericContainer<?> mcContainer(Network network, String command) {
+        return new GenericContainer<>(MC_IMAGE)
+                .withNetwork(network)
+                .withCreateContainerCmdModifier(cmd -> cmd.withEntrypoint("/bin/sh"))
+                .withCommand("-c", command);
+    }
+
+    /**
+     * Builds the {@code apus/runner} container, pre-populated with every environment variable
+     * the image needs to render {@code testdata/mini-world} against the MinIO fixture started
+     * by {@link #startMinio(Network)}/{@link #seedFixtureWorld(Network)}.
+     *
+     * <p>The single mandatory difference between callers -- {@code APUS_MAP_PREFIX} controls
+     * where in the map bucket the output lands, and callers that don't set one keep BlueMap's
+     * bucket-root default -- is left to the caller via {@link GenericContainer#withEnv}, which
+     * overrides values set here since it's called after this method returns.
+     */
+    static GenericContainer<?> runnerContainer(Network network, String image) {
+        return new GenericContainer<>(DockerImageName.parse(image))
+                .withNetwork(network)
+                .withEnv("APUS_MAP_ID", "overworld")
+                .withEnv("APUS_DIMENSION", "minecraft:overworld")
+                .withEnv("APUS_MC_VERSION", "1.21.10")
+                .withEnv("APUS_WORLD_S3_URL", "s3://" + WORLD_BUCKET + "/" + WORLD_PATH)
+                .withEnv("APUS_MAP_BUCKET", MAP_BUCKET)
+                .withEnv("APUS_S3_ENDPOINT", "http://minio:9000")
+                .withEnv("APUS_S3_ACCESS_KEY", ACCESS_KEY)
+                .withEnv("APUS_S3_SECRET_KEY", SECRET_KEY);
     }
 }

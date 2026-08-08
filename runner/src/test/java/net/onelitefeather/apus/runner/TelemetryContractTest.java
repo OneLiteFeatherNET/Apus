@@ -31,7 +31,6 @@ import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.MinIOContainer;
 import org.testcontainers.containers.Network;
 import org.testcontainers.containers.wait.strategy.Wait;
-import org.testcontainers.utility.DockerImageName;
 
 /**
  * The early-warning system for BlueMap upgrades.
@@ -60,20 +59,10 @@ class TelemetryContractTest {
 
             MinioFixtures.seedFixtureWorld(network);
 
-            try (GenericContainer<?> runner = new GenericContainer<>(
-                            DockerImageName.parse(System.getProperty("apus.runner.image", "apus/runner:dev")))
-                    .withNetwork(network)
+            String image = System.getProperty("apus.runner.image", "apus/runner:dev");
+
+            try (GenericContainer<?> runner = MinioFixtures.runnerContainer(network, image)
                     .withExposedPorts(8099)
-                    .withEnv("APUS_MAP_ID", "overworld")
-                    .withEnv("APUS_DIMENSION", "minecraft:overworld")
-                    .withEnv("APUS_MC_VERSION", "1.21.10")
-                    .withEnv(
-                            "APUS_WORLD_S3_URL",
-                            "s3://" + MinioFixtures.WORLD_BUCKET + "/" + MinioFixtures.WORLD_PATH)
-                    .withEnv("APUS_MAP_BUCKET", MinioFixtures.MAP_BUCKET)
-                    .withEnv("APUS_S3_ENDPOINT", "http://minio:9000")
-                    .withEnv("APUS_S3_ACCESS_KEY", MinioFixtures.ACCESS_KEY)
-                    .withEnv("APUS_S3_SECRET_KEY", MinioFixtures.SECRET_KEY)
                     .withEnv("APUS_FORCE_RENDER", "true")
                     .waitingFor(Wait.forLogMessage(".*apus-telemetry] listening.*", 1)
                             .withStartupTimeout(Duration.ofMinutes(5)))) {

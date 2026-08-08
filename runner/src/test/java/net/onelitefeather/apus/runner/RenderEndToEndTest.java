@@ -27,7 +27,6 @@ import org.testcontainers.containers.MinIOContainer;
 import org.testcontainers.containers.Network;
 import org.testcontainers.containers.output.Slf4jLogConsumer;
 import org.testcontainers.containers.wait.strategy.Wait;
-import org.testcontainers.utility.DockerImageName;
 
 /**
  * Proves the whole Phase 1 contract: world in from S3, map out to S3, progress over HTTP.
@@ -57,19 +56,8 @@ class RenderEndToEndTest {
 
             String image = System.getProperty("apus.runner.image", "apus/runner:dev");
 
-            try (GenericContainer<?> runner = new GenericContainer<>(DockerImageName.parse(image))
-                    .withNetwork(network)
-                    .withEnv("APUS_MAP_ID", MAP_ID)
-                    .withEnv("APUS_DIMENSION", "minecraft:overworld")
-                    .withEnv("APUS_MC_VERSION", "1.21.10")
-                    .withEnv(
-                            "APUS_WORLD_S3_URL",
-                            "s3://" + MinioFixtures.WORLD_BUCKET + "/" + MinioFixtures.WORLD_PATH)
-                    .withEnv("APUS_MAP_BUCKET", MinioFixtures.MAP_BUCKET)
+            try (GenericContainer<?> runner = MinioFixtures.runnerContainer(network, image)
                     .withEnv("APUS_MAP_PREFIX", MAP_PREFIX)
-                    .withEnv("APUS_S3_ENDPOINT", "http://minio:9000")
-                    .withEnv("APUS_S3_ACCESS_KEY", MinioFixtures.ACCESS_KEY)
-                    .withEnv("APUS_S3_SECRET_KEY", MinioFixtures.SECRET_KEY)
                     .withEnv("APUS_RENDER_THREADS", "2")
                     .withLogConsumer(new Slf4jLogConsumer(org.slf4j.LoggerFactory.getLogger("runner")))
                     .waitingFor(Wait.forLogMessage(".*starting BlueMap.*", 1)
@@ -92,11 +80,8 @@ class RenderEndToEndTest {
             // Verify that map data actually landed in the target bucket, and that it is a
             // real rendered tile, not just a non-empty bucket a degenerate partial render
             // (e.g. one that only uploads metadata) would also produce.
-            try (GenericContainer<?> verifier = new GenericContainer<>(DockerImageName.parse("minio/mc:latest"))
-                    .withNetwork(network)
-                    .withCreateContainerCmdModifier(cmd -> cmd.withEntrypoint("/bin/sh"))
-                    .withCommand(
-                            "-c",
+            try (GenericContainer<?> verifier = MinioFixtures.mcContainer(
+                            network,
                             "mc alias set m http://minio:9000 " + MinioFixtures.ACCESS_KEY + " " + MinioFixtures.SECRET_KEY
                                     + " && COUNT=$(mc ls --recursive m/" + MinioFixtures.MAP_BUCKET + " | wc -l)"
                                     + " && echo OBJECTS=$COUNT"
