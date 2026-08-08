@@ -48,4 +48,15 @@ class PrometheusWriterTest {
         assertFalse(text.contains("-1"), text);
         assertTrue(text.contains("apus_render_degraded 1"), text);
     }
+
+    @Test
+    void escapesSpecialCharactersInMapLabels() {
+        ProgressSnapshot snapshot = new ProgressSnapshot(
+                ProgressSnapshot.State.RENDERING, "map\"with\\backslash", 0.5, 60L, 1, 4, false, "Updating");
+
+        String text = PrometheusWriter.toPrometheus(snapshot);
+
+        assertTrue(text.contains("apus_render_progress_ratio{map=\"map\\\"with\\\\backslash\"} 0.5"), text);
+        assertTrue(text.contains("apus_render_eta_seconds{map=\"map\\\"with\\\\backslash\"} 60"), text);
+    }
 }

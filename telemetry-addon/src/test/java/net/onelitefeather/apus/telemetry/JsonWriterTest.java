@@ -55,4 +55,15 @@ class JsonWriterTest {
 
         assertTrue(json.contains("\"description\":\"say \\\"hi\\\" \\\\ bye\""), json);
     }
+
+    @Test
+    void escapesControlCharactersInDescriptions() {
+        // Test newline, carriage return, tab, and a generic control character (0x01)
+        String description = "line1\nline2\rcarriage\ttab" + ((char) 0x01) + "bell";
+        ProgressSnapshot snapshot = ProgressSnapshot.unknown(description);
+
+        String json = JsonWriter.toJson(snapshot);
+
+        assertTrue(json.contains("\"description\":\"line1\\nline2\\rcarriage\\ttab\\u0001bell\""), json);
+    }
 }
