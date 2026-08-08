@@ -20,6 +20,7 @@ package net.onelitefeather.apus.operator.ingest;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import net.onelitefeather.apus.ingest.BundlePath;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.CommonPrefix;
 import software.amazon.awssdk.services.s3.model.Delete;
@@ -38,10 +39,10 @@ import software.amazon.awssdk.services.s3.model.S3Object;
  * net.onelitefeather.apus.ingest.S3Client#wrapping} -- the interface {@link BundleStore} is
  * fully exercised by {@link WorldIngestReconcilerTest} through an in-memory fake instead.
  *
- * <p><b>"Version" = the common prefix directly under {@code tenant/worldId/}.</b> {@link
+ * <p><b>"Version" = the common prefix directly under {@link BundlePath#prefix}.</b> {@link
  * net.onelitefeather.apus.ingest.BundleWriter#write} always writes a bundle under exactly that
- * shape ({@code <tenant>/<worldId>/<version>/...}), so listing common prefixes one level deep is
- * enough to enumerate every version without inspecting individual object keys.
+ * shape ({@code <tenant>/<sourceName>/<worldId>/<version>/...}), so listing common prefixes one
+ * level deep is enough to enumerate every version without inspecting individual object keys.
  */
 public final class AwsBundleStore implements BundleStore {
 
@@ -55,8 +56,8 @@ public final class AwsBundleStore implements BundleStore {
     }
 
     @Override
-    public List<BundleVersion> listVersions(String tenant, String worldId, String bundleBucket) {
-        String prefix = tenant + "/" + worldId + "/";
+    public List<BundleVersion> listVersions(String tenant, String sourceName, String worldId, String bundleBucket) {
+        String prefix = BundlePath.prefix(tenant, sourceName, worldId);
         ListObjectsV2Request request = ListObjectsV2Request.builder()
                 .bucket(bundleBucket)
                 .prefix(prefix)
@@ -65,7 +66,7 @@ public final class AwsBundleStore implements BundleStore {
 
         List<BundleVersion> versions = new ArrayList<>();
         for (CommonPrefix commonPrefix : client.listObjectsV2Paginator(request).commonPrefixes()) {
-            String versionPrefix = commonPrefix.prefix(); // "<tenant>/<worldId>/<version>/"
+            String versionPrefix = commonPrefix.prefix(); // "<tenant>/<sourceName>/<worldId>/<version>/"
             String version = versionPrefix.substring(prefix.length(), versionPrefix.length() - 1);
             versions.add(new BundleVersion(version, lastModifiedOf(bundleBucket, versionPrefix)));
         }
@@ -90,8 +91,8 @@ public final class AwsBundleStore implements BundleStore {
     }
 
     @Override
-    public void deleteVersion(String tenant, String worldId, String version, String bundleBucket) {
-        String prefix = tenant + "/" + worldId + "/" + version + "/";
+    public void deleteVersion(String tenant, String sourceName, String worldId, String version, String bundleBucket) {
+        String prefix = BundlePath.of(tenant, sourceName, worldId, version) + "/";
         List<ObjectIdentifier> keys = new ArrayList<>();
         ListObjectsV2Request listRequest =
                 ListObjectsV2Request.builder().bucket(bundleBucket).prefix(prefix).build();

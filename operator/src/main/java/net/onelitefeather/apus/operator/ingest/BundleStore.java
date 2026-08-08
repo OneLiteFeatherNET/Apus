@@ -32,11 +32,17 @@ public interface BundleStore {
     record BundleVersion(String version, Instant lastModified) {}
 
     /**
-     * Lists every bundle version currently written for {@code tenant}/{@code worldId}, in no
-     * particular order -- callers sort as needed.
+     * Lists every bundle version currently written for {@code tenant}/{@code sourceName}/{@code
+     * worldId}, in no particular order -- callers sort as needed.
+     *
+     * <p>{@code sourceName} scopes the listing to one {@code WorldSource}'s own bundles -- see
+     * {@code net.onelitefeather.apus.ingest.BundlePath} for why {@code worldId} alone (the
+     * Minecraft world's own directory name, commonly the vanilla default {@code "world"}) is not
+     * enough to identify a unique bundle lineage: two different sources in the same namespace can
+     * both use it.
      */
-    List<BundleVersion> listVersions(String tenant, String worldId, String bundleBucket);
+    List<BundleVersion> listVersions(String tenant, String sourceName, String worldId, String bundleBucket);
 
     /** Deletes every object under one bundle version's prefix. */
-    void deleteVersion(String tenant, String worldId, String version, String bundleBucket);
+    void deleteVersion(String tenant, String sourceName, String worldId, String version, String bundleBucket);
 }
