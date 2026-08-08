@@ -29,6 +29,7 @@ dependencyResolutionManagement {
             library("testcontainers.bom", "org.testcontainers", "testcontainers-bom").versionRef("testcontainers")
             library("testcontainers.junit", "org.testcontainers", "junit-jupiter").withoutVersion()
             library("testcontainers.minio", "org.testcontainers", "minio").withoutVersion()
+            library("testcontainers.k3s", "org.testcontainers", "k3s").withoutVersion()
 
             library("josdk", "io.javaoperatorsdk", "operator-framework").versionRef("josdk")
             library("josdk.junit", "io.javaoperatorsdk", "operator-framework-junit").versionRef("josdk")

@@ -60,6 +60,16 @@ import net.onelitefeather.apus.operator.rook.CephObjectStoreUser;
  * currently being reconciled. A mismatch (or missing labels) aborts the reconciliation with a
  * {@code ResourceConflict} condition instead of silently adopting -- and thereby leaking the
  * contents of -- someone else's namespace or storage user.
+ *
+ * <p><b>Rook not (yet) installed:</b> {@link #reconcile} checks {@link
+ * io.fabric8.kubernetes.client.Client#supports(Class)} for {@link CephObjectStoreUser} before
+ * touching it. If Rook's {@code CephObjectStoreUser} CRD is not registered on the cluster, the
+ * namespace, quota and limit range are still created -- a tenant should get its compute
+ * footprint even while storage is not yet available -- but the Ceph user step is skipped and
+ * the {@code Ready} condition is set to {@code False} with reason {@value
+ * #ROOK_UNAVAILABLE_REASON} instead of throwing. A missing CRD is an environment that has not
+ * finished coming up yet, not a bug; the next reconciliation (triggered by the operator's
+ * regular resync) retries it once Rook is ready.
  */
 @ControllerConfiguration
 public class TenantReconciler implements Reconciler<Tenant> {
@@ -69,6 +79,12 @@ public class TenantReconciler implements Reconciler<Tenant> {
 
     /** Reason set on the {@code Ready} condition when an existing resource fails the ownership check. */
     public static final String RESOURCE_CONFLICT_REASON = "ResourceConflict";
+
+    /**
+     * Reason set on the {@code Ready} condition when Rook's {@code CephObjectStoreUser} CRD is
+     * not registered on the cluster, so the storage user could not be provisioned.
+     */
+    public static final String ROOK_UNAVAILABLE_REASON = "RookUnavailable";
 
     private static final String TENANT_API_VERSION = "bluemap.onelitefeather.net/v1alpha1";
     private static final String TENANT_KIND = "Tenant";
@@ -104,13 +120,23 @@ public class TenantReconciler implements Reconciler<Tenant> {
             return conflict(tenant, "Namespace", namespace);
         }
 
-        CephObjectStoreUser existingUser = client.resources(CephObjectStoreUser.class)
-                .inNamespace(config.rookNamespace())
-                .withName(cephUser)
-                .get();
-        if (existingUser != null
-                && !ownedBySameTenant(existingUser.getMetadata().getLabels(), tenantName, tenantUid)) {
-            return conflict(tenant, "CephObjectStoreUser", cephUser);
+        // Rook may not be installed yet (e.g. a fresh cluster, or a plain k3s test cluster with
+        // no storage operator at all). supports() asks the API server's discovery document
+        // whether the CRD is registered, rather than probing with a get()/create() call and
+        // trying to tell "the CRD doesn't exist" apart from "the object doesn't exist" from a
+        // 404 -- both would otherwise look the same from here.
+        boolean rookAvailable = client.supports(CephObjectStoreUser.class);
+
+        CephObjectStoreUser existingUser = null;
+        if (rookAvailable) {
+            existingUser = client.resources(CephObjectStoreUser.class)
+                    .inNamespace(config.rookNamespace())
+                    .withName(cephUser)
+                    .get();
+            if (existingUser != null
+                    && !ownedBySameTenant(existingUser.getMetadata().getLabels(), tenantName, tenantUid)) {
+                return conflict(tenant, "CephObjectStoreUser", cephUser);
+            }
         }
 
         OwnerReference ownerReference = tenantOwnerReference(tenant);
@@ -154,28 +180,44 @@ public class TenantReconciler implements Reconciler<Tenant> {
                         .build())
                 .createOr(NonDeletingOperation::update);
 
-        CephObjectStoreUser user = new CephObjectStoreUser();
-        user.getMetadata().setName(cephUser);
-        user.getMetadata().setNamespace(config.rookNamespace());
-        user.getMetadata().setLabels(tenantLabels(tenantName, tenantUid));
-        user.getSpec().setStore(config.cephObjectStore());
-        user.getSpec().setDisplayName(cephUser);
-        user.getSpec().getQuotas().setMaxSize(tenant.getSpec().getStorage().getQuota());
-        user.getSpec().getQuotas().setMaxObjects(tenant.getSpec().getStorage().getMaxObjects());
-        // No ownerReference here: the user lives in the Rook namespace, not the tenant's own
-        // namespace, and Kubernetes garbage collection of a namespaced dependent owned by a
-        // cluster-scoped resource across namespaces is not something this operator relies on.
-        // The tenant/UID labels checked above are what actually prevents cross-tenant reuse.
-        client.resources(CephObjectStoreUser.class)
-                .inNamespace(config.rookNamespace())
-                .resource(user)
-                .createOr(NonDeletingOperation::update);
+        if (rookAvailable) {
+            CephObjectStoreUser user = new CephObjectStoreUser();
+            user.getMetadata().setName(cephUser);
+            user.getMetadata().setNamespace(config.rookNamespace());
+            user.getMetadata().setLabels(tenantLabels(tenantName, tenantUid));
+            user.getSpec().setStore(config.cephObjectStore());
+            user.getSpec().setDisplayName(cephUser);
+            user.getSpec().getQuotas().setMaxSize(tenant.getSpec().getStorage().getQuota());
+            user.getSpec().getQuotas().setMaxObjects(tenant.getSpec().getStorage().getMaxObjects());
+            // No ownerReference here: the user lives in the Rook namespace, not the tenant's own
+            // namespace, and Kubernetes garbage collection of a namespaced dependent owned by a
+            // cluster-scoped resource across namespaces is not something this operator relies on.
+            // The tenant/UID labels checked above are what actually prevents cross-tenant reuse.
+            client.resources(CephObjectStoreUser.class)
+                    .inNamespace(config.rookNamespace())
+                    .resource(user)
+                    .createOr(NonDeletingOperation::update);
+        }
 
         tenant.getStatus().setNamespace(namespace);
-        tenant.getStatus().setObjectStoreUser(cephUser);
-        Conditions.set(
-                tenant.getStatus().getConditions(),
-                Conditions.ready(true, "Provisioned", "namespace and storage user exist"));
+
+        if (rookAvailable) {
+            tenant.getStatus().setObjectStoreUser(cephUser);
+            Conditions.set(
+                    tenant.getStatus().getConditions(),
+                    Conditions.ready(true, "Provisioned", "namespace and storage user exist"));
+        } else {
+            // Leave status.objectStoreUser unset: no CephObjectStoreUser was actually created,
+            // and reporting the deterministic name here would claim a resource exists that
+            // does not.
+            Conditions.set(
+                    tenant.getStatus().getConditions(),
+                    Conditions.ready(
+                            false,
+                            ROOK_UNAVAILABLE_REASON,
+                            "namespace and quota provisioned; CephObjectStoreUser CRD (ceph.rook.io) is not"
+                                    + " registered on this cluster -- Rook is not installed or not ready yet"));
+        }
 
         return UpdateControl.patchStatus(tenant);
     }
