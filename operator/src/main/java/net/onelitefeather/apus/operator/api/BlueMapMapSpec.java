@@ -108,7 +108,7 @@ public class BlueMapMapSpec {
 
     /** Where the world data this map renders comes from. */
     public static class Source {
-        private Ref sourceRef;
+        private Ref sourceRef = new Ref();
         private String world;
         private String dimension;
 
