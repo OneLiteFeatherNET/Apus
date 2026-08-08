@@ -44,11 +44,18 @@ public final class CrdGeneratorMain {
 
     public static void main(String[] args) {
         if (args.length != 2) {
-            throw new IllegalArgumentException("usage: CrdGeneratorMain <output-dir> <classes-dir>");
+            throw new IllegalArgumentException(
+                    "usage: CrdGeneratorMain <output-dir> <classes-dirs, path-separator-joined>");
         }
 
         File outputDir = new File(args[0]);
-        File classesDir = new File(args[1]);
+        // sourceSets.main.output.classesDirs is a FileCollection, not a single directory: Java
+        // compiles Java/Kotlin/... sources to separate directories, so a single "the classes
+        // dir" assumption breaks the moment this module gains a second compiled-classes
+        // output. Accept as many as the caller passes.
+        File[] classesDirs = Arrays.stream(args[1].split(File.pathSeparator))
+                .map(File::new)
+                .toArray(File[]::new);
 
         // withClasspathElements only feeds the class *loader* used to load classes that were
         // already found -- it plays no part in discovering them. Discovery is a separate step
@@ -62,7 +69,7 @@ public final class CrdGeneratorMain {
         CustomResourceCollector collector = new CustomResourceCollector()
                 .withParentClassLoader(Thread.currentThread().getContextClassLoader())
                 .withClasspathElements(classpathElements)
-                .withFileToScan(classesDir);
+                .withFileToScan(classesDirs);
 
         List<Class<? extends HasMetadata>> customResourceClasses = collector.findCustomResourceClasses();
         if (customResourceClasses.isEmpty()) {

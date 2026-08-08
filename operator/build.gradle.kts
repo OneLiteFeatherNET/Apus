@@ -42,7 +42,7 @@ val generateCrds by tasks.registering(JavaExec::class) {
     outputs.dir(crdOutputDir)
     args(
         crdOutputDir.get().asFile.absolutePath,
-        sourceSets.main.get().output.classesDirs.singleFile.absolutePath,
+        sourceSets.main.get().output.classesDirs.asPath,
     )
     doFirst {
         crdOutputDir.get().asFile.mkdirs()

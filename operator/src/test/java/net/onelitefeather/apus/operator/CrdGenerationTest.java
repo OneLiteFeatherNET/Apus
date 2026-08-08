@@ -17,13 +17,20 @@
  */
 package net.onelitefeather.apus.operator;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import io.fabric8.kubernetes.api.model.apiextensions.v1.CustomResourceDefinition;
+import io.fabric8.kubernetes.api.model.apiextensions.v1.CustomResourceDefinitionVersion;
+import io.fabric8.kubernetes.client.utils.Serialization;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
+import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 
@@ -33,6 +40,30 @@ class CrdGenerationTest {
         return Path.of(System.getProperty("apus.crd.dir", "build/crds"));
     }
 
+    /**
+     * Loads and parses a single generated CRD manifest by its deterministic file name (the
+     * fabric8 CRDGenerator names files {@code <plural>.<group>-<version>.yml}). A missing file
+     * fails with a message naming exactly which manifest is missing, rather than silently
+     * degrading to "the concatenation of everything else happened to contain the right
+     * string" -- which stops meaning anything once more than one CRD is generated.
+     *
+     * <p>Package-private so later tasks adding further CRDs to this module (namespace,
+     * storage-user, render-job, ... -- see the phase 2a plan) can reuse it instead of
+     * re-implementing file lookup and YAML parsing.
+     */
+    static CustomResourceDefinition loadCrd(String fileName) {
+        Path file = crdDir().resolve(fileName);
+        assertTrue(
+                Files.isRegularFile(file),
+                "expected generated CRD file: " + file
+                        + " (does the generator's <plural>.<group>-<version> naming still match?)");
+        try (var in = Files.newInputStream(file)) {
+            return Serialization.unmarshal(in, CustomResourceDefinition.class);
+        } catch (IOException e) {
+            throw new UncheckedIOException("could not read/parse " + file, e);
+        }
+    }
+
     private static String readAllCrds() throws IOException {
         try (Stream<Path> files = Files.list(crdDir())) {
             List<Path> yamls = files.filter(p -> p.toString().endsWith(".yml")
@@ -40,39 +71,59 @@ class CrdGenerationTest {
                     .toList();
             StringBuilder all = new StringBuilder();
             for (Path p : yamls) {
-                all.append(Files.readString(p, StandardCharsets.UTF_8)).append('\n');
+                all.append(Files.readString(p)).append('\n');
             }
             return all.toString();
         }
     }
 
     @Test
-    void generatesACrdForTheTenantResource() throws IOException {
-        assertTrue(Files.isDirectory(crdDir()), "CRD output directory must exist: " + crdDir());
+    void generatesTheTenantCrdWithExpectedIdentity() {
+        CustomResourceDefinition crd = loadCrd("tenants.bluemap.onelitefeather.net-v1.yml");
 
-        String all = readAllCrds();
-
-        assertTrue(all.contains("bluemap.onelitefeather.net"), "API group missing:\n" + all);
-        assertTrue(all.contains("kind: Tenant"), "Tenant kind missing:\n" + all);
-        assertTrue(all.contains("plural: tenants"), "plural missing:\n" + all);
+        assertEquals("bluemap.onelitefeather.net", crd.getSpec().getGroup());
+        assertEquals("Tenant", crd.getSpec().getNames().getKind());
+        assertEquals("tenants", crd.getSpec().getNames().getPlural());
     }
 
     @Test
-    void tenantIsClusterScoped() throws IOException {
-        String all = readAllCrds();
+    void tenantIsClusterScoped() {
+        CustomResourceDefinition crd = loadCrd("tenants.bluemap.onelitefeather.net-v1.yml");
 
         // Tenant grants a namespace and a storage quota -- it must never be
-        // creatable from inside a tenant namespace.
-        assertTrue(all.contains("scope: Cluster"), "Tenant must be cluster-scoped:\n" + all);
+        // creatable from inside a tenant namespace. Checked on the Tenant CRD specifically:
+        // Phase 2a adds five more (namespaced) CRDs to this module, and a check that merely
+        // scans every generated file for the substring "scope: Cluster" would keep passing
+        // for as long as *any* of them is cluster-scoped, even if Tenant itself regressed.
+        assertEquals("Cluster", crd.getSpec().getScope(), "Tenant must be cluster-scoped");
     }
 
     @Test
-    void statusSubresourceIsEnabled() throws IOException {
+    void tenantStatusSubresourceIsEnabled() {
+        CustomResourceDefinition crd = loadCrd("tenants.bluemap.onelitefeather.net-v1.yml");
+
+        Optional<CustomResourceDefinitionVersion> v1alpha1 = crd.getSpec().getVersions().stream()
+                .filter(version -> "v1alpha1".equals(version.getName()))
+                .findFirst();
+        assertTrue(v1alpha1.isPresent(), "expected a v1alpha1 version entry in the Tenant CRD");
+
+        // Without the status subresource the operator could not update status independently
+        // of spec, and every status write would bump the resource version.
+        assertNotNull(
+                v1alpha1.get().getSubresources(), "Tenant v1alpha1 is missing the subresources block");
+        assertNotNull(
+                v1alpha1.get().getSubresources().getStatus(),
+                "Tenant v1alpha1 is missing the status subresource");
+    }
+
+    @Test
+    void generatesNoForeignCrds() throws IOException {
+        // Unlike the assertions above, "does this string appear anywhere across every
+        // generated manifest" is exactly the right question here: no file, no matter its
+        // name, may define a CRD in a group this operator does not own.
         String all = readAllCrds();
 
-        // Without the status subresource the operator could not update status
-        // independently of spec, and every status write would bump the resource version.
-        assertTrue(all.contains("status: {}") || all.contains("subresources"),
-                "status subresource missing:\n" + all);
+        assertFalse(all.contains("objectbucket.io"), "unexpected objectbucket.io CRD found:\n" + all);
+        assertFalse(all.contains("ceph.rook.io"), "unexpected ceph.rook.io CRD found:\n" + all);
     }
 }
