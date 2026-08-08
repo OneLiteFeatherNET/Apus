@@ -170,6 +170,32 @@ class TelemetryServerTest {
     }
 
     @Test
+    void internalDispatcherThreadIsAlsoADaemonThread() throws Exception {
+        // The JDK's HttpServer spawns its own internal accept/dispatch thread
+        // ("HTTP-Dispatcher") outside of the executor configured via setExecutor().
+        // That thread inherits its daemon flag from whichever thread constructs the
+        // HttpServer. If start() is called from a non-daemon thread (as BlueMap's main
+        // thread is) without special handling, the dispatcher thread ends up non-daemon
+        // and blocks the JVM from ever exiting after a render finishes.
+        try (TelemetryServer server = new TelemetryServer(
+                new TelemetryConfig("127.0.0.1", 0, true), () -> ProgressSnapshot.idle(0, 1))) {
+            server.start();
+
+            boolean foundDispatcherThread = false;
+            for (Thread thread : Thread.getAllStackTraces().keySet()) {
+                if (thread.getName().startsWith("HTTP-Dispatcher")) {
+                    foundDispatcherThread = true;
+                    assertTrue(
+                            thread.isDaemon(),
+                            "HttpServer's internal dispatcher thread must be a daemon thread, "
+                                    + "otherwise a completed render pod would never let the JVM exit");
+                }
+            }
+            assertTrue(foundDispatcherThread, "expected to find the HttpServer's internal dispatcher thread");
+        }
+    }
+
+    @Test
     void boundPortThrowsBeforeTheServerIsStarted() {
         try (TelemetryServer server = new TelemetryServer(
                 new TelemetryConfig("127.0.0.1", 0, true), () -> ProgressSnapshot.idle(0, 1))) {

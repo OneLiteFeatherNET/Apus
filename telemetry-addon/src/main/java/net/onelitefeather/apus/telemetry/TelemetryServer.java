@@ -45,24 +45,58 @@ public final class TelemetryServer implements AutoCloseable {
     }
 
     public void start() throws IOException {
-        server = HttpServer.create(new InetSocketAddress(config.bindAddress(), config.port()), 0);
-        server.createContext(
-                "/progress",
-                exactPath("/progress", exchange -> respondWith(exchange, "application/json", JsonWriter::toJson)));
-        server.createContext(
-                "/metrics",
-                exactPath(
-                        "/metrics",
-                        exchange -> respondWith(exchange, "text/plain; version=0.0.4", PrometheusWriter::toPrometheus)));
-        server.createContext("/healthz", exactPath("/healthz", exchange -> send(exchange, 200, "text/plain", "ok")));
-        server.createContext("/", exchange -> send(exchange, 404, "text/plain", "not found"));
-        // A single daemon thread is plenty: the operator polls once per second.
-        server.setExecutor(Executors.newSingleThreadExecutor(runnable -> {
-            Thread thread = new Thread(runnable, "apus-telemetry");
-            thread.setDaemon(true);
-            return thread;
-        }));
-        server.start();
+        // The JDK's HttpServer implementation spawns its own internal accept/dispatch
+        // thread (named "HTTP-Dispatcher") outside of the executor set via setExecutor().
+        // That thread inherits the daemon flag from whichever thread constructs the
+        // HttpServer, NOT from the executor's thread factory. BlueMap calls this addon's
+        // run() method from its own main (non-daemon) thread, so without this wrapper the
+        // dispatcher thread would be non-daemon and keep the whole JVM alive forever after
+        // a render finishes -- the render-only container would never exit.
+        //
+        // Building the server from inside a short-lived daemon thread makes the internally
+        // spawned dispatcher thread daemon too, so it can never block JVM shutdown.
+        IOException[] failure = new IOException[1];
+        Thread initThread = new Thread(
+                () -> {
+                    try {
+                        server = HttpServer.create(new InetSocketAddress(config.bindAddress(), config.port()), 0);
+                        server.createContext(
+                                "/progress",
+                                exactPath(
+                                        "/progress",
+                                        exchange -> respondWith(exchange, "application/json", JsonWriter::toJson)));
+                        server.createContext(
+                                "/metrics",
+                                exactPath(
+                                        "/metrics",
+                                        exchange -> respondWith(
+                                                exchange, "text/plain; version=0.0.4", PrometheusWriter::toPrometheus)));
+                        server.createContext(
+                                "/healthz", exactPath("/healthz", exchange -> send(exchange, 200, "text/plain", "ok")));
+                        server.createContext("/", exchange -> send(exchange, 404, "text/plain", "not found"));
+                        // A single daemon thread is plenty: the operator polls once per second.
+                        server.setExecutor(Executors.newSingleThreadExecutor(runnable -> {
+                            Thread thread = new Thread(runnable, "apus-telemetry");
+                            thread.setDaemon(true);
+                            return thread;
+                        }));
+                        server.start();
+                    } catch (IOException e) {
+                        failure[0] = e;
+                    }
+                },
+                "apus-telemetry-init");
+        initThread.setDaemon(true);
+        initThread.start();
+        try {
+            initThread.join();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IOException("interrupted while starting the telemetry server", e);
+        }
+        if (failure[0] != null) {
+            throw failure[0];
+        }
     }
 
     public int boundPort() {
