@@ -81,6 +81,8 @@ Kubernetes operator will drive (see `docs/superpowers/specs/2026-08-08-apus-desi
 | `APUS_RENDER_THREADS` | no | `2` | Passed to BlueMap's `render-thread-count` |
 | `APUS_FORCE_RENDER` | no | `false` | `true` adds `-f`/`--force-render` to the BlueMap CLI invocation |
 | `APUS_TELEMETRY_PORT` | no | `8099` | Port the telemetry HTTP server binds to |
+| `APUS_TELEMETRY_BIND` | no | `0.0.0.0` | Address the telemetry HTTP server binds to |
+| `APUS_TELEMETRY_ENABLED` | no | enabled | Set to `false` to skip starting the telemetry server; any other value keeps it on |
 
 ## Exit codes
 

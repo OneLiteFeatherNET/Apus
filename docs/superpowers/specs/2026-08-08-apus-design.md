@@ -359,6 +359,8 @@ aus §9.1. Verifiziert und ausgeliefert in Phase 1 (`runner/entrypoint.sh`,
 | `APUS_RENDER_THREADS` | nein | Default `2` |
 | `APUS_FORCE_RENDER` | nein | `true` fügt `-f` hinzu |
 | `APUS_TELEMETRY_PORT` | nein | Default `8099` |
+| `APUS_TELEMETRY_BIND` | nein | Lausch-Adresse des Telemetrieservers, Default `0.0.0.0` |
+| `APUS_TELEMETRY_ENABLED` | nein | `false` schaltet den Telemetrieserver ab; jeder andere Wert lässt ihn laufen |
 
 Die vollständige, laufend aktuelle Referenz mit Beispielwerten steht in
 `runner/README.md`.

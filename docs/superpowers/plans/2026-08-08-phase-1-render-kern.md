@@ -134,7 +134,9 @@ Apus/
 │       │   └── probe/
 │       │       ├── RenderManagerAccess.java Schmale Schnittstelle auf BlueMap
 │       │       ├── RenderProgressProbe.java Erzeugt Snapshots, kapselt Fehlerfälle
-│       │       └── BlueMapRenderManagerAccess.java  Einzige Klasse mit BlueMap-Typen
+│       │       ├── BlueMapRenderManagerAccess.java  Weg über die BlueMap-API
+│       │       └── LogTailRenderManagerAccess.java  Weg über BlueMaps Logger (in Task 8
+│       │                                            ergänzt, siehe unten)
 │       ├── main/resources/bluemap.addon.json
 │       └── test/java/net/onelitefeather/apus/telemetry/
 │           ├── ProgressSnapshotTest.java
@@ -161,7 +163,9 @@ Apus/
     └── mini-world/                     Minimale Vanilla-Welt für Tests
 ```
 
-**Warum diese Aufteilung:** `BlueMapRenderManagerAccess` ist die **einzige** Klasse, die BlueMap-Typen importiert. Alles andere — Snapshot, Serialisierung, HTTP, Fehlerbehandlung — ist reines Java und ohne laufende BlueMap-Instanz testbar. Das macht Phase 1 fast vollständig unit-testbar und begrenzt die Auswirkung eines BlueMap-Upgrades auf eine Datei.
+**Warum diese Aufteilung:** BlueMap-Typen werden **ausschließlich** im Paket `probe` importiert, hinter der Schnittstelle `RenderManagerAccess`. Alles andere — Snapshot, Serialisierung, HTTP, Fehlerbehandlung — ist reines Java und ohne laufende BlueMap-Instanz testbar. Das macht Phase 1 fast vollständig unit-testbar und begrenzt die Auswirkung eines BlueMap-Upgrades auf dieses eine Paket.
+
+> **Nachgeführt auf den ausgelieferten Stand:** Ursprünglich war `BlueMapRenderManagerAccess` als *einzige* Klasse mit BlueMap-Bezug geplant. Task 8 hat ergeben, dass der API-Weg im CLI-Betrieb prinzipbedingt nicht trägt, und `LogTailRenderManagerAccess` als zweite Implementierung derselben Schnittstelle ergänzt. Genau dieser Zuschnitt hat die Erweiterung billig gemacht: Es kam eine Klasse hinzu, keine bestehende musste geändert werden.
 
 ---
 
@@ -1199,7 +1203,7 @@ Expected: PASS (6 Tests)
 
 - [ ] **Step 7: `BlueMapRenderManagerAccess` implementieren**
 
-Die einzige Klasse mit BlueMap-Importen.
+Die erste der beiden Klassen mit BlueMap-Importen — die zweite (`LogTailRenderManagerAccess`) kam in Task 8 hinzu, nachdem sich dieser Weg im CLI-Betrieb als nicht tragfähig erwiesen hatte.
 
 ```java
 package net.onelitefeather.apus.telemetry.probe;
