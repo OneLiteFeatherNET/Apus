@@ -263,13 +263,29 @@ Das `telemetry-addon` startet einen HTTP-Server (Default `:8099`):
 `/metrics` liefert dieselben Werte als Prometheus-Metriken; ein `PodMonitor` sammelt sie
 für Grafana und Historie.
 
-**Bekannte Kopplung:** `estimateProgress()` ist über `BlueMapAPI` nicht erreichbar, das
-Addon kommt nur per Reflection auf `RenderManagerImpl` daran. Absicherungen:
+**Bekannte Kopplung:** `estimateProgress()` ist über die öffentliche `BlueMapAPI` nicht
+erreichbar. Implementiert ist (Stand Task 8, `BlueMapRenderManagerAccess`) **keine**
+Reflection, sondern der von BlueMap für Addons dokumentierte Weg:
+`((BlueMapAPIImpl) api).plugin().getRenderManager()`. Absicherungen:
 
-- Die Reflection ist in **einer** Klasse gekapselt (`RenderProgressProbe`) hinter einem Interface. Ein späterer Wechsel auf eine offizielle API oder auf den eigenen Runner ersetzt nur diese Klasse.
-- Schlägt sie fehl, liefert `/progress` `state: "unknown"` und `degraded: true`, **ohne** den Render zu beeinträchtigen. Fortschritt ist Komfort, kein kritischer Pfad.
-- Ein Contract-Test pro unterstützter BlueMap-Version läuft in der CI-Matrix (§13).
-- Mittelfristig: Upstream-PR, der Task-Fortschritt in `BlueMapAPI` freigibt. Wird er angenommen, entfällt die Reflection ersatzlos.
+- Der Zugriff ist in **einer** Klasse gekapselt (`BlueMapRenderManagerAccess`) hinter dem `RenderManagerAccess`-Interface. Ein späterer Wechsel auf eine offizielle API, auf Reflection oder auf den eigenen Runner ersetzt nur diese Klasse.
+- Schlägt der Zugriff fehl (z. B. `plugin()` liefert `null`), liefert `/progress` degradiert, **ohne** den Render zu beeinträchtigen. Fortschritt ist Komfort, kein kritischer Pfad.
+- Ein Contract-Test (`runner/src/test/java/.../TelemetryContractTest.java`) läuft gegen einen echten Render und muss vor jedem BlueMap-Upgrade ausgeführt werden.
+
+**Bekannte Lücke (Task 8, gegen BlueMap 5.23 verifiziert):** Im CLI-Betrieb — dem
+Modus, in dem `apus/runner` BlueMap ausschließlich nutzt — ist `plugin()` **strukturell
+immer** `null`. `BlueMapCLI.renderMaps()` konstruiert `BlueMapAPIImpl` unbedingt mit
+`Plugin = null` (per Dekompilierung verifiziert); BlueMap selbst überspringt dann auch
+den Bau der internen `RenderManagerImpl`, sodass kein Reflection-Fallback greift — es
+gibt in diesem Modus kein von einem Addon erreichbares Objekt, das den echten
+`RenderManager` hält. `/progress` bleibt während eines CLI-Renders durchgehend bei
+`state: "starting"`. `TelemetryContractTest` dokumentiert das reproduzierbar und ist
+bis zur Klärung `@Disabled`. Details und Optionen (Upstream-Fix, Wechsel weg vom
+CLI-Modus, eigenständiges Progress-Tracking über `MapTileState`) stehen in
+`runner/README.md#telemetry`. Der ursprünglich hier skizzierte Reflection-Fallback auf
+`RenderManagerImpl` ist damit für den CLI-Betrieb **kein** gangbarer Rückfallweg mehr —
+er setzt eine Instanz voraus, die im CLI-Modus nie entsteht.
+- Mittelfristig: Upstream-PR, der Task-Fortschritt unabhängig von `Plugin` in `BlueMapAPI` freigibt (siehe `runner/README.md#telemetry`, Option 1). Wird er angenommen, entfällt diese Lücke ersatzlos.
 
 Der Operator pollt `/progress` im Sekundentakt über den Pod und schreibt die Werte nach
 `BlueMapRender.status.progress`. Damit zeigt auch `kubectl get bluemaprender` den Stand.
@@ -609,7 +625,7 @@ Karte später eingebettet und gesteuert werden, statt nur verlinkt zu sein. Nich
 | Ingest bricht ab | Kein Manifest → Bundle gilt als nicht existent. Kein halber Zustand im Render-Pfad |
 | Unbekanntes Welt-Layout | Condition `LayoutDetectionFailed` mit gefundenen Pfaden. Kein Raten, kein Retry |
 | Speicherlimit erreicht | RGW-Fehler → Condition `StorageQuotaExceeded`, **kein** Retry. Sonst läuft der Job endlos gegen eine Wand |
-| Telemetry-Reflection bricht nach BlueMap-Update | `/progress` liefert `degraded: true`, Render läuft normal weiter |
+| Telemetry-Zugriffsweg bricht nach BlueMap-Update | `/progress` degradiert (siehe §7.2), Render läuft normal weiter |
 | Rook liefert Bucket nicht | `BlueMapMap` bleibt in `Pending` mit Condition `BucketProvisioning`, kein Job wird gestartet |
 | Bundle-Version wurde gelöscht | Render schlägt mit `BundleNotFound` fehl; Retention löscht nur unreferenzierte Bundles |
 

@@ -20,10 +20,8 @@ package net.onelitefeather.apus.runner;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.nio.file.Path;
 import java.time.Duration;
 import org.junit.jupiter.api.Test;
-import org.testcontainers.containers.BindMode;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.MinIOContainer;
 import org.testcontainers.containers.Network;
@@ -39,10 +37,6 @@ import org.testcontainers.utility.DockerImageName;
  */
 class RenderEndToEndTest {
 
-    private static final String ACCESS_KEY = "apustest";
-    private static final String SECRET_KEY = "apustestsecret";
-    private static final String WORLD_BUCKET = "bundles";
-    private static final String MAP_BUCKET = "maps";
     private static final String MAP_ID = "overworld";
     private static final String MAP_PREFIX = "demo";
 
@@ -54,36 +48,12 @@ class RenderEndToEndTest {
     // never produce this file, since it comes from the tile-rendering stage itself.
     private static final String RENDERED_TILE_KEY = MAP_PREFIX + "/" + MAP_ID + "/tiles/0/x0/z0.prbm.gz";
 
-    private static Path fixture() {
-        return Path.of(System.getProperty("user.dir")).getParent().resolve("testdata/mini-world");
-    }
-
     @Test
     void rendersAWorldFromS3BackIntoS3AndReportsProgress() throws Exception {
         try (Network network = Network.newNetwork();
-                MinIOContainer minio = new MinIOContainer(DockerImageName.parse("minio/minio:RELEASE.2024-11-07T00-52-20Z"))
-                        .withUserName(ACCESS_KEY)
-                        .withPassword(SECRET_KEY)
-                        .withNetwork(network)
-                        .withNetworkAliases("minio")) {
+                MinIOContainer minio = MinioFixtures.startMinio(network)) {
 
-            minio.start();
-
-            // Upload the fixture world using the mc client from a throwaway container.
-            try (GenericContainer<?> seeder = new GenericContainer<>(DockerImageName.parse("minio/mc:latest"))
-                    .withNetwork(network)
-                    .withFileSystemBind(fixture().toString(), "/fixture", BindMode.READ_ONLY)
-                    .withCreateContainerCmdModifier(cmd -> cmd.withEntrypoint("/bin/sh"))
-                    .withCommand(
-                            "-c",
-                            "mc alias set m http://minio:9000 " + ACCESS_KEY + " " + SECRET_KEY
-                                    + " && mc mb --ignore-existing m/" + WORLD_BUCKET
-                                    + " && mc mb --ignore-existing m/" + MAP_BUCKET
-                                    + " && mc mirror /fixture m/" + WORLD_BUCKET + "/worlds/demo/v1"
-                                    + " && echo SEEDED")
-                    .waitingFor(Wait.forLogMessage(".*SEEDED.*", 1).withStartupTimeout(Duration.ofMinutes(3)))) {
-                seeder.start();
-            }
+            MinioFixtures.seedFixtureWorld(network);
 
             String image = System.getProperty("apus.runner.image", "apus/runner:dev");
 
@@ -92,12 +62,14 @@ class RenderEndToEndTest {
                     .withEnv("APUS_MAP_ID", MAP_ID)
                     .withEnv("APUS_DIMENSION", "minecraft:overworld")
                     .withEnv("APUS_MC_VERSION", "1.21.10")
-                    .withEnv("APUS_WORLD_S3_URL", "s3://" + WORLD_BUCKET + "/worlds/demo/v1")
-                    .withEnv("APUS_MAP_BUCKET", MAP_BUCKET)
+                    .withEnv(
+                            "APUS_WORLD_S3_URL",
+                            "s3://" + MinioFixtures.WORLD_BUCKET + "/" + MinioFixtures.WORLD_PATH)
+                    .withEnv("APUS_MAP_BUCKET", MinioFixtures.MAP_BUCKET)
                     .withEnv("APUS_MAP_PREFIX", MAP_PREFIX)
                     .withEnv("APUS_S3_ENDPOINT", "http://minio:9000")
-                    .withEnv("APUS_S3_ACCESS_KEY", ACCESS_KEY)
-                    .withEnv("APUS_S3_SECRET_KEY", SECRET_KEY)
+                    .withEnv("APUS_S3_ACCESS_KEY", MinioFixtures.ACCESS_KEY)
+                    .withEnv("APUS_S3_SECRET_KEY", MinioFixtures.SECRET_KEY)
                     .withEnv("APUS_RENDER_THREADS", "2")
                     .withLogConsumer(new Slf4jLogConsumer(org.slf4j.LoggerFactory.getLogger("runner")))
                     .waitingFor(Wait.forLogMessage(".*starting BlueMap.*", 1)
@@ -125,13 +97,13 @@ class RenderEndToEndTest {
                     .withCreateContainerCmdModifier(cmd -> cmd.withEntrypoint("/bin/sh"))
                     .withCommand(
                             "-c",
-                            "mc alias set m http://minio:9000 " + ACCESS_KEY + " " + SECRET_KEY
-                                    + " && COUNT=$(mc ls --recursive m/" + MAP_BUCKET + " | wc -l)"
+                            "mc alias set m http://minio:9000 " + MinioFixtures.ACCESS_KEY + " " + MinioFixtures.SECRET_KEY
+                                    + " && COUNT=$(mc ls --recursive m/" + MinioFixtures.MAP_BUCKET + " | wc -l)"
                                     + " && echo OBJECTS=$COUNT"
                                     // Independent of the count check above: a chained "&&" would skip this
                                     // (and the wait strategy below would time out instead of failing cleanly)
                                     // if the bucket were empty, so report presence unconditionally instead.
-                                    + " ; (mc stat m/" + MAP_BUCKET + "/" + RENDERED_TILE_KEY
+                                    + " ; (mc stat m/" + MinioFixtures.MAP_BUCKET + "/" + RENDERED_TILE_KEY
                                     + " >/dev/null 2>&1 && echo TILE_FOUND=yes || echo TILE_FOUND=no)")
                     .waitingFor(Wait.forLogMessage(".*TILE_FOUND=.*", 1).withStartupTimeout(Duration.ofMinutes(2)))) {
                 verifier.start();
@@ -140,7 +112,8 @@ class RenderEndToEndTest {
                 assertTrue(!logs.contains("OBJECTS=0"), "map bucket must not be empty after a render:\n" + logs);
                 assertTrue(
                         logs.contains("TILE_FOUND=yes"),
-                        "expected a real render tile at " + MAP_BUCKET + "/" + RENDERED_TILE_KEY + "; logs:\n" + logs);
+                        "expected a real render tile at " + MinioFixtures.MAP_BUCKET + "/" + RENDERED_TILE_KEY
+                                + "; logs:\n" + logs);
             }
         }
     }

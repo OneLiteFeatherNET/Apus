@@ -61,3 +61,65 @@ Inherited from the BlueMap CLI: `0` success, `1` configuration or IO error,
 `2` missing Minecraft resources. `bundle-sync.sh` adds `3` when the synced world
 contains no `region/` directory, and `4` when `APUS_WORLD_S3_URL` is missing the
 `s3://` prefix or has no path after it.
+
+## Telemetry
+
+`/progress` is served by the `apus-telemetry` BlueMap addon (`telemetry-addon/`). All
+coupling to BlueMap's internals lives in one class,
+[`BlueMapRenderManagerAccess`](../telemetry-addon/src/main/java/net/onelitefeather/apus/telemetry/probe/BlueMapRenderManagerAccess.java),
+behind the `RenderManagerAccess` seam. It reaches BlueMap's internal `RenderManager` via
+`((BlueMapAPIImpl) api).plugin().getRenderManager()` — the route BlueMap's own javadoc
+recommends for addons. No reflection.
+
+**Known limitation: this route is permanently unavailable when BlueMap runs as the CLI
+jar, which is how `apus/runner` invokes it.** Decompiling `BlueMapCLI.renderMaps()`
+(`javap -p -c` against `de/bluecolored/bluemap/cli/BlueMapCLI.class` inside `cli.jar`)
+shows the only call site of `new BlueMapAPIImpl(BlueMapService, Plugin)` pushes a
+constant `null` for the `Plugin` argument (`aconst_null` right before the
+`invokespecial`). BlueMap's own constructor logic then skips constructing a
+`RenderManagerImpl` entirely whenever `Plugin == null` — so **neither** `plugin()`
+**nor** the newer public `BlueMapAPIImpl.getRenderManager()` **nor** `getPlugin()`
+return anything to reflect on; there is no `RenderManagerImpl` instance in CLI mode to
+even fall back to reflection against. The `RenderManager` that actually drives a CLI
+render is a local variable inside `BlueMapCLI.renderMaps()`, captured only by two
+CLI-private inner classes (a progress-logging `TimerTask` and a shutdown-hook lambda) —
+it is never published anywhere `BlueMapAPI` or the addon can reach it.
+
+Practical effect, confirmed against a real render of the `testdata/mini-world` fixture:
+`/progress` stays at `{"state":"starting","progress":-1,...,"degraded":false,
+"description":"waiting for BlueMap API"}` for the entire render and only ever changes
+once, from the addon's `onEnable` callback logging
+`no plugin instance available; progress will report as unknown` — after which
+`RenderProgressProbe` still reports `starting`, not `unknown`/`degraded`, because it
+cannot distinguish "not yet enabled" from "enabled but no plugin instance exists".
+`state` never reaches `rendering`, even though the BlueMap CLI's own log output shows
+real render progress (`updating map 'overworld': 43.512% (ETA: 51 seconds)`) at the
+same time.
+
+`runner/src/test/java/net/onelitefeather/apus/runner/TelemetryContractTest.java` proves
+this end-to-end against a real render and is currently `@Disabled` with this finding as
+the reason — it is not a flaky test, it fails deterministically today. Do not weaken its
+assertions to force it green; **re-enable it** once one of the following is done, and run
+it against every BlueMap version Apus claims to support before each release:
+
+1. **Upstream fix (preferred):** BlueMap's CLI already builds the exact `RenderManager`
+   it needs locally in `renderMaps()`. A small upstream change to either pass a
+   minimal `Plugin` wrapping it, or to give `BlueMapAPIImpl`/`RenderManagerImpl` a
+   constructor overload that accepts a `RenderManager` directly (no `Plugin` required),
+   would close this gap for every CLI-based addon, not just Apus.
+2. **Switch the runner off CLI-only mode** onto a code path where BlueMap does construct
+   a real `Plugin` (i.e. embedding BlueMap the way a server plugin does). This is a much
+   larger architectural change than swapping one class.
+3. **Track progress independently of `RenderManager`,** e.g. by comparing
+   `BmMap.getMapTileState()`/`getMapRegionState()` against the world's known region
+   files. Reachable without a `Plugin` (via `BlueMapMapImpl.map()`, itself reachable from
+   `BlueMapAPI.getMap(id)`), but it duplicates render-progress accounting BlueMap already
+   does internally and does not cover queue depth or ETA. Not implemented.
+
+What was **not** done, and why: reflecting into the live JVM's `Timer` named
+`BlueMap-CLI-Timer` to pull the captured `RenderManager` field out of BlueMap's private
+`TimerTask` subclasses was considered and rejected. That is reflection into
+`java.util.Timer` internals plus an anonymous class's synthetic captured-variable field —
+two layers removed from anything BlueMap documents or versions, with no stable field
+name guaranteed, and it would defeat the entire point of concentrating BlueMap coupling
+in one seam class.
