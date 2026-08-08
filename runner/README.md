@@ -65,61 +65,87 @@ contains no `region/` directory, and `4` when `APUS_WORLD_S3_URL` is missing the
 ## Telemetry
 
 `/progress` is served by the `apus-telemetry` BlueMap addon (`telemetry-addon/`). All
-coupling to BlueMap's internals lives in one class,
-[`BlueMapRenderManagerAccess`](../telemetry-addon/src/main/java/net/onelitefeather/apus/telemetry/probe/BlueMapRenderManagerAccess.java),
-behind the `RenderManagerAccess` seam. It reaches BlueMap's internal `RenderManager` via
+coupling to BlueMap's internals lives in the `probe` package, behind the
+`RenderManagerAccess` seam — `ApusTelemetryAddon` (the entrypoint) only *chooses* between
+two implementations, it never talks to BlueMap directly itself.
+
+### The route that works in `apus/runner`: log-tailing
+
+[`LogTailRenderManagerAccess`](../telemetry-addon/src/main/java/net/onelitefeather/apus/telemetry/probe/LogTailRenderManagerAccess.java)
+registers itself on BlueMap's own `Logger.global`
+(`de.bluecolored.bluemap.core.logger.Logger`/`MultiLogger`) and parses the exact
+progress line BlueMap's CLI already logs on its own during a render:
+
+```
+updating map 'overworld': 35.208% (ETA: 38 seconds)
+```
+
+This is a documented BlueMap extension point, not a hack: the CLI's own `-l/--log-file`
+and `-b/--verbose` flags register additional loggers on `Logger.global` the same way
+(`Logger.global.put(Logger.file(...))` / `Logger.global.put(Logger.stdOut(true))`,
+confirmed by decompiling `BlueMapCLI.class`). An addon is loaded early in `main()`,
+before any render starts, so registering here catches every line, including the one that
+matters. Verified against a real render of `testdata/mini-world` (`/progress` polled
+every second, see `TelemetryContractTest`):
+
+```json
+{"state":"idle","currentMap":null,"progress":-1,"etaSeconds":-1,"queuedTasks":-1,"renderThreads":-1,"degraded":false,"description":null}
+{"state":"rendering","currentMap":"overworld","progress":0.35554,"etaSeconds":35,"queuedTasks":-1,"renderThreads":-1,"degraded":false,"description":"updating map 'overworld'"}
+{"state":"rendering","currentMap":"overworld","progress":0.72232,"etaSeconds":28,"queuedTasks":-1,"renderThreads":-1,"degraded":false,"description":"updating map 'overworld'"}
+```
+
+Trade-off: no log line carries queue depth or thread count, so `queuedTasks` and
+`renderThreads` are always `-1` (unknown) under this route — BlueMap simply never logs
+them, and guessing would be worse than saying so.
+
+### The route BlueMap documents for addons: `plugin()` — verified dead in CLI mode
+
+[`BlueMapRenderManagerAccess`](../telemetry-addon/src/main/java/net/onelitefeather/apus/telemetry/probe/BlueMapRenderManagerAccess.java)
+reaches BlueMap's internal `RenderManager` via
 `((BlueMapAPIImpl) api).plugin().getRenderManager()` — the route BlueMap's own javadoc
-recommends for addons. No reflection.
+recommends for addons, and richer when it works (it also exposes queue depth and thread
+count). **This route is permanently unavailable when BlueMap runs as the CLI jar, which
+is how `apus/runner` invokes it.** Decompiling `BlueMapCLI.renderMaps()` (`javap -p -c`
+against `de/bluecolored/bluemap/cli/BlueMapCLI.class` inside `cli.jar`) shows the only
+call site of `new BlueMapAPIImpl(BlueMapService, Plugin)` pushes a constant `null` for
+the `Plugin` argument (`aconst_null` right before the `invokespecial`). BlueMap's own
+constructor logic then skips constructing a `RenderManagerImpl` entirely whenever
+`Plugin == null` — so **neither** `plugin()` **nor** the newer public
+`BlueMapAPIImpl.getRenderManager()` **nor** `getPlugin()` return anything to reflect on;
+there is no `RenderManagerImpl` instance in CLI mode to even fall back to reflection
+against. The `RenderManager` that actually drives a CLI render is a local variable
+inside `BlueMapCLI.renderMaps()`, captured only by two CLI-private inner classes (a
+progress-logging `TimerTask` — the one that produces the log line
+`LogTailRenderManagerAccess` reads — and a shutdown-hook lambda); it is never published
+anywhere `BlueMapAPI` or an addon can reach it directly. This finding is worth keeping
+even though the log-tail route made it moot for Apus: it explains *why* a second
+implementation exists at all, and it will apply again to any future route that assumes
+`plugin()` works.
 
-**Known limitation: this route is permanently unavailable when BlueMap runs as the CLI
-jar, which is how `apus/runner` invokes it.** Decompiling `BlueMapCLI.renderMaps()`
-(`javap -p -c` against `de/bluecolored/bluemap/cli/BlueMapCLI.class` inside `cli.jar`)
-shows the only call site of `new BlueMapAPIImpl(BlueMapService, Plugin)` pushes a
-constant `null` for the `Plugin` argument (`aconst_null` right before the
-`invokespecial`). BlueMap's own constructor logic then skips constructing a
-`RenderManagerImpl` entirely whenever `Plugin == null` — so **neither** `plugin()`
-**nor** the newer public `BlueMapAPIImpl.getRenderManager()` **nor** `getPlugin()`
-return anything to reflect on; there is no `RenderManagerImpl` instance in CLI mode to
-even fall back to reflection against. The `RenderManager` that actually drives a CLI
-render is a local variable inside `BlueMapCLI.renderMaps()`, captured only by two
-CLI-private inner classes (a progress-logging `TimerTask` and a shutdown-hook lambda) —
-it is never published anywhere `BlueMapAPI` or the addon can reach it.
+What was considered and rejected instead of log-tailing: reflecting into the live JVM's
+`Timer` named `BlueMap-CLI-Timer` to pull the captured `RenderManager` field out of
+BlueMap's private `TimerTask` subclasses. That would have meant reflection into
+`java.util.Timer` internals plus an anonymous class's synthetic captured-variable
+field — two layers removed from anything BlueMap documents or versions, with no stable
+field name guaranteed. The log-tail route is both more stable (a log message format is
+far more likely to stay compatible across BlueMap versions than an internal field name)
+and, unlike the `Timer` idea, itself a documented extension point.
 
-Practical effect, confirmed against a real render of the `testdata/mini-world` fixture:
-`/progress` stays at `{"state":"starting","progress":-1,...,"degraded":false,
-"description":"waiting for BlueMap API"}` for the entire render and only ever changes
-once, from the addon's `onEnable` callback logging
-`no plugin instance available; progress will report as unknown` — after which
-`RenderProgressProbe` still reports `starting`, not `unknown`/`degraded`, because it
-cannot distinguish "not yet enabled" from "enabled but no plugin instance exists".
-`state` never reaches `rendering`, even though the BlueMap CLI's own log output shows
-real render progress (`updating map 'overworld': 43.512% (ETA: 51 seconds)`) at the
-same time.
+### Wiring
+
+`ApusTelemetryAddon` registers the log-tail route unconditionally and immediately after
+starting the HTTP server — independent of whether `BlueMapAPI.onEnable` ever fires, since
+that's the only route guaranteed to work in CLI mode. If `BlueMapAPI.onEnable` does fire
+and the `plugin()` route resolves (e.g. on a server-plugin platform, not CLI), it is
+preferred for its richer data; `onDisable` falls back to the log-tail route rather than to
+nothing. If even registering the log-tail route fails (a hypothetical future BlueMap
+version removing `Logger.global`), `/progress` reports `degraded: true` instead of
+`starting` forever — a small sentinel `RenderManagerAccess` in `ApusTelemetryAddon` whose
+methods throw, letting `RenderProgressProbe`'s existing failure handling do the rest
+without that class needing to change.
 
 `runner/src/test/java/net/onelitefeather/apus/runner/TelemetryContractTest.java` proves
-this end-to-end against a real render and is currently `@Disabled` with this finding as
-the reason — it is not a flaky test, it fails deterministically today. Do not weaken its
-assertions to force it green; **re-enable it** once one of the following is done, and run
-it against every BlueMap version Apus claims to support before each release:
-
-1. **Upstream fix (preferred):** BlueMap's CLI already builds the exact `RenderManager`
-   it needs locally in `renderMaps()`. A small upstream change to either pass a
-   minimal `Plugin` wrapping it, or to give `BlueMapAPIImpl`/`RenderManagerImpl` a
-   constructor overload that accepts a `RenderManager` directly (no `Plugin` required),
-   would close this gap for every CLI-based addon, not just Apus.
-2. **Switch the runner off CLI-only mode** onto a code path where BlueMap does construct
-   a real `Plugin` (i.e. embedding BlueMap the way a server plugin does). This is a much
-   larger architectural change than swapping one class.
-3. **Track progress independently of `RenderManager`,** e.g. by comparing
-   `BmMap.getMapTileState()`/`getMapRegionState()` against the world's known region
-   files. Reachable without a `Plugin` (via `BlueMapMapImpl.map()`, itself reachable from
-   `BlueMapAPI.getMap(id)`), but it duplicates render-progress accounting BlueMap already
-   does internally and does not cover queue depth or ETA. Not implemented.
-
-What was **not** done, and why: reflecting into the live JVM's `Timer` named
-`BlueMap-CLI-Timer` to pull the captured `RenderManager` field out of BlueMap's private
-`TimerTask` subclasses was considered and rejected. That is reflection into
-`java.util.Timer` internals plus an anonymous class's synthetic captured-variable field —
-two layers removed from anything BlueMap documents or versions, with no stable field
-name guaranteed, and it would defeat the entire point of concentrating BlueMap coupling
-in one seam class.
+this end-to-end against a real render and must be run against every BlueMap version Apus
+claims to support before each release — it is the regression test that will catch either
+route breaking on a BlueMap upgrade (a changed log line format, or `Logger.global`
+disappearing).

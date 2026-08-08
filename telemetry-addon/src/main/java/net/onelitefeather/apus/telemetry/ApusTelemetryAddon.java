@@ -20,6 +20,7 @@ package net.onelitefeather.apus.telemetry;
 import de.bluecolored.bluemap.api.BlueMapAPI;
 import java.util.concurrent.atomic.AtomicReference;
 import net.onelitefeather.apus.telemetry.probe.BlueMapRenderManagerAccess;
+import net.onelitefeather.apus.telemetry.probe.LogTailRenderManagerAccess;
 import net.onelitefeather.apus.telemetry.probe.RenderManagerAccess;
 import net.onelitefeather.apus.telemetry.probe.RenderProgressProbe;
 
@@ -30,11 +31,68 @@ import net.onelitefeather.apus.telemetry.probe.RenderProgressProbe;
  * early during startup — before the API is ready. We therefore only register a callback
  * here and start serving immediately; until the API fires, {@code /progress} reports
  * {@code starting}.
+ *
+ * <p>Two independent routes exist to reach BlueMap's render progress; both are behind {@link
+ * RenderManagerAccess} so this class only chooses between them, never reimplements them (see
+ * {@code runner/README.md#telemetry} for why both are needed and how each was verified):
+ *
+ * <ol>
+ *   <li>{@link BlueMapRenderManagerAccess} — BlueMap's documented addon route via {@code
+ *       BlueMapAPIImpl.plugin()}. Richer (queue depth, thread count), but unconditionally
+ *       {@code null} when BlueMap runs as the CLI jar, since the CLI never constructs a
+ *       {@code Plugin}.
+ *   <li>{@link LogTailRenderManagerAccess} — parses BlueMap's own progress log line off
+ *       {@code Logger.global}. Works in CLI mode (that's the whole point), but can't report
+ *       queue depth or thread count, since no log line carries them.
+ * </ol>
+ *
+ * <p>The log-tail route is registered unconditionally, before the API callback is even wired,
+ * so it works whether or not {@code BlueMapAPI.onEnable} ever fires. The API route, when it
+ * does become available, is preferred for its richer data. If registering the log-tail route
+ * itself fails (e.g. a future BlueMap version removes {@code Logger.global}), {@code
+ * /progress} degrades to {@code degraded: true} instead of reporting {@code starting} forever
+ * — see {@link #UNAVAILABLE}.
  */
 public final class ApusTelemetryAddon implements Runnable {
 
+    /**
+     * Stands in for "no render-manager access could be established at all" (neither the API
+     * route nor the log-tail fallback). Every method throws, which {@link RenderProgressProbe}
+     * — deliberately left untouched by this class — turns into {@code degraded: true} instead
+     * of the permanent {@code starting} state a {@code null} {@link RenderManagerAccess} would
+     * produce.
+     */
+    private static final RenderManagerAccess UNAVAILABLE = new RenderManagerAccess() {
+        @Override
+        public boolean isRunning() {
+            throw unavailable();
+        }
+
+        @Override
+        public int queuedTasks() {
+            throw unavailable();
+        }
+
+        @Override
+        public int renderThreads() {
+            throw unavailable();
+        }
+
+        @Override
+        public TaskInfo currentTask() {
+            throw unavailable();
+        }
+
+        private IllegalStateException unavailable() {
+            return new IllegalStateException(
+                    "no BlueMap render-manager access available (neither the API route nor the log-tail fallback"
+                            + " could be established)");
+        }
+    };
+
     private final AtomicReference<RenderManagerAccess> access = new AtomicReference<>();
     private TelemetryServer server;
+    private LogTailRenderManagerAccess logTail;
 
     @Override
     public void run() {
@@ -56,14 +114,35 @@ public final class ApusTelemetryAddon implements Runnable {
             return;
         }
 
+        // Register the log-tail fallback immediately, independent of whether BlueMapAPI ever
+        // fires onEnable -- it's the only route that works at all in CLI mode.
+        RenderManagerAccess fallback;
+        try {
+            LogTailRenderManagerAccess tail = new LogTailRenderManagerAccess();
+            tail.register();
+            logTail = tail;
+            fallback = tail;
+        } catch (Throwable t) {
+            System.err.println("[apus-telemetry] failed to register log-tail fallback: " + t);
+            fallback = UNAVAILABLE;
+        }
+        access.set(fallback);
+        RenderManagerAccess fallbackFinal = fallback;
+
         BlueMapAPI.onEnable(api -> {
             RenderManagerAccess resolved = BlueMapRenderManagerAccess.createOrNull(api);
-            access.set(resolved);
-            if (resolved == null) {
-                System.err.println("[apus-telemetry] no plugin instance available; progress will report as unknown");
+            if (resolved != null) {
+                access.set(resolved);
+            } else {
+                System.err.println(
+                        "[apus-telemetry] no plugin instance available; falling back to log-tail progress parsing");
+                access.set(fallbackFinal);
             }
         });
-        BlueMapAPI.onDisable(api -> access.set(null));
+        // The log-tail fallback keeps working regardless of the API's own lifecycle (it reads
+        // BlueMap's logger, not the API), so fall back to it instead of losing progress
+        // reporting entirely once the API-backed instance goes away.
+        BlueMapAPI.onDisable(api -> access.set(fallbackFinal));
 
         Runtime.getRuntime().addShutdownHook(new Thread(this::stop, "apus-telemetry-shutdown"));
     }
@@ -71,6 +150,9 @@ public final class ApusTelemetryAddon implements Runnable {
     private void stop() {
         if (server != null) {
             server.close();
+        }
+        if (logTail != null) {
+            logTail.unregister();
         }
     }
 }

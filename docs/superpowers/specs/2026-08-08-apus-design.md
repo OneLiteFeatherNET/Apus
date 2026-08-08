@@ -264,28 +264,50 @@ Das `telemetry-addon` startet einen HTTP-Server (Default `:8099`):
 für Grafana und Historie.
 
 **Bekannte Kopplung:** `estimateProgress()` ist über die öffentliche `BlueMapAPI` nicht
-erreichbar. Implementiert ist (Stand Task 8, `BlueMapRenderManagerAccess`) **keine**
-Reflection, sondern der von BlueMap für Addons dokumentierte Weg:
-`((BlueMapAPIImpl) api).plugin().getRenderManager()`. Absicherungen:
+erreichbar. Zwei Implementierungen von `RenderManagerAccess` existieren, `ApusTelemetryAddon`
+wählt zwischen ihnen — keine Reflection in beiden Fällen:
 
-- Der Zugriff ist in **einer** Klasse gekapselt (`BlueMapRenderManagerAccess`) hinter dem `RenderManagerAccess`-Interface. Ein späterer Wechsel auf eine offizielle API, auf Reflection oder auf den eigenen Runner ersetzt nur diese Klasse.
-- Schlägt der Zugriff fehl (z. B. `plugin()` liefert `null`), liefert `/progress` degradiert, **ohne** den Render zu beeinträchtigen. Fortschritt ist Komfort, kein kritischer Pfad.
-- Ein Contract-Test (`runner/src/test/java/.../TelemetryContractTest.java`) läuft gegen einen echten Render und muss vor jedem BlueMap-Upgrade ausgeführt werden.
+1. **`BlueMapRenderManagerAccess`** — der von BlueMap für Addons dokumentierte Weg,
+   `((BlueMapAPIImpl) api).plugin().getRenderManager()`. Liefert bei Erfolg zusätzlich
+   Warteschlangentiefe und Thread-Anzahl.
+2. **`LogTailRenderManagerAccess`** — registriert sich auf BlueMaps eigenem
+   `Logger.global` (`de.bluecolored.bluemap.core.logger.Logger`/`MultiLogger`, derselbe
+   Mechanismus, den die CLI-Flags `-l`/`-b` selbst nutzen) und parst die Fortschrittszeile,
+   die BlueMap ohnehin selbst loggt (`updating map 'overworld': 35.208% (ETA: 38 seconds)`).
+   Liefert keine Warteschlangentiefe/Thread-Anzahl (nicht in der Logzeile enthalten, dort
+   `-1`).
 
-**Bekannte Lücke (Task 8, gegen BlueMap 5.23 verifiziert):** Im CLI-Betrieb — dem
-Modus, in dem `apus/runner` BlueMap ausschließlich nutzt — ist `plugin()` **strukturell
-immer** `null`. `BlueMapCLI.renderMaps()` konstruiert `BlueMapAPIImpl` unbedingt mit
-`Plugin = null` (per Dekompilierung verifiziert); BlueMap selbst überspringt dann auch
-den Bau der internen `RenderManagerImpl`, sodass kein Reflection-Fallback greift — es
-gibt in diesem Modus kein von einem Addon erreichbares Objekt, das den echten
-`RenderManager` hält. `/progress` bleibt während eines CLI-Renders durchgehend bei
-`state: "starting"`. `TelemetryContractTest` dokumentiert das reproduzierbar und ist
-bis zur Klärung `@Disabled`. Details und Optionen (Upstream-Fix, Wechsel weg vom
-CLI-Modus, eigenständiges Progress-Tracking über `MapTileState`) stehen in
-`runner/README.md#telemetry`. Der ursprünglich hier skizzierte Reflection-Fallback auf
-`RenderManagerImpl` ist damit für den CLI-Betrieb **kein** gangbarer Rückfallweg mehr —
-er setzt eine Instanz voraus, die im CLI-Modus nie entsteht.
-- Mittelfristig: Upstream-PR, der Task-Fortschritt unabhängig von `Plugin` in `BlueMapAPI` freigibt (siehe `runner/README.md#telemetry`, Option 1). Wird er angenommen, entfällt diese Lücke ersatzlos.
+**Verifiziert gegen BlueMap 5.23, Task 8:** Im CLI-Betrieb — dem Modus, in dem
+`apus/runner` BlueMap ausschließlich nutzt — ist Weg 1 (`plugin()`) **strukturell immer**
+`null`. `BlueMapCLI.renderMaps()` konstruiert `BlueMapAPIImpl` unbedingt mit
+`Plugin = null` (per Dekompilierung verifiziert); BlueMap selbst überspringt dann auch den
+Bau der internen `RenderManagerImpl`, sodass auch ein Reflection-Fallback darauf ins Leere
+liefe — es gibt in diesem Modus kein über `BlueMapAPI` erreichbares Objekt, das den echten
+`RenderManager` hält. Der ursprünglich hier skizzierte Reflection-Fallback auf
+`RenderManagerImpl` ist für den CLI-Betrieb daher **kein** gangbarer Weg — er setzt eine
+Instanz voraus, die im CLI-Modus nie entsteht. Weg 2 (Log-Tailing) funktioniert im
+CLI-Betrieb dagegen zuverlässig, da BlueMaps eigene CLI die Fortschrittszeile unabhängig
+vom `Plugin`-Objekt über den globalen Logger ausgibt. `apus/runner` läuft daher
+ausschließlich auf Weg 2; Weg 1 bleibt für einen künftigen Server-Plugin-Betrieb
+(dort existiert eine echte `Plugin`-Instanz) als bevorzugter, reichhaltigerer Pfad
+erhalten. Details, beobachtete `/progress`-Antworten und die verworfene Alternative
+(Reflection in `java.util.Timer`-Internals) stehen in `runner/README.md#telemetry`.
+
+Absicherungen:
+
+- Beide Zugriffswege sind hinter dem `RenderManagerAccess`-Interface gekapselt
+  (`telemetry-addon/.../probe/`), `ApusTelemetryAddon` wählt nur zwischen ihnen. Ein
+  späterer dritter Weg (offizielle API-Erweiterung, eigener Runner) ersetzt nur die
+  Verdrahtung dort.
+- Schlägt jeder Zugriff fehl (auch die Log-Tail-Registrierung selbst), liefert
+  `/progress` `degraded: true`, **ohne** den Render zu beeinträchtigen. Fortschritt ist
+  Komfort, kein kritischer Pfad.
+- Ein Contract-Test (`runner/src/test/java/.../TelemetryContractTest.java`) läuft gegen
+  einen echten Render und muss vor jedem BlueMap-Upgrade ausgeführt werden — er deckt
+  beide Wege ab (welcher greift, hängt vom Betriebsmodus ab).
+- Mittelfristig: Upstream-PR, die den CLI-eigenen `RenderManager` unabhängig von `Plugin`
+  über `BlueMapAPI` erreichbar macht (siehe `runner/README.md#telemetry`), würde Weg 1
+  auch im CLI-Betrieb tragfähig machen und die Log-Tail-Notlösung überflüssig machen.
 
 Der Operator pollt `/progress` im Sekundentakt über den Pod und schreibt die Werte nach
 `BlueMapRender.status.progress`. Damit zeigt auch `kubectl get bluemaprender` den Stand.

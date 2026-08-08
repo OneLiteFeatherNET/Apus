@@ -26,7 +26,6 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.MinIOContainer;
@@ -41,24 +40,17 @@ import org.testcontainers.utility.DockerImageName;
  * passes — only this test fails. Run it against every BlueMap version Apus claims to
  * support before releasing.
  *
- * <p><b>Currently disabled — see {@code runner/README.md#telemetry}.</b> BlueMap's CLI jar
- * unconditionally constructs its internal {@code BlueMapAPIImpl} with a {@code null}
- * {@code Plugin} (confirmed by decompiling {@code BlueMapCLI.renderMaps()}: the only call
- * site of the {@code BlueMapAPIImpl(BlueMapService, Plugin)} constructor pushes an
- * {@code aconst_null} for the {@code Plugin} argument). That makes {@code plugin()},
- * {@code getRenderManager()}, and {@code getPlugin()} on {@code BlueMapAPIImpl} return
- * {@code null} unconditionally in CLI/render-only mode — the exact mode {@code apus/runner}
- * uses. There is consequently no {@code RenderManagerImpl} instance to reflect on either
- * (BlueMap only constructs one when {@code Plugin != null}). The real {@code RenderManager}
- * driving the render is a local variable inside {@code BlueMapCLI.renderMaps()}, published
- * nowhere reachable through {@code BlueMapAPI}. This is not a bug in
- * {@code BlueMapRenderManagerAccess}; it is a structural property of the BlueMap CLI. Running
- * this test today reliably shows {@code state} stuck at {@code starting} for the whole render.
- * Re-enable once one of the mitigations in the README is implemented.
+ * <p>BlueMap's CLI jar unconditionally constructs its internal {@code BlueMapAPIImpl} with a
+ * {@code null} {@code Plugin} (confirmed by decompiling {@code BlueMapCLI.renderMaps()}), so
+ * the documented addon route ({@code plugin().getRenderManager()}, in
+ * {@link net.onelitefeather.apus.telemetry.probe.BlueMapRenderManagerAccess}) never resolves
+ * in CLI/render-only mode — the exact mode {@code apus/runner} uses. Progress is read instead
+ * via {@link net.onelitefeather.apus.telemetry.probe.LogTailRenderManagerAccess}, which
+ * registers on BlueMap's own {@code Logger.global} (a documented extension point; the CLI's
+ * own {@code -l}/{@code -b} flags use the same mechanism) and parses the exact progress line
+ * BlueMap's CLI already logs itself. See {@code runner/README.md#telemetry} for the full
+ * diagnosis of why the API route fails and why the log-tail route works instead.
  */
-@Disabled(
-        "BlueMap's CLI always constructs BlueMapAPIImpl with a null Plugin, so no addon-reachable"
-                + " RenderManager exists in CLI mode; see runner/README.md#telemetry")
 class TelemetryContractTest {
 
     @Test
