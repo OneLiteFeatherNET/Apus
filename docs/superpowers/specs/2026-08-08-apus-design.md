@@ -237,7 +237,7 @@ Ein `BlueMapRender` erzeugt einen Kubernetes-`Job` mit:
 
 1. **Init: `bundle-sync`** — lädt die im Manifest gelisteten Dimensionen des Bundles auf ein `emptyDir` (oder PVC bei großen Welten).
 2. **Init: `assets-sync`** — holt die Minecraft-Client-JAR der benötigten Version aus dem Asset-Cache-Bucket. Verhindert, dass jeder Render-Pod erneut bei Mojang lädt.
-3. **Main: `bluemap`** — BlueMap-CLI mit `-r`, dazu im `packs/`-Ordner `BlueMapS3Storage` (Map-Output) und `telemetry-addon` (Fortschritt). Konfiguration kommt aus gemounteter ConfigMap plus Secret.
+3. **Main: `bluemap`** — BlueMap-CLI mit `-r`, dazu im `packs/`-Ordner `BlueMapS3Storage` (Map-Output) und `telemetry-addon` (Fortschritt). Die Konfiguration erzeugt der Container beim Start selbst aus Umgebungsvariablen (§7.4); Zugangsdaten kommen dabei aus dem von Rook erzeugten Secret. Es wird **keine** ConfigMap gemountet — siehe die Anmerkung in §9.2.
 
 Der Map-Output geht direkt über den S3-Storage in den Ziel-Bucket. Es gibt keinen
 separaten Upload-Schritt — und damit auch keinen Zustand, der zwischen „gerendert" und
