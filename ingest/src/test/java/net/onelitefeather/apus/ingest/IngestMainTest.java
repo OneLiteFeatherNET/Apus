@@ -31,9 +31,11 @@ import org.junit.jupiter.api.io.TempDir;
  * Covers the one part of {@link IngestMain#run} that is meaningfully testable without a real
  * source and a real S3 endpoint: that a missing or invalid required variable aborts cleanly,
  * with a non-zero exit code, before any directory is even created -- the "no half-started job"
- * requirement from the phase 2b plan. The full happy path (fetch -> detect -> write) is exercised
- * end to end against MinIO in the {@code :ingest:integrationTest} task added in a later phase 2b
- * task, not here.
+ * requirement from the phase 2b plan. The full happy path (fetch -> detect -> write), plus the
+ * proof that the resulting bundle is exactly what the {@code runner} render container expects to
+ * read, is exercised end to end against MinIO and the real {@code apus/runner} image in {@code
+ * runner}'s {@code :runner:integrationTest} task ({@code IngestRenderContractTest}) -- not here,
+ * since proving the ingest/render contract needs both modules together.
  */
 class IngestMainTest {
 

@@ -64,10 +64,13 @@ public final class IngestMain {
 
     /**
      * Runs the full ingest flow and returns the process exit code, without calling {@link
-     * System#exit}. Package-private so tests can drive it against an arbitrary environment map and
-     * work directory instead of the real process environment and {@code /work}.
+     * System#exit}. Public so tests can drive it against an arbitrary environment map and work
+     * directory instead of the real process environment and {@code /work} -- including, from
+     * {@code runner}'s {@code :runner:integrationTest} task, the end-to-end proof that a bundle
+     * this method writes is exactly what the render container expects to read (see
+     * {@code IngestRenderContractTest}).
      */
-    static int run(Map<String, String> env, Path workDir) {
+    public static int run(Map<String, String> env, Path workDir) {
         IngestConfig config;
         try {
             config = IngestConfig.fromEnv(env);

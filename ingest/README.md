@@ -143,6 +143,8 @@ Every other test in this module (`IngestConfigTest`, `IngestMainTest`, `Throttle
 `PterodactylConnectorTest`, `ArchivesTest`, `TarStreamReaderTest`) runs Docker-free as part of the
 routine `./gradlew :ingest:test`.
 
-A full source-to-bundle end-to-end test against MinIO (ingest a Bukkit-layout world fixture, check
-the resulting manifest) is a separate, later phase 2b task and lives alongside the reconciler
-tests, not here.
+A full source-to-bundle-to-render end-to-end test (ingest a Bukkit-layout world fixture against
+real MinIO, check the resulting manifest, then start a real render against the produced bundle
+with the `runner` image) lives in `runner`'s `:runner:integrationTest`
+(`IngestRenderContractTest`), not here -- proving the contract between this module's output and
+`runner`'s input needs both modules in the same test.
