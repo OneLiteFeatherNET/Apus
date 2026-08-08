@@ -22,6 +22,7 @@ import io.fabric8.kubernetes.client.KubernetesClient;
 import java.util.Optional;
 import net.onelitefeather.apus.operator.OperatorConfig;
 import net.onelitefeather.apus.operator.api.BlueMapMap;
+import net.onelitefeather.apus.operator.api.Labels;
 import net.onelitefeather.apus.operator.rook.ObjectBucketClaim;
 
 /**
@@ -34,8 +35,21 @@ import net.onelitefeather.apus.operator.rook.ObjectBucketClaim;
  * anywhere else would require copying a Secret across a namespace boundary — exactly the kind
  * of cross-tenant credential leak the rest of the cluster's conventions try to avoid. This is a
  * deliberate exception to the "central" convention, not an oversight.
+ *
+ * <p>Once Rook binds the claim, it writes a Secret (named after the claim) into the same
+ * namespace, containing the keys {@code AWS_ACCESS_KEY_ID} and {@code AWS_SECRET_ACCESS_KEY}.
+ * {@link net.onelitefeather.apus.operator.render.RenderJobBuilder} references that Secret by
+ * name and reads exactly those two keys via {@code secretKeyRef} — this is Rook's contract, not
+ * something Apus controls, so callers must not rename or reshape it.
  */
 public final class BucketProvisioner {
+
+    /**
+     * S3 bucket names are limited to 63 characters (RFC-compliant DNS label rules); Rook/RGW
+     * enforces the same limit. Failing fast here gives a clear error instead of an opaque
+     * rejection from Rook once the claim is submitted.
+     */
+    private static final int MAX_BUCKET_NAME_LENGTH = 63;
 
     private final KubernetesClient client;
     private final OperatorConfig config;
@@ -52,6 +66,8 @@ public final class BucketProvisioner {
      * @param cephUser the Ceph object-store user (from Task 3's tenant reconciler) that owns
      *     the bucket; recorded so Rook grants it access
      * @return the bound claim, or empty while Rook is still provisioning
+     * @throws IllegalArgumentException if the resulting bucket name exceeds the 63-character S3
+     *     limit
      */
     public Optional<ObjectBucketClaim> ensureBucket(BlueMapMap map, String cephUser) {
         String namespace = map.getMetadata().getNamespace();
@@ -61,12 +77,19 @@ public final class BucketProvisioner {
                 client.resources(ObjectBucketClaim.class).inNamespace(namespace).withName(name).get();
 
         if (existing == null) {
+            String bucketName = cephUser + "-" + name;
+            if (bucketName.length() > MAX_BUCKET_NAME_LENGTH) {
+                throw new IllegalArgumentException("bucket name '%s' is %d characters long, exceeding the S3 limit of %d"
+                        .formatted(bucketName, bucketName.length(), MAX_BUCKET_NAME_LENGTH));
+            }
+
             ObjectBucketClaim claim = new ObjectBucketClaim();
             claim.setMetadata(new ObjectMetaBuilder()
                     .withName(name)
                     .withNamespace(namespace)
+                    .withLabels(Labels.standard("bluemap-bucket-claim", name))
                     .build());
-            claim.getSpec().setBucketName(cephUser + "-" + name);
+            claim.getSpec().setBucketName(bucketName);
             claim.getSpec().setStorageClassName(config.bucketStorageClass());
             claim.getSpec().getAdditionalConfig().put("bucketOwner", cephUser);
 

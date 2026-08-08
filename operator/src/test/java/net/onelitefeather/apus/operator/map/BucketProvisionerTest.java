@@ -19,6 +19,7 @@ package net.onelitefeather.apus.operator.map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.fabric8.kubernetes.api.model.ObjectMetaBuilder;
@@ -27,6 +28,7 @@ import io.fabric8.kubernetes.client.server.mock.EnableKubernetesMockClient;
 import java.util.Optional;
 import net.onelitefeather.apus.operator.OperatorConfig;
 import net.onelitefeather.apus.operator.api.BlueMapMap;
+import net.onelitefeather.apus.operator.api.Labels;
 import net.onelitefeather.apus.operator.rook.ObjectBucketClaim;
 import org.junit.jupiter.api.Test;
 
@@ -89,5 +91,31 @@ class BucketProvisionerTest {
         Optional<ObjectBucketClaim> bound = provisioner.ensureBucket(map(), "apus-friends");
 
         assertTrue(bound.isPresent(), "a bound claim must be reported");
+    }
+
+    @Test
+    void createsTheClaimWithTheManagedByLabel() {
+        BucketProvisioner provisioner = new BucketProvisioner(client, OperatorConfig.defaults());
+
+        provisioner.ensureBucket(map(), "apus-friends");
+
+        ObjectBucketClaim claim = client.resources(ObjectBucketClaim.class)
+                .inNamespace("bluemap-friends")
+                .withName("survival-overworld")
+                .get();
+        assertEquals(Labels.MANAGED_BY_VALUE, claim.getMetadata().getLabels().get(Labels.MANAGED_BY));
+    }
+
+    @Test
+    void rejectsABucketNameExceedingTheS3Limit() {
+        BucketProvisioner provisioner = new BucketProvisioner(client, OperatorConfig.defaults());
+        BlueMapMap map = map();
+        map.getMetadata().setName("a-very-long-map-name-that-pushes-the-combined-bucket-name-past-limit");
+        String longCephUser = "apus-a-tenant-name-that-is-also-fairly-long-for-good-measure";
+
+        IllegalArgumentException exception =
+                assertThrows(IllegalArgumentException.class, () -> provisioner.ensureBucket(map, longCephUser));
+
+        assertTrue(exception.getMessage().contains("63"), exception.getMessage());
     }
 }
