@@ -536,10 +536,25 @@ Render-Job und Hosting-Pod sie brauchen, ohne Secrets über Namespace-Grenzen zu
 Weil alle Buckets eines Mandanten seinem `CephObjectStoreUser` gehören, zählt ihr
 gesamter Verbrauch gegen dessen Quota (§10.2).
 
-### 9.2 BlueMap-Konfiguration wird generiert
+### 9.2 BlueMap-Konfiguration wird generiert (Phase 3, Hosting)
 
-Aus der CR und den Rook-Werten erzeugt der Operator die vollständige BlueMap-Konfiguration
-als ConfigMap (plus Secret für Zugangsdaten):
+**Klarstellung (2026-08-08, Review Phase 2a):** Diese Sektion beschrieb ursprünglich, dass der
+Operator die Render-Konfiguration als ConfigMap ausliefert. Das widersprach §7.4: Der Phase-1-
+Runner wird für den Render **ausschließlich über Umgebungsvariablen** konfiguriert und liest nie
+etwas aus einem gemounteten Pfad — das ist gegen einen echten Render verifiziert
+(`runner/entrypoint.sh`, `runner/bin/render-config.sh`). Der `RenderJobBuilder` aus Phase 2a
+mountet deshalb bewusst **keine** ConfigMap; §7.4 ist für den Render-Pfad maßgeblich, nicht diese
+Sektion.
+
+Die hier beschriebene Konfigurationserzeugung bleibt gültig, aber erst für **Phase 3**
+(`BlueMapHosting`) relevant: Der langlebige Webserver-Pod, der bereits gerenderte Karten
+ausliefert, braucht ein vollständiges `webserver.conf` und dieselbe Speicher-Anbindung — eine
+Oberfläche, die der Render-Umgebungsvariablen-Vertrag aus §7.4 nicht abdeckt. `BlueMapConfigBuilder`
+existiert bereits (Phase 2a) und generiert diese Dateien, wird aber erst mit dem Hosting-Pod in
+Phase 3 tatsächlich verdrahtet.
+
+Aus der CR und den Rook-Werten erzeugt der Operator für den Hosting-Pod die vollständige
+BlueMap-Konfiguration als ConfigMap (plus Secret für Zugangsdaten):
 
 | Datei | Inhalt |
 |---|---|
@@ -553,7 +568,7 @@ Nutzer schreiben kein HOCON. Wer Sonderfälle braucht, setzt gezielt
 
 **Verifiziertes Format von `storages/s3.conf`** (Phase 1, Task 7 — per Integrationstest
 gegen einen echten BlueMap-CLI-Lauf und Quellcode-Review von `S3StorageConfiguration`
-bestätigt; der Operator muss in Phase 2 exakt diese Schlüssel erzeugen):
+bestätigt; der Operator muss beim Verdrahten in Phase 3 exakt diese Schlüssel erzeugen):
 
 ```hocon
 storage-type: "themeinerlp:s3"

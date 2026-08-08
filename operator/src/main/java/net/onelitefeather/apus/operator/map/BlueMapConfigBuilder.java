@@ -28,6 +28,15 @@ import net.onelitefeather.apus.operator.api.BlueMapMap;
  * absent from every generated file: they come from the Rook-managed Secret as environment
  * variables at pod start (the runner's entrypoint from Phase 1 writes them into the
  * configuration then), because a ConfigMap is readable by anything in the namespace.
+ *
+ * <p><b>Not wired into any reconciler yet — this is intentional, not an oversight.</b> The
+ * Phase 1 runner image is configured exclusively through environment variables (design spec
+ * §7.4, verified against a real render), so {@link
+ * net.onelitefeather.apus.operator.render.RenderJobBuilder} never mounts a ConfigMap and never
+ * calls this class. It exists for Phase 3 ({@code BlueMapHosting}): the long-running webserver
+ * pod that serves already-rendered maps needs a full {@code webserver.conf} and the storage
+ * config this class builds, and that surface is not covered by the render env-var contract.
+ * Do not delete this class as dead code — it is future-phase code, staged ahead of its wiring.
  */
 public final class BlueMapConfigBuilder {
 
