@@ -19,12 +19,18 @@ package net.onelitefeather.apus.ingest.connector;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.lang.reflect.Field;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.net.ServerSocket;
+import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -106,6 +112,92 @@ class PterodactylConnectorTest {
         assertFalse(Files.exists(workDir.resolve("server.properties")), "server.properties is not part of a world");
         assertFalse(Files.exists(workDir.resolve("plugins")), "plugin data is not part of a world");
         assertFalse(Files.exists(workDir.resolve("logs")), "log files are not part of a world");
+    }
+
+    /**
+     * F1: if the panel's response envelope ever stops matching {@code
+     * {"object":"list","data":[...]}} -- a different API version, a proxy error page served with
+     * a 2xx status, whatever -- {@code discover()} must fail loudly rather than silently reading
+     * an empty backup list out of the mismatched shape (which {@code WorldSourceReconciler} would
+     * report as a perfectly healthy "no versions available at the source yet").
+     */
+    @Test
+    void discoverRejectsAResponseThatDoesNotMatchTheExpectedListEnvelope() throws IOException {
+        server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
+        server.createContext("/api/client/servers/" + SERVER_ID + "/backups", exchange -> {
+            requireBearerToken(exchange);
+            // Structurally valid JSON, but not the {object:"list", data:[...]} envelope this
+            // connector's whole parsing logic assumes.
+            respondJson(exchange, 200, "{\"unexpected\":\"shape\"}");
+        });
+        server.start();
+
+        IllegalStateException e =
+                assertThrows(IllegalStateException.class, () -> new PterodactylConnector().discover(baseConfig()));
+        assertTrue(e.getMessage().contains("expected"), "must explain what shape was expected, not just fail blankly");
+    }
+
+    /**
+     * S1: a failure downloading the backup archive must never embed the signed URL itself in its
+     * message -- it is a short-lived but fully-privileged credential for the entire backup, and
+     * exception messages end up on stderr, i.e. in log aggregation (see {@code IngestMain}).
+     */
+    @Test
+    void fetchDoesNotLeakTheSignedDownloadUrlWhenTheDownloadFails(@TempDir Path workDir) throws IOException {
+        int deadPort = unusedPort();
+        String secretToken = "super-secret-signed-token-should-never-appear-in-logs";
+
+        server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
+        server.createContext("/api/client/servers/" + SERVER_ID + "/backups", exchange -> {
+            requireBearerToken(exchange);
+            respondJson(exchange, 200, backupsListResponse());
+        });
+        server.createContext(
+                "/api/client/servers/" + SERVER_ID + "/backups/" + SUCCESSFUL_BACKUP_UUID + "/download", exchange -> {
+                    requireBearerToken(exchange);
+                    // Points at a closed local port: the GET against it fails with a connection
+                    // refused IOException, exercising fetch()'s catch(IOException) branch.
+                    String deadUrl = "http://127.0.0.1:" + deadPort + "/archive.tar.gz?token=" + secretToken;
+                    respondJson(exchange, 200, "{\"object\":\"signed_url\",\"attributes\":{\"url\":\"" + deadUrl + "\"}}");
+                });
+        server.start();
+
+        Map<String, String> config = baseConfig();
+        config.put(PterodactylConnector.CONFIG_WORLD_PATHS, "world");
+        SourceVersion version = new SourceVersion(SUCCESSFUL_BACKUP_UUID, "daily-backup", Instant.now(), 0);
+
+        UncheckedIOException e = assertThrows(
+                UncheckedIOException.class, () -> new PterodactylConnector().fetch(config, version, workDir));
+
+        assertFalse(
+                e.getMessage().contains(secretToken),
+                "the signed URL (and its token) must never appear in an exception message, got: " + e.getMessage());
+        assertTrue(
+                e.getMessage().contains("127.0.0.1"), "the host alone is still useful for diagnosing the failure");
+    }
+
+    /**
+     * B1: {@code discover()}/{@code fetch()} run inside a JOSDK worker shared across every
+     * reconciler (see the class Javadoc); a panel that accepts a connection and never responds
+     * must not be able to hang that worker forever.
+     */
+    @Test
+    void theDefaultHttpClientHasAConnectTimeoutConfigured() throws ReflectiveOperationException {
+        PterodactylConnector connector = new PterodactylConnector();
+
+        Field field = PterodactylConnector.class.getDeclaredField("httpClient");
+        field.setAccessible(true);
+        HttpClient client = (HttpClient) field.get(connector);
+
+        assertTrue(
+                client.connectTimeout().isPresent(),
+                "the default client must bound how long connecting to an unresponsive panel can take");
+    }
+
+    private static int unusedPort() throws IOException {
+        try (ServerSocket socket = new ServerSocket(0)) {
+            return socket.getLocalPort();
+        }
     }
 
     private Map<String, String> baseConfig() {

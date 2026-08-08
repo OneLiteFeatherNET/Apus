@@ -28,6 +28,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -86,10 +87,22 @@ public final class PterodactylConnector implements WorldSourceConnector {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
+    /**
+     * Applied both as the connect timeout (via {@link HttpClient.Builder#connectTimeout}) and as
+     * the per-request timeout (via {@link HttpRequest.Builder#timeout}) on every call this
+     * connector makes. Without either, a panel that accepts a TCP connection and then simply
+     * never responds -- or never finishes sending a large backup body -- would hang the calling
+     * thread indefinitely. {@code discover()} runs directly inside {@code WorldSourceReconciler},
+     * whose JOSDK worker pool is shared across all five reconcilers (see the class Javadoc), so an
+     * unresponsive panel would starve unrelated render/ingest reconciliation too, not just this
+     * source's own polling.
+     */
+    private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(30);
+
     private final HttpClient httpClient;
 
     public PterodactylConnector() {
-        this(HttpClient.newHttpClient());
+        this(HttpClient.newBuilder().connectTimeout(REQUEST_TIMEOUT).build());
     }
 
     /** Visible for tests to inject a client with tighter timeouts against a local HTTP stub. */
@@ -113,6 +126,7 @@ public final class PterodactylConnector implements WorldSourceConnector {
         requireSuccess(response, "list backups");
 
         JsonNode root = parseJson(response.body());
+        requireListEnvelope(root, response.body());
 
         List<SourceVersion> versions = new ArrayList<>();
         for (JsonNode item : root.path("data")) {
@@ -152,8 +166,9 @@ public final class PterodactylConnector implements WorldSourceConnector {
         // together, potentially tens of gigabytes. gzip is not seekable, so the stream is walked
         // exactly once and only entries under the configured world paths are written; the archive
         // as a whole is never buffered in memory or written to disk.
+        URI signedUri = URI.create(signedUrl);
         HttpRequest downloadRequest =
-                HttpRequest.newBuilder(URI.create(signedUrl)).GET().build();
+                HttpRequest.newBuilder(signedUri).timeout(REQUEST_TIMEOUT).GET().build();
         try {
             HttpResponse<InputStream> archive =
                     httpClient.send(downloadRequest, HttpResponse.BodyHandlers.ofInputStream());
@@ -163,10 +178,15 @@ public final class PterodactylConnector implements WorldSourceConnector {
             }
             try (InputStream raw = archive.body();
                     GZIPInputStream gzip = new GZIPInputStream(raw)) {
-                Archives.extractTar(gzip, workDir, entryName -> matchesAnyWorldPath(entryName, worldPaths));
+                Archives.extractTar(
+                        gzip, workDir, entryName -> matchesAnyWorldPath(entryName, worldPaths), Archives.limitsFrom(config));
             }
         } catch (IOException e) {
-            throw new UncheckedIOException("failed to stream backup archive from " + signedUrl, e);
+            // Never embed the signed URL itself in the message: it is a short-lived but
+            // fully-privileged credential for downloading the entire backup, and exception
+            // messages end up on stderr and therefore in log aggregation (see IngestMain). The
+            // host alone is enough to diagnose a connectivity problem.
+            throw new UncheckedIOException("failed to stream backup archive from host " + signedUri.getHost(), e);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("interrupted while downloading backup archive", e);
@@ -196,6 +216,7 @@ public final class PterodactylConnector implements WorldSourceConnector {
         return HttpRequest.newBuilder(uri)
                 .header("Authorization", "Bearer " + apiKey)
                 .header("Accept", "application/json")
+                .timeout(REQUEST_TIMEOUT)
                 .GET()
                 .build();
     }
@@ -204,6 +225,27 @@ public final class PterodactylConnector implements WorldSourceConnector {
         if (response.statusCode() / 100 != 2) {
             throw new IllegalStateException("Pterodactyl API call to " + action + " failed with HTTP "
                     + response.statusCode() + ": " + response.body());
+        }
+    }
+
+    /**
+     * Rejects a backups-list response that does not match the documented list envelope ({@code
+     * {"object":"list","data":[...]}} -- see the class Javadoc's "one piece taken from community
+     * docs" note) instead of silently falling through.
+     *
+     * <p>Without this check, a panel that answers with an unexpected shape -- a different API
+     * version, a proxy's error page returned with a 2xx status, a permission response that omits
+     * {@code data} -- would make {@code root.path("data")} resolve to a Jackson {@code
+     * MissingNode}, which iterates as empty. That reads as "the source has zero backups", a
+     * perfectly healthy, reportable state ({@code WorldSourceReconciler}'s {@code UP_TO_DATE}
+     * condition) -- turning a genuinely unverified assumption about the response shape into a
+     * silent, permanent misdiagnosis instead of a visible, retried failure.
+     */
+    private static void requireListEnvelope(JsonNode root, String rawBody) {
+        if (!"list".equals(root.path("object").asText(null)) || !root.path("data").isArray()) {
+            throw new IllegalStateException(
+                    "Pterodactyl backups response did not match the expected {object:\"list\",data:[...]} envelope: "
+                            + rawBody);
         }
     }
 
