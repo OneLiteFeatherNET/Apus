@@ -99,4 +99,16 @@ class RenderProgressProbeTest {
         assertEquals(null, snapshot.currentMap());
         assertFalse(snapshot.degraded());
     }
+
+    @Test
+    void degradesInsteadOfThrowingWhenTheSupplierItselfFails() {
+        ProgressSnapshot snapshot = new RenderProgressProbe(() -> {
+                    throw new IllegalStateException("supplier exploded");
+                })
+                .sample();
+
+        assertEquals(ProgressSnapshot.State.UNKNOWN, snapshot.state());
+        assertTrue(snapshot.degraded());
+        assertTrue(snapshot.description().contains("supplier exploded"), snapshot.description());
+    }
 }
