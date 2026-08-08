@@ -82,9 +82,19 @@ public final class BundleWriter {
         void update(long bytesDone, long bytesTotal);
     }
 
+    /** Sibling directories of a dimension's region directory that are part of the bundle when present. */
+    private static final String ENTITIES_DIR = "entities";
+
+    private static final String POI_DIR = "poi";
+    private static final String LEVEL_DAT = "level.dat";
+
+    /** The dimension whose region directory's parent holds the world's {@code level.dat}. */
+    private static final String OVERWORLD_DIMENSION = "overworld";
+
     /**
-     * Writes every region file of {@code layout}'s dimensions, then the manifest describing them
-     * as the bundle's last object.
+     * Writes every region file of {@code layout}'s dimensions (plus, where present, each
+     * dimension's {@code entities}/{@code poi} data and the world's {@code level.dat}), then the
+     * manifest describing them as the bundle's last object.
      *
      * <p>{@code sourceType} and {@code minecraftVersion} are opaque to this class -- neither the
      * layout detector nor the bundle writer has any way to know where the data came from or which
@@ -92,31 +102,66 @@ public final class BundleWriter {
      * passes them straight through into {@link BundleManifest#source()} and {@link
      * BundleManifest#minecraftVersion()}.
      *
+     * <p>{@code level.dat} is read from the overworld dimension's region directory's parent (the
+     * world root every detected layout resolves the overworld's {@code region/} directory
+     * under -- see {@code LayoutDetector}), since that copy is the one describing the world as a
+     * whole; the nether/end folders a Bukkit-style split layout produces each carry their own
+     * {@code level.dat} too, but those are per-dimension placeholders, not the world's actual
+     * level data.
+     *
+     * @param sourceName the {@code WorldSource} this bundle was produced from, by name -- scopes
+     *     the bundle path so two sources whose worlds happen to share a {@code worldId} (e.g. the
+     *     Minecraft default {@code "world"}) never collide on the same prefix; see {@link
+     *     BundlePath}
      * @param sourceType the source connector type (e.g. {@code "s3"}, {@code "pterodactyl"}), or
      *     {@code null} if not known to the caller
+     * @param sourceRef an identifier for the exact source version this bundle was produced from
+     *     (e.g. a Pterodactyl backup UUID or an S3 object key) -- distinct from {@code version},
+     *     which is the *bundle's own* version identifier, not where it came from
      * @param minecraftVersion the Minecraft version the world was generated/played under, or
      *     {@code null} if not known to the caller
-     * @return the bundle's root path within the bucket, {@code <tenant>/<worldId>/<version>}
+     * @return the bundle's root path within the bucket, {@code <tenant>/<sourceName>/<worldId>/<version>}
      */
     public String write(
             String tenant,
+            String sourceName,
             String worldId,
             String version,
             String sourceType,
+            String sourceRef,
             String minecraftVersion,
             WorldLayoutLike layout,
             ProgressSink progress) {
-        String bundlePath = tenant + "/" + worldId + "/" + version;
+        String bundlePath = BundlePath.of(tenant, sourceName, worldId, version);
 
         Map<String, List<RegionFile>> filesByDimension = new LinkedHashMap<>();
+        Map<String, List<RegionFile>> entityFilesByDimension = new LinkedHashMap<>();
+        Map<String, List<RegionFile>> poiFilesByDimension = new LinkedHashMap<>();
         long totalBytes = 0;
         for (Map.Entry<String, Path> entry : layout.dimensions().entrySet()) {
-            List<RegionFile> files = listRegionFiles(entry.getValue());
+            Path regionDir = entry.getValue();
+            List<RegionFile> files = listRegionFiles(regionDir);
             filesByDimension.put(entry.getKey(), files);
             for (RegionFile file : files) {
                 totalBytes += file.sizeBytes();
             }
+
+            List<RegionFile> entityFiles = listRegionFilesIfPresent(regionDir.resolveSibling(ENTITIES_DIR));
+            entityFilesByDimension.put(entry.getKey(), entityFiles);
+            for (RegionFile file : entityFiles) {
+                totalBytes += file.sizeBytes();
+            }
+
+            List<RegionFile> poiFiles = listRegionFilesIfPresent(regionDir.resolveSibling(POI_DIR));
+            poiFilesByDimension.put(entry.getKey(), poiFiles);
+            for (RegionFile file : poiFiles) {
+                totalBytes += file.sizeBytes();
+            }
         }
+
+        Path levelDat = levelDatPath(layout);
+        long levelDatSize = levelDat != null && Files.isRegularFile(levelDat) ? sizeOrZero(levelDat) : 0;
+        totalBytes += levelDatSize;
 
         MessageDigest digest = newDigest();
         List<BundleManifest.DimensionInfo> dimensionInfos = new ArrayList<>();
@@ -140,6 +185,32 @@ public final class BundleWriter {
             }
             dimensionInfos.add(
                     new BundleManifest.DimensionInfo(dimensionId, dimensionPath, regions, regions.size()));
+
+            bytesDone = writeSidecarFiles(
+                    dimensionPath + "/" + ENTITIES_DIR,
+                    entityFilesByDimension.get(dimensionId),
+                    digest,
+                    progress,
+                    bytesDone,
+                    totalBytes);
+            bytesDone = writeSidecarFiles(
+                    dimensionPath + "/" + POI_DIR,
+                    poiFilesByDimension.get(dimensionId),
+                    digest,
+                    progress,
+                    bytesDone,
+                    totalBytes);
+        }
+
+        if (levelDat != null && levelDatSize > 0) {
+            byte[] content = readFully(levelDat);
+            digest.update(content);
+            s3.putObject(bucket, bundlePath + "/" + LEVEL_DAT, content);
+            sizeBytes += content.length;
+            bytesDone += content.length;
+            if (progress != null) {
+                progress.update(bytesDone, totalBytes);
+            }
         }
 
         BundleManifest manifest = new BundleManifest(
@@ -147,7 +218,7 @@ public final class BundleWriter {
                 tenant,
                 worldId,
                 version,
-                new BundleManifest.SourceInfo(sourceType, version, layout.kind()),
+                new BundleManifest.SourceInfo(sourceType, sourceRef, layout.kind()),
                 minecraftVersion,
                 dimensionInfos,
                 sizeBytes,
@@ -161,7 +232,50 @@ public final class BundleWriter {
         return bundlePath;
     }
 
+    /** {@code null} if the layout has no overworld dimension (should not happen for a detected layout). */
+    private static Path levelDatPath(WorldLayoutLike layout) {
+        Path overworldRegion = layout.dimensions().get(OVERWORLD_DIMENSION);
+        return overworldRegion == null ? null : overworldRegion.resolveSibling(LEVEL_DAT);
+    }
+
+    private static long sizeOrZero(Path path) {
+        try {
+            return Files.size(path);
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed to size " + path, e);
+        }
+    }
+
+    /** Uploads {@code files} (entities or poi region files) under {@code targetPrefix}, updating progress as it goes. */
+    private long writeSidecarFiles(
+            String targetPrefix,
+            List<RegionFile> files,
+            MessageDigest digest,
+            ProgressSink progress,
+            long bytesDone,
+            long totalBytes) {
+        if (files == null) {
+            return bytesDone;
+        }
+        long done = bytesDone;
+        for (RegionFile file : files) {
+            byte[] content = readFully(file.path());
+            digest.update(content);
+            s3.putObject(bucket, targetPrefix + "/" + file.path().getFileName(), content);
+            done += content.length;
+            if (progress != null) {
+                progress.update(done, totalBytes);
+            }
+        }
+        return done;
+    }
+
     private record RegionFile(Path path, int x, int z, long sizeBytes) {}
+
+    /** Same as {@link #listRegionFiles}, but returns an empty list rather than failing when {@code dir} does not exist. */
+    private static List<RegionFile> listRegionFilesIfPresent(Path dir) {
+        return Files.isDirectory(dir) ? listRegionFiles(dir) : List.of();
+    }
 
     private static List<RegionFile> listRegionFiles(Path regionDir) {
         List<RegionFile> files = new ArrayList<>();

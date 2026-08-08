@@ -125,9 +125,11 @@ public final class IngestMain {
             ThrottledProgressSink progress = new ThrottledProgressSink(config.progressInterval());
             return writer.write(
                     config.bundleTenant(),
+                    config.bundleSourceName(),
                     config.bundleWorldId(),
                     config.bundleVersion(),
                     config.sourceType(),
+                    config.sourceVersionId(),
                     config.minecraftVersion(),
                     layout,
                     progress);

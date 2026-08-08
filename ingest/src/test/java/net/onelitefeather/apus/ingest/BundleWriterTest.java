@@ -38,6 +38,7 @@ import org.junit.jupiter.api.io.TempDir;
 class BundleWriterTest {
 
     private static final String BUCKET = "test-bucket";
+    private static final String SOURCE_NAME = "survival-source";
 
     /** Records every {@code putObject} call, in the exact order they happened. */
     private static final class LoggingFakeS3Client implements S3Client {
@@ -95,12 +96,12 @@ class BundleWriterTest {
         LoggingFakeS3Client fake = new LoggingFakeS3Client();
         BundleWriter writer = new BundleWriter(fake, BUCKET);
 
-        String bundlePath = writer.write("acme", "spawn", "v1", "s3", "1.21.10", layout, null);
+        String bundlePath = writer.write("acme", SOURCE_NAME, "spawn", "v1", "s3", "src-ref-1", "1.21.10", layout, null);
 
-        assertEquals("acme/spawn/v1", bundlePath);
+        assertEquals("acme/" + SOURCE_NAME + "/spawn/v1", bundlePath);
         assertEquals(4, fake.keysInOrder.size(), "3 region files + 1 manifest");
 
-        String manifestKey = "acme/spawn/v1/manifest.json";
+        String manifestKey = bundlePath + "/manifest.json";
         assertEquals(manifestKey, fake.keysInOrder.get(fake.keysInOrder.size() - 1), "manifest must be written last");
 
         // Every other key must be a region file key, and none of them may be the manifest.
@@ -126,7 +127,8 @@ class BundleWriterTest {
         BundleWriter writer = new BundleWriter(fake, BUCKET);
 
         assertThrows(
-                RuntimeException.class, () -> writer.write("acme", "spawn", "v1", "s3", "1.21.10", layout, null));
+                RuntimeException.class,
+                () -> writer.write("acme", SOURCE_NAME, "spawn", "v1", "s3", "src-ref-1", "1.21.10", layout, null));
 
         assertTrue(fake.objects.keySet().stream().noneMatch(key -> key.endsWith("manifest.json")),
                 "no manifest may exist after a failed write: " + fake.objects.keySet());
@@ -150,9 +152,9 @@ class BundleWriterTest {
         LoggingFakeS3Client fake = new LoggingFakeS3Client();
         BundleWriter writer = new BundleWriter(fake, BUCKET);
 
-        writer.write("acme", "spawn", "v1", "s3", "1.21.10", layout, null);
+        String bundlePath = writer.write("acme", SOURCE_NAME, "spawn", "v1", "s3", "src-ref-1", "1.21.10", layout, null);
 
-        byte[] manifestBytes = fake.objects.get("acme/spawn/v1/manifest.json");
+        byte[] manifestBytes = fake.objects.get(bundlePath + "/manifest.json");
         BundleManifest manifest = BundleManifest.fromJson(new String(manifestBytes, StandardCharsets.UTF_8));
 
         assertEquals(1, manifest.dimensions().size());
@@ -184,7 +186,7 @@ class BundleWriterTest {
         RecordingProgressSink progress = new RecordingProgressSink();
         BundleWriter writer = new BundleWriter(fake, BUCKET);
 
-        writer.write("acme", "spawn", "v1", "s3", "1.21.10", layout, progress);
+        writer.write("acme", SOURCE_NAME, "spawn", "v1", "s3", "src-ref-1", "1.21.10", layout, progress);
 
         assertEquals(2, progress.updates.size());
         long[] first = progress.updates.get(0);
@@ -206,9 +208,9 @@ class BundleWriterTest {
 
         BundleWriter writer = new BundleWriter(new LoggingFakeS3Client(), BUCKET);
 
-        String bundlePath = writer.write("acme", "spawn", "v1", "s3", "1.21.10", layout, null);
+        String bundlePath = writer.write("acme", SOURCE_NAME, "spawn", "v1", "s3", "src-ref-1", "1.21.10", layout, null);
 
-        assertEquals("acme/spawn/v1", bundlePath);
+        assertEquals("acme/" + SOURCE_NAME + "/spawn/v1", bundlePath);
     }
 
     @Test
@@ -224,9 +226,10 @@ class BundleWriterTest {
         LoggingFakeS3Client fake = new LoggingFakeS3Client();
         BundleWriter writer = new BundleWriter(fake, BUCKET);
 
-        writer.write("acme", "spawn", "v1", "pterodactyl", "1.20.4", layout, null);
+        String bundlePath =
+                writer.write("acme", SOURCE_NAME, "spawn", "v1", "pterodactyl", "backup-uuid-1", "1.20.4", layout, null);
 
-        byte[] manifestBytes = fake.objects.get("acme/spawn/v1/manifest.json");
+        byte[] manifestBytes = fake.objects.get(bundlePath + "/manifest.json");
         BundleManifest manifest = BundleManifest.fromJson(new String(manifestBytes, StandardCharsets.UTF_8));
 
         assertEquals("pterodactyl", manifest.source().type());
@@ -246,12 +249,154 @@ class BundleWriterTest {
         LoggingFakeS3Client fake = new LoggingFakeS3Client();
         BundleWriter writer = new BundleWriter(fake, BUCKET);
 
-        writer.write("acme", "spawn", "v1", null, null, layout, null);
+        writer.write("acme", SOURCE_NAME, "spawn", "v1", null, null, null, layout, null);
 
-        byte[] manifestBytes = fake.objects.get("acme/spawn/v1/manifest.json");
+        byte[] manifestBytes = fake.objects.get("acme/" + SOURCE_NAME + "/spawn/v1/manifest.json");
         BundleManifest manifest = BundleManifest.fromJson(new String(manifestBytes, StandardCharsets.UTF_8));
 
         assertNull(manifest.source().type());
         assertNull(manifest.minecraftVersion());
+    }
+
+    // --- C2: bundle path is scoped by source name -------------------------------------------
+
+    @Test
+    void twoSourcesWithTheSameWorldIdNeverShareABundlePath(@TempDir Path tempDir) throws IOException {
+        Path overworld = tempDir.resolve("overworld");
+        writeRegionFile(overworld, "r.0.0.mca", "a".getBytes(StandardCharsets.UTF_8));
+        Map<String, Path> dimensions = new LinkedHashMap<>();
+        dimensions.put("overworld", overworld);
+        FakeLayout layout = new FakeLayout("vanilla", dimensions);
+
+        LoggingFakeS3Client fake = new LoggingFakeS3Client();
+        BundleWriter writer = new BundleWriter(fake, BUCKET);
+
+        // Same tenant, same worldId ("world", the Minecraft default), same version -- only the
+        // owning source differs, exactly the collision scenario the fix guards against.
+        String pathA = writer.write("acme", "source-a", "world", "v1", "s3", "ref", "1.21.10", layout, null);
+        String pathB = writer.write("acme", "source-b", "world", "v1", "s3", "ref", "1.21.10", layout, null);
+
+        assertFalse(pathA.equals(pathB), "two different sources must never resolve to the same bundle path");
+        assertEquals("acme/source-a/world/v1", pathA);
+        assertEquals("acme/source-b/world/v1", pathB);
+    }
+
+    // --- D2: manifest.source.ref carries the source's own version identifier ----------------
+
+    @Test
+    void manifestSourceRefIsTheSuppliedSourceVersionIdentifierNotTheBundleVersion(@TempDir Path tempDir)
+            throws IOException {
+        Path overworld = tempDir.resolve("overworld");
+        writeRegionFile(overworld, "r.0.0.mca", "a".getBytes(StandardCharsets.UTF_8));
+        Map<String, Path> dimensions = new LinkedHashMap<>();
+        dimensions.put("overworld", overworld);
+        FakeLayout layout = new FakeLayout("vanilla", dimensions);
+
+        LoggingFakeS3Client fake = new LoggingFakeS3Client();
+        BundleWriter writer = new BundleWriter(fake, BUCKET);
+
+        String bundlePath = writer.write(
+                "acme",
+                SOURCE_NAME,
+                "spawn",
+                "ingest-run-7", // the bundle's own version identifier
+                "pterodactyl",
+                "11111111-1111-1111-1111-111111111111", // the actual Pterodactyl backup UUID
+                "1.21.10",
+                layout,
+                null);
+
+        byte[] manifestBytes = fake.objects.get(bundlePath + "/manifest.json");
+        BundleManifest manifest = BundleManifest.fromJson(new String(manifestBytes, StandardCharsets.UTF_8));
+
+        assertEquals(
+                "11111111-1111-1111-1111-111111111111",
+                manifest.source().ref(),
+                "source.ref must be the source's own version identifier, not the bundle version");
+        assertFalse(
+                "ingest-run-7".equals(manifest.source().ref()),
+                "source.ref must not be the bundle version, which describes this bundle, not where it came from");
+    }
+
+    // --- D1: level.dat, entities/ and poi/ are included when present ------------------------
+
+    @Test
+    void writeIncludesLevelDatFromTheOverworldDirectory(@TempDir Path tempDir) throws IOException {
+        Path overworld = tempDir.resolve("world/region");
+        writeRegionFile(overworld, "r.0.0.mca", "a".getBytes(StandardCharsets.UTF_8));
+        Files.writeString(overworld.getParent().resolve("level.dat"), "level-data");
+
+        Map<String, Path> dimensions = new LinkedHashMap<>();
+        dimensions.put("overworld", overworld);
+        FakeLayout layout = new FakeLayout("vanilla", dimensions);
+
+        LoggingFakeS3Client fake = new LoggingFakeS3Client();
+        BundleWriter writer = new BundleWriter(fake, BUCKET);
+
+        String bundlePath = writer.write("acme", SOURCE_NAME, "spawn", "v1", "s3", "ref", "1.21.10", layout, null);
+
+        byte[] levelDat = fake.objects.get(bundlePath + "/level.dat");
+        assertEquals("level-data", new String(levelDat, StandardCharsets.UTF_8));
+    }
+
+    @Test
+    void writeToleratesAMissingLevelDat(@TempDir Path tempDir) throws IOException {
+        Path overworld = tempDir.resolve("world/region");
+        writeRegionFile(overworld, "r.0.0.mca", "a".getBytes(StandardCharsets.UTF_8));
+        // No level.dat written next to it.
+
+        Map<String, Path> dimensions = new LinkedHashMap<>();
+        dimensions.put("overworld", overworld);
+        FakeLayout layout = new FakeLayout("vanilla", dimensions);
+
+        LoggingFakeS3Client fake = new LoggingFakeS3Client();
+        BundleWriter writer = new BundleWriter(fake, BUCKET);
+
+        String bundlePath = writer.write("acme", SOURCE_NAME, "spawn", "v1", "s3", "ref", "1.21.10", layout, null);
+
+        assertFalse(fake.objects.containsKey(bundlePath + "/level.dat"));
+    }
+
+    @Test
+    void writeIncludesEntitiesAndPoiFilesWhenPresent(@TempDir Path tempDir) throws IOException {
+        Path overworld = tempDir.resolve("world/region");
+        writeRegionFile(overworld, "r.0.0.mca", "region-data".getBytes(StandardCharsets.UTF_8));
+        writeRegionFile(overworld.getParent().resolve("entities"), "r.0.0.mca", "entity-data".getBytes(StandardCharsets.UTF_8));
+        writeRegionFile(overworld.getParent().resolve("poi"), "r.0.0.mca", "poi-data".getBytes(StandardCharsets.UTF_8));
+
+        Map<String, Path> dimensions = new LinkedHashMap<>();
+        dimensions.put("overworld", overworld);
+        FakeLayout layout = new FakeLayout("vanilla", dimensions);
+
+        LoggingFakeS3Client fake = new LoggingFakeS3Client();
+        BundleWriter writer = new BundleWriter(fake, BUCKET);
+
+        String bundlePath = writer.write("acme", SOURCE_NAME, "spawn", "v1", "s3", "ref", "1.21.10", layout, null);
+
+        String dimensionPath = bundlePath + "/dimensions/overworld";
+        assertEquals(
+                "entity-data",
+                new String(fake.objects.get(dimensionPath + "/entities/r.0.0.mca"), StandardCharsets.UTF_8));
+        assertEquals(
+                "poi-data", new String(fake.objects.get(dimensionPath + "/poi/r.0.0.mca"), StandardCharsets.UTF_8));
+    }
+
+    @Test
+    void writeToleratesMissingEntitiesAndPoiDirectories(@TempDir Path tempDir) throws IOException {
+        Path overworld = tempDir.resolve("world/region");
+        writeRegionFile(overworld, "r.0.0.mca", "region-data".getBytes(StandardCharsets.UTF_8));
+        // No entities/ or poi/ siblings created -- e.g. a pre-1.17 world.
+
+        Map<String, Path> dimensions = new LinkedHashMap<>();
+        dimensions.put("overworld", overworld);
+        FakeLayout layout = new FakeLayout("vanilla", dimensions);
+
+        LoggingFakeS3Client fake = new LoggingFakeS3Client();
+        BundleWriter writer = new BundleWriter(fake, BUCKET);
+
+        String bundlePath = writer.write("acme", SOURCE_NAME, "spawn", "v1", "s3", "ref", "1.21.10", layout, null);
+
+        assertTrue(fake.objects.keySet().stream().noneMatch(key -> key.contains("/entities/")));
+        assertTrue(fake.objects.keySet().stream().noneMatch(key -> key.contains("/poi/")));
     }
 }
