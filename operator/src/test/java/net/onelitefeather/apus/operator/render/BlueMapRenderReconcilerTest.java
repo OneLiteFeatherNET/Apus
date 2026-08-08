@@ -34,6 +34,7 @@ import io.fabric8.kubernetes.api.model.batch.v1.JobBuilder;
 import io.fabric8.kubernetes.api.model.batch.v1.JobConditionBuilder;
 import io.fabric8.kubernetes.api.model.batch.v1.JobStatusBuilder;
 import io.fabric8.kubernetes.client.KubernetesClient;
+import io.fabric8.kubernetes.client.KubernetesClientException;
 import io.fabric8.kubernetes.client.server.mock.EnableKubernetesMockClient;
 import io.javaoperatorsdk.operator.api.reconciler.UpdateControl;
 import java.util.List;
@@ -211,6 +212,123 @@ class BlueMapRenderReconcilerTest {
         assertNotNull(
                 client.batch().v1().jobs().inNamespace("bluemap-friends").withName("render-2").get(),
                 "a finished render must not block a new one");
+    }
+
+    // --- Map-status lock: the primary, atomic defence (the Job listing above is only a
+    // secondary safeguard, since listing Jobs and then creating one is itself racy) -----------
+
+    @Test
+    void claimsTheMapLockOnFirstRenderAndRecordsItselfInMapStatus() {
+        client.resources(BlueMapMap.class).inNamespace("bluemap-friends").resource(boundMap()).create();
+        BlueMapRenderReconciler reconciler = new BlueMapRenderReconciler(client, OperatorConfig.defaults());
+
+        reconciler.reconcile(renderWithUid("render-1"), null);
+
+        BlueMapMap mapAfterClaim = client.resources(BlueMapMap.class)
+                .inNamespace("bluemap-friends")
+                .withName("survival-overworld")
+                .get();
+        assertEquals(
+                "render-1",
+                mapAfterClaim.getStatus().getLatestRender().getName(),
+                "the winning render must record itself as the map's latest render");
+        assertEquals("Rendering", mapAfterClaim.getStatus().getLatestRender().getPhase());
+    }
+
+    @Test
+    void theMapLockAloneBlocksASecondRenderEvenWithoutACompetingJob() {
+        client.resources(BlueMapMap.class).inNamespace("bluemap-friends").resource(boundMap()).create();
+        BlueMapRenderReconciler reconciler = new BlueMapRenderReconciler(client, OperatorConfig.defaults());
+        BlueMapRender first = renderWithUid("render-1");
+        reconciler.reconcile(first, null);
+
+        // Persist the winning render as a live, still-active BlueMapRender, then remove its Job
+        // -- the pre-existing Job-listing safeguard alone could not block a second render here,
+        // so if the second render is still refused, it can only be the map-status lock doing it.
+        persistRenderCr(first);
+        client.batch().v1().jobs().inNamespace("bluemap-friends").withName("render-1").delete();
+
+        BlueMapRender second = renderWithUid("render-2");
+        reconciler.reconcile(second, null);
+
+        assertEquals("Pending", second.getStatus().getPhase());
+        assertEquals(BlueMapRenderReconciler.CONCURRENT_RENDER_REASON, readyReason(second));
+        assertNull(
+                client.batch().v1().jobs().inNamespace("bluemap-friends").withName("render-2").get(),
+                "the map lock alone must be enough to block a second render");
+    }
+
+    @Test
+    void aTerminalRecordedPredecessorDoesNotBlockANewClaim() {
+        client.resources(BlueMapMap.class).inNamespace("bluemap-friends").resource(boundMap()).create();
+        BlueMapRenderReconciler reconciler = new BlueMapRenderReconciler(client, OperatorConfig.defaults());
+
+        BlueMapRender predecessor = renderWithUid("render-1");
+        predecessor.getStatus().setPhase("Succeeded");
+        persistRenderCr(predecessor);
+
+        BlueMapMap map = client.resources(BlueMapMap.class)
+                .inNamespace("bluemap-friends")
+                .withName("survival-overworld")
+                .get();
+        map.getStatus().getLatestRender().setName("render-1");
+        map.getStatus().getLatestRender().setPhase("Rendering");
+        client.resources(BlueMapMap.class).inNamespace("bluemap-friends").resource(map).updateStatus();
+
+        BlueMapRender second = renderWithUid("render-2");
+        reconciler.reconcile(second, null);
+
+        assertNotNull(
+                client.batch().v1().jobs().inNamespace("bluemap-friends").withName("render-2").get(),
+                "a terminal recorded predecessor must not block a new claim");
+        assertEquals(
+                "render-2",
+                client.resources(BlueMapMap.class)
+                        .inNamespace("bluemap-friends")
+                        .withName("survival-overworld")
+                        .get()
+                        .getStatus()
+                        .getLatestRender()
+                        .getName(),
+                "the new render must take over the lock");
+    }
+
+    @Test
+    void losingTheOptimisticLockRaceCreatesNoJob() {
+        // The fabric8 mock server does not enforce resourceVersion-based optimistic concurrency
+        // (verified separately -- a real API server does), so a genuine 409 cannot be
+        // reproduced against it. A fake MapLockClaimer exercises the conflict-handling path
+        // deterministically instead: whoever gets the conflict must not create a job.
+        client.resources(BlueMapMap.class).inNamespace("bluemap-friends").resource(boundMap()).create();
+        BlueMapRenderReconciler.MapLockClaimer alwaysConflicts =
+                map -> {
+                    throw new KubernetesClientException("simulated conflict", 409, null);
+                };
+        BlueMapRenderReconciler reconciler =
+                new BlueMapRenderReconciler(client, OperatorConfig.defaults(), pod -> Optional.empty(), alwaysConflicts);
+        BlueMapRender render = renderWithUid("render-1");
+
+        UpdateControl<BlueMapRender> control = reconciler.reconcile(render, null);
+
+        assertEquals("Pending", render.getStatus().getPhase());
+        assertEquals(BlueMapRenderReconciler.CONCURRENT_RENDER_REASON, readyReason(render));
+        assertTrue(control.isPatchStatus());
+        assertNull(
+                client.batch().v1().jobs().inNamespace("bluemap-friends").withName("render-1").get(),
+                "losing the optimistic-lock race must not create a job");
+    }
+
+    /** Persists {@code render} as a live BlueMapRender custom resource, status included. */
+    private void persistRenderCr(BlueMapRender render) {
+        BlueMapRender created = client.resources(BlueMapRender.class)
+                .inNamespace(render.getMetadata().getNamespace())
+                .resource(render)
+                .create();
+        created.getStatus().setPhase(render.getStatus().getPhase());
+        client.resources(BlueMapRender.class)
+                .inNamespace(render.getMetadata().getNamespace())
+                .resource(created)
+                .updateStatus();
     }
 
     // --- Ownership check, mirroring TenantReconciler ---------------------------------------

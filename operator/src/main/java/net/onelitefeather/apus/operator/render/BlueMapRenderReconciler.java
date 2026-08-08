@@ -25,6 +25,7 @@ import io.fabric8.kubernetes.api.model.batch.v1.Job;
 import io.fabric8.kubernetes.api.model.batch.v1.JobCondition;
 import io.fabric8.kubernetes.api.model.batch.v1.JobStatus;
 import io.fabric8.kubernetes.client.KubernetesClient;
+import io.fabric8.kubernetes.client.KubernetesClientException;
 import io.fabric8.kubernetes.client.dsl.NonDeletingOperation;
 import io.javaoperatorsdk.operator.api.reconciler.Context;
 import io.javaoperatorsdk.operator.api.reconciler.ControllerConfiguration;
@@ -59,11 +60,24 @@ import net.onelitefeather.apus.operator.api.Conditions;
  * an empty bucket name and it would simply fail. This reconciler refuses to create a job until
  * that status is populated, reporting {@value #MAP_NOT_READY_REASON} and rechecking later.
  *
- * <p><b>Concurrency lock ({@code Forbid}):</b> before creating a job, this reconciler lists
- * every other {@link Job} in the namespace carrying {@link RenderJobBuilder#MAP_LABEL} for the
- * same map. If any of them is still active (no {@code Succeeded}/{@code Failed} outcome yet), the
- * new render is left in {@code Pending} with reason {@value #CONCURRENT_RENDER_REASON} and
- * nothing is submitted -- two writers on the same map storage can leave it inconsistent.
+ * <p><b>Concurrency lock ({@code Forbid}):</b> listing Jobs and then creating one is two separate
+ * API calls with no atomicity between them -- two {@link BlueMapRender}s for the same map
+ * reconciled at nearly the same time could both observe "nothing active yet" before either of
+ * them has created its Job. The primary lock is therefore an optimistic write to {@link
+ * net.onelitefeather.apus.operator.api.BlueMapMapStatus#getLatestRender() BlueMapMap.status.latestRender}:
+ * before creating a Job, this reconciler claims that field for itself via {@link
+ * MapLockClaimer#claim(BlueMapMap)}, an {@code updateStatus()} call the API server rejects with a
+ * 409 Conflict if the map's status changed (i.e. someone else claimed it first) since this
+ * reconciler last read it. The reconciler that loses the conflict creates no Job and stays in
+ * {@code Pending} with reason {@value #CONCURRENT_RENDER_REASON}, to be rechecked later. If the
+ * currently-recorded render is itself still active (fetched live by name, not trusted from the
+ * possibly-stale copy in {@code latestRender.phase}), a second render does not even attempt the
+ * write -- same outcome. A terminal ({@code Succeeded}/{@code Failed}) or since-deleted recorded
+ * render does not block a new claim. As a secondary safeguard (in case the status field was lost
+ * or never written, e.g. by a manual edit), this reconciler also lists every other {@link Job} in
+ * the namespace carrying {@link RenderJobBuilder#MAP_LABEL} for the same map and refuses to
+ * proceed if one is still active -- but this check alone is not race-free, which is exactly why
+ * the status-based claim exists.
  *
  * <p><b>Storage quota is not retried.</b> Ceph enforces a tenant's storage quota (see {@code
  * TenantReconciler}), so a render can fail because the bucket is simply full. That failure is
@@ -127,6 +141,7 @@ public class BlueMapRenderReconciler implements Reconciler<BlueMapRender> {
     private final KubernetesClient client;
     private final OperatorConfig config;
     private final ProgressFetcher progressFetcher;
+    private final MapLockClaimer mapLockClaimer;
 
     public BlueMapRenderReconciler(KubernetesClient client, OperatorConfig config) {
         this(client, config, new HttpProgressFetcher());
@@ -134,9 +149,19 @@ public class BlueMapRenderReconciler implements Reconciler<BlueMapRender> {
 
     /** Test seam: lets a fake progress source replace the real HTTP round-trip to the pod. */
     BlueMapRenderReconciler(KubernetesClient client, OperatorConfig config, ProgressFetcher progressFetcher) {
+        this(client, config, progressFetcher, map -> client.resources(BlueMapMap.class)
+                .inNamespace(map.getMetadata().getNamespace())
+                .resource(map)
+                .updateStatus());
+    }
+
+    /** Test seam: lets a fake claimer simulate a 409 Conflict from a competing reconciler. */
+    BlueMapRenderReconciler(
+            KubernetesClient client, OperatorConfig config, ProgressFetcher progressFetcher, MapLockClaimer mapLockClaimer) {
         this.client = client;
         this.config = config;
         this.progressFetcher = progressFetcher;
+        this.mapLockClaimer = mapLockClaimer;
     }
 
     @Override
@@ -169,6 +194,13 @@ public class BlueMapRenderReconciler implements Reconciler<BlueMapRender> {
         }
 
         if (anotherActiveRenderJobExists(namespace, mapName, renderName)) {
+            return pending(
+                    render,
+                    CONCURRENT_RENDER_REASON,
+                    "another render for map '" + mapName + "' is already active (concurrencyPolicy: Forbid)");
+        }
+
+        if (!tryClaimMap(map, namespace, renderName)) {
             return pending(
                     render,
                     CONCURRENT_RENDER_REASON,
@@ -277,6 +309,60 @@ public class BlueMapRenderReconciler implements Reconciler<BlueMapRender> {
         return false;
     }
 
+    /**
+     * Attempts to claim {@code map.status.latestRender} for {@code renderName}, the primary
+     * defence of the concurrency lock described in the class Javadoc.
+     *
+     * <p>Three outcomes are all "claimed, proceed": the field is empty (no prior render), it
+     * already names this exact render (a retry after a previous claim whose Job creation never
+     * happened, e.g. a crash in between -- re-claiming is a harmless no-op), or the previously
+     * recorded render is no longer active. In every other case -- another render is recorded and
+     * still active, or the optimistic {@code updateStatus()} loses a race to a competing claim
+     * (HTTP 409) -- this returns {@code false} and creates nothing.
+     */
+    private boolean tryClaimMap(BlueMapMap map, String namespace, String renderName) {
+        String recordedName = map.getStatus().getLatestRender().getName();
+        if (renderName.equals(recordedName)) {
+            return true;
+        }
+        if (recordedName != null && !recordedName.isBlank() && isRenderStillActive(namespace, recordedName)) {
+            return false;
+        }
+
+        map.getStatus().getLatestRender().setName(renderName);
+        map.getStatus().getLatestRender().setPhase(RENDERING_PHASE);
+        try {
+            mapLockClaimer.claim(map);
+            return true;
+        } catch (KubernetesClientException e) {
+            if (e.getCode() == 409) {
+                // Lost the race: another reconciler's claim landed first and changed the map's
+                // resourceVersion out from under us. Whoever gets the conflict has lost -- see
+                // the class Javadoc.
+                return false;
+            }
+            throw e;
+        }
+    }
+
+    /**
+     * Live lookup of whether the render currently recorded in {@code latestRender} still counts
+     * as active, used by {@link #tryClaimMap}. Deliberately re-fetches the actual {@link
+     * BlueMapRender} instead of trusting {@code latestRender.phase}: that field is only a
+     * snapshot written at claim time and is never updated again, so trusting it here would make
+     * every render after the first permanently find the map "still active" once the recorded
+     * phase is stale. A missing render (deleted since it was recorded) counts as not active.
+     */
+    private boolean isRenderStillActive(String namespace, String renderName) {
+        BlueMapRender recorded =
+                client.resources(BlueMapRender.class).inNamespace(namespace).withName(renderName).get();
+        if (recorded == null) {
+            return false;
+        }
+        String phase = recorded.getStatus().getPhase();
+        return phase == null || !TERMINAL_PHASES.contains(phase);
+    }
+
     private Pod findPod(String namespace, String renderName) {
         List<Pod> pods = client.pods()
                 .inNamespace(namespace)
@@ -381,6 +467,20 @@ public class BlueMapRenderReconciler implements Reconciler<BlueMapRender> {
     @FunctionalInterface
     interface ProgressFetcher {
         Optional<String> fetch(Pod pod);
+    }
+
+    /**
+     * Performs the optimistic {@code updateStatus()} call {@link #tryClaimMap} relies on. The
+     * real implementation is a one-line delegation to the Kubernetes client; it exists as an
+     * interface purely so tests can inject a fake that throws a simulated {@link
+     * KubernetesClientException} (HTTP 409) to exercise the conflict path deterministically --
+     * the fabric8 mock server used elsewhere in this test suite does not enforce optimistic
+     * concurrency (no resourceVersion check on update), so a real conflict cannot be reproduced
+     * against it.
+     */
+    @FunctionalInterface
+    interface MapLockClaimer {
+        void claim(BlueMapMap map);
     }
 
     /**
