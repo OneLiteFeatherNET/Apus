@@ -58,4 +58,22 @@ class ApusResourceTest {
         // Two renders writing the same map storage can leave the map inconsistent (§7.3).
         assertEquals("Forbid", new BlueMapMap().getSpec().getTrigger().getConcurrencyPolicy());
     }
+
+    @Test
+    void everyResourceHasANonNullSpecAndStatusRightAfterConstruction() {
+        // CustomResource's default initSpec()/initStatus() return null; a subclass has to
+        // override both or `new X().getSpec()` is null until something (e.g. Jackson
+        // deserialisation from the API server) overwrites the field. Checked across all three
+        // resources in one test so a fourth resource added later can't quietly skip this.
+        assertNotNull(new Tenant().getSpec(), "Tenant.getSpec() must not be null right after construction");
+        assertNotNull(new Tenant().getStatus(), "Tenant.getStatus() must not be null right after construction");
+        assertNotNull(new BlueMapMap().getSpec(), "BlueMapMap.getSpec() must not be null right after construction");
+        assertNotNull(
+                new BlueMapMap().getStatus(), "BlueMapMap.getStatus() must not be null right after construction");
+        assertNotNull(
+                new BlueMapRender().getSpec(), "BlueMapRender.getSpec() must not be null right after construction");
+        assertNotNull(
+                new BlueMapRender().getStatus(),
+                "BlueMapRender.getStatus() must not be null right after construction");
+    }
 }

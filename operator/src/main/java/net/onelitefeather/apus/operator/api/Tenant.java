@@ -33,4 +33,15 @@ import io.fabric8.kubernetes.model.annotation.Version;
 @Kind("Tenant")
 @Plural("tenants")
 @ShortNames("bmtenant")
-public class Tenant extends CustomResource<TenantSpec, TenantStatus> {}
+public class Tenant extends CustomResource<TenantSpec, TenantStatus> {
+
+    @Override
+    protected TenantSpec initSpec() {
+        return new TenantSpec();
+    }
+
+    @Override
+    protected TenantStatus initStatus() {
+        return new TenantStatus();
+    }
+}

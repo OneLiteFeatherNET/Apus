@@ -45,7 +45,16 @@ val generateCrds by tasks.registering(JavaExec::class) {
         sourceSets.main.get().output.classesDirs.asPath,
     )
     doFirst {
-        crdOutputDir.get().asFile.mkdirs()
+        // The generator only ever writes files, it never removes ones that no longer
+        // correspond to a CustomResource class -- e.g. after a resource is renamed or
+        // deleted. Without this, a stale manifest from an earlier run would keep sitting in
+        // crdOutputDir and any test scanning that directory would stay green even though the
+        // actual generator output is now wrong. Clearing the directory before every run makes
+        // its contents an accurate reflection of the current source, not an accumulation of
+        // every run that ever touched it.
+        val dir = crdOutputDir.get().asFile
+        dir.deleteRecursively()
+        dir.mkdirs()
     }
 }
 
