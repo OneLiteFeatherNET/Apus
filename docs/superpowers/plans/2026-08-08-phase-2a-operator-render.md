@@ -116,13 +116,31 @@ operator/
 
 ## Parallelisierung
 
-| Gruppe | Aufgaben | Voraussetzung |
+Der Zuschnitt ist bewusst darauf ausgelegt, die Mitte parallel bearbeitbar zu machen.
+Der Trick: **Alle Datenklassen entstehen vorab in Task 2.** Solange Datenklassen und die
+Logik, die sie nutzt, in derselben Aufgabe stecken, hängt alles an allem — sind sie
+vorgezogen, berühren die drei Folgeaufgaben komplett getrennte Dateien.
+
+| Gruppe | Aufgaben | Ausführung |
 |---|---|---|
-| A | Task 1 | — |
-| B | Task 2, Task 3 | Task 1 |
-| C | Task 4, Task 5 | Task 2, Task 3 |
-| D | Task 6, Task 7 | Task 4, Task 5 |
-| E | Task 8 | alle |
+| A | Task 1 — Modul und CRD-Generierung | sequenziell (Fundament) |
+| B | Task 2 — vollständiges Datenmodell | sequenziell (alle bauen darauf) |
+| C | Task 3, Task 4, Task 5 | **parallel**, je eigener Worktree |
+| D | Task 6 — Render-Reconciler | sequenziell (braucht Task 5) |
+| E | Task 7 — Einstiegspunkt | sequenziell (verdrahtet alle Reconciler) |
+| F | Task 8 — Integrationstest | sequenziell |
+
+**Warum Task 6 und 7 nicht mitlaufen:** Task 6 baut auf der Signatur von
+`RenderJobBuilder` aus Task 5 auf, Task 7 verdrahtet alle Reconciler. Parallel gebaut
+müssten beide gegen Schnittstellen programmieren, die sich noch ändern — die Nacharbeit
+fräße den Zeitgewinn wieder auf.
+
+**Dateien der parallelen Gruppe C** (nachweislich disjunkt):
+- Task 3: `tenant/TenantReconciler.java` + zugehöriger Test
+- Task 4: `map/BucketProvisioner.java`, `map/BlueMapConfigBuilder.java` + Tests
+- Task 5: `render/RenderJobBuilder.java` + Test
+
+Keine der drei Aufgaben ändert eine Datei einer anderen oder die Build-Dateien.
 
 ---
 
@@ -458,7 +476,14 @@ git commit -m "build(operator): add operator module with crd generation"
 
 ---
 
-### Task 2: Rook-Ressourcen modellieren
+### Task 2: Vollständiges Datenmodell
+
+Diese Aufgabe legt **alle** Datenklassen an, die die parallele Gruppe C braucht — Rook-Modelle,
+die beiden verbleibenden Custom Resources, die gemeinsamen Hilfsklassen und die
+Betriebskonfiguration. Danach berühren Task 3, 4 und 5 keine gemeinsame Datei mehr.
+
+Alle Klassen hier sind reine Datenhalter ohne Kubernetes-Zugriff und ohne Logik. Sie sind
+zugleich die Schnittstelle, die Phase 5 (API und UI) später wiederverwendet.
 
 **Files:**
 - Create: `operator/src/main/java/net/onelitefeather/apus/operator/rook/ObjectBucketClaim.java`
@@ -467,10 +492,18 @@ git commit -m "build(operator): add operator module with crd generation"
 - Create: `operator/src/main/java/net/onelitefeather/apus/operator/rook/CephObjectStoreUser.java`
 - Create: `operator/src/main/java/net/onelitefeather/apus/operator/rook/CephObjectStoreUserSpec.java`
 - Create: `operator/src/main/java/net/onelitefeather/apus/operator/rook/CephObjectStoreUserStatus.java`
+- Create: `operator/src/main/java/net/onelitefeather/apus/operator/api/Ref.java`
+- Create: `operator/src/main/java/net/onelitefeather/apus/operator/api/Conditions.java`
+- Create: `operator/src/main/java/net/onelitefeather/apus/operator/api/BlueMapMap.java`, `BlueMapMapSpec.java`, `BlueMapMapStatus.java`
+- Create: `operator/src/main/java/net/onelitefeather/apus/operator/api/BlueMapRender.java`, `BlueMapRenderSpec.java`, `BlueMapRenderStatus.java`
+- Create: `operator/src/main/java/net/onelitefeather/apus/operator/OperatorConfig.java`
 - Test: `operator/src/test/java/net/onelitefeather/apus/operator/rook/RookResourceSerialisationTest.java`
+- Test: `operator/src/test/java/net/onelitefeather/apus/operator/api/ApusResourceTest.java`
+- Test: `operator/src/test/java/net/onelitefeather/apus/operator/OperatorConfigTest.java`
+- Modify: `operator/src/test/java/net/onelitefeather/apus/operator/CrdGenerationTest.java` (Zusicherungen für die beiden neuen CRDs)
 
 **Interfaces:**
-- Consumes: nichts aus anderen Aufgaben
+- Consumes: `Tenant` und die CRD-Generierung aus Task 1
 - Produces:
 ```java
 // Beide sind namespaced.
@@ -482,7 +515,62 @@ CephObjectStoreUser: spec.store, spec.displayName,
                      status.phase
 ```
 
-Diese Klassen dürfen **nicht** in die CRD-Generierung geraten — sie modellieren fremde CRDs, die Rook mitbringt.
+Die Rook-Klassen dürfen **nicht** in die CRD-Generierung geraten — sie modellieren fremde CRDs, die Rook mitbringt. Der Generator scannt nach `@Group`, also müssen sie über den Ausschluss in `CrdGeneratorMain` bzw. eine Paketbeschränkung draußen bleiben. Task 1 hat dafür bereits eine Zusicherung (`generatesNoForeignCrds`) — sie muss grün bleiben.
+
+Zusätzlich entstehen hier:
+
+```java
+// api/Ref.java — bewusst OHNE namespace-Feld.
+// §10.1 der Spec verbietet Referenzen über Namespace-Grenzen; was es nicht gibt,
+// kann auch nicht falsch gesetzt werden.
+public class Ref { String name; }
+
+// api/Conditions.java
+public static Condition ready(boolean ready, String reason, String message);
+public static void set(List<Condition> conditions, Condition condition);  // ersetzt gleichnamige
+
+// api/BlueMapMap — namespaced, @Kind("BlueMapMap"), @Plural("bluemapmaps"), @ShortNames("bmmap")
+// BlueMapMapSpec — alle Gruppen im Feld initialisiert, damit nie auf null geprüft werden muss:
+Source source = new Source();                     // Ref sourceRef; String world; String dimension
+Trigger trigger = new Trigger();                  // boolean onNewBundle; String schedule;
+                                                  // String concurrencyPolicy = "Forbid"
+BlueMapSettings bluemap = new BlueMapSettings();  // String version; String minecraftVersion;
+                                                  // Map<String,String> configOverrides
+Storage storage = new Storage();                  // String bucketClaim = "auto"; String prefix
+Resources resources = new Resources();            // String cpu; String memory
+int shards = 1;                                   // > 1 erst ab Phase 4
+int historyLimit = 10;
+boolean purgeOnDelete = false;                    // §9.4: Löschen vernichtet keine Renderarbeit
+// BlueMapMapStatus:
+Bucket bucket = new Bucket();                     // String name; String endpoint; String secretName
+LatestRender latestRender = new LatestRender();   // String name; String phase
+List<Condition> conditions = new ArrayList<>();
+
+// api/BlueMapRender — namespaced, @Kind("BlueMapRender"), @Plural("bluemaprenders"), @ShortNames("bmrender")
+// BlueMapRenderSpec:
+Ref mapRef = new Ref(); String bundleUrl; String bundleVersion; boolean force = false;
+// BlueMapRenderStatus:
+String phase;                                     // Pending|Syncing|Rendering|Finalizing|Succeeded|Failed
+Progress progress = new Progress();               // double percent; String currentMap;
+                                                  // long etaSeconds; boolean degraded
+String jobName; String startTime; String completionTime;
+List<Condition> conditions = new ArrayList<>();
+
+// OperatorConfig — site-specific settings the operator cannot derive
+public record OperatorConfig(String rookNamespace, String cephObjectStore,
+                             String bucketStorageClass, String runnerImage) {
+    public static OperatorConfig defaults();                             // feather-core-Werte
+    public static OperatorConfig fromEnvironment(Function<String,String> env);
+}
+```
+
+Umgebungsvariablen für `fromEnvironment`: `APUS_ROOK_NAMESPACE`, `APUS_CEPH_OBJECT_STORE`,
+`APUS_BUCKET_STORAGE_CLASS`, `APUS_RUNNER_IMAGE`. Defaults: `rook-ceph-fr01`, `feather-s3`,
+`ceph-bucket-fr01`, `apus/runner:dev`.
+
+Warum `OperatorConfig` hierher gehört und nicht in einen Reconciler: Alle drei Aufgaben der
+parallelen Gruppe brauchen es. Läge es in einer davon, würden drei Agenten es gleichzeitig
+und unterschiedlich anlegen.
 
 - [ ] **Step 1: Den fehlschlagenden Test schreiben**
 
@@ -812,35 +900,96 @@ Expected: Nur CRDs der Gruppe `bluemap.onelitefeather.net`. Erscheinen dort `obj
     }
 ```
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 7: Die beiden verbleibenden Custom Resources anlegen**
+
+`Ref`, `Conditions`, `BlueMapMap` (+Spec, +Status) und `BlueMapRender` (+Spec, +Status) nach
+der oben festgelegten Feldstruktur. Beide Ressourcen sind **namespaced**, tragen also
+`implements Namespaced` — anders als `Tenant`.
+
+Schreibe dazu `api/ApusResourceTest.java` mit diesen Zusicherungen:
+
+```java
+    @Test
+    void bothResourcesAreNamespaced() {
+        // Only Tenant is cluster-scoped: it hands out a namespace and a quota.
+        // Maps and renders belong to exactly one tenant and must never escape it.
+        assertTrue(io.fabric8.kubernetes.api.model.Namespaced.class.isAssignableFrom(BlueMapMap.class));
+        assertTrue(io.fabric8.kubernetes.api.model.Namespaced.class.isAssignableFrom(BlueMapRender.class));
+    }
+
+    @Test
+    void referencesCarryNoNamespace() throws Exception {
+        // §10.1: a resource may only reference things in its own namespace.
+        // A namespace field on Ref would invite exactly the cross-tenant reference
+        // the design forbids.
+        for (java.lang.reflect.Field field : Ref.class.getDeclaredFields()) {
+            assertNotEquals("namespace", field.getName(),
+                    "Ref must not carry a namespace — see spec §10.1");
+        }
+    }
+
+    @Test
+    void specGroupsAreInitialisedSoReconcilersNeverSeeNull() {
+        BlueMapMap map = new BlueMapMap();
+        assertNotNull(map.getSpec().getSource());
+        assertNotNull(map.getSpec().getTrigger());
+        assertNotNull(map.getSpec().getStorage());
+        assertNotNull(map.getStatus().getBucket());
+    }
+
+    @Test
+    void concurrencyPolicyDefaultsToForbid() {
+        // Two renders writing the same map storage can leave the map inconsistent (§7.3).
+        assertEquals("Forbid", new BlueMapMap().getSpec().getTrigger().getConcurrencyPolicy());
+    }
+```
+
+- [ ] **Step 8: `OperatorConfig` anlegen**
+
+Nach der oben festgelegten Signatur, mit `OperatorConfigTest`, der Defaults und
+Umgebungsauswertung prüft.
+
+- [ ] **Step 9: Die CRD-Zusicherungen erweitern**
+
+`CrdGenerationTest` prüft bislang nur `Tenant`. Ergänze — mit derselben strukturierten
+Lademethode, die Task 1 eingeführt hat — je einen Test, dass `bluemapmaps` und
+`bluemaprenders` erzeugt werden und **`scope: Namespaced`** tragen. Genau diese Zusicherung
+macht den früheren Textvergleich-Test wertlos gewesen und ist der Grund, warum er
+umgestellt wurde.
+
+Run: `./gradlew :operator:clean :operator:test`
+Expected: PASS, und `operator/build/crds/` enthält jetzt drei CRDs.
+
+- [ ] **Step 10: Commit**
 
 ```bash
 ./gradlew spotlessApply
 git add -A
-git commit -m "feat(operator): model the rook resources apus provisions"
+git commit -m "feat(operator): add the full apus and rook data model"
 ```
 
 ---
 
-### Task 3: Tenant-Reconciler
+### Task 3: Tenant-Reconciler *(parallel mit Task 4 und 5)*
+
+> Diese Aufgabe läuft gleichzeitig mit Task 4 und Task 5 in einem eigenen Worktree.
+> Sie legt **ausschließlich** die unten genannten Dateien an. Alle Datenklassen,
+> `Conditions` und `OperatorConfig` stammen aus Task 2 und werden unverändert benutzt —
+> lege sie nicht erneut an und ändere sie nicht.
 
 **Files:**
 - Create: `operator/src/main/java/net/onelitefeather/apus/operator/tenant/TenantReconciler.java`
-- Create: `operator/src/main/java/net/onelitefeather/apus/operator/api/Conditions.java`
 - Test: `operator/src/test/java/net/onelitefeather/apus/operator/tenant/TenantReconcilerTest.java`
 
 **Interfaces:**
-- Consumes: `Tenant`, `TenantSpec`, `TenantStatus` (Task 1); `CephObjectStoreUser` (Task 2)
+- Consumes (alle aus Task 2 bzw. 1, unverändert zu benutzen): `Tenant`, `TenantSpec`, `TenantStatus`, `CephObjectStoreUser`, `Conditions.ready(...)`, `Conditions.set(...)`, `OperatorConfig.defaults()`
 - Produces:
 ```java
-public final class Conditions {
-    public static Condition ready(boolean ready, String reason, String message);
-    public static void set(List<Condition> conditions, Condition condition);  // ersetzt gleichnamige
-}
-
 @ControllerConfiguration
 public class TenantReconciler implements Reconciler<Tenant> {
     public TenantReconciler(KubernetesClient client, OperatorConfig config);
+    public static String namespaceFor(Tenant tenant);   // "bluemap-<name>"
+    public static String cephUserFor(Tenant tenant);    // "apus-<name>"
 }
 ```
 Der Reconciler erzeugt aus einem `Tenant`: Namespace `bluemap-<name>`, `ResourceQuota`, `LimitRange` und einen `CephObjectStoreUser` mit der Quota.
@@ -948,7 +1097,10 @@ class TenantReconcilerTest {
 Run: `./gradlew :operator:test --tests '*TenantReconcilerTest*'`
 Expected: FAIL, „cannot find symbol: class TenantReconciler"
 
-- [ ] **Step 3: `OperatorConfig` und `Conditions` implementieren**
+- [ ] **Step 3: (entfällt — `OperatorConfig` und `Conditions` stammen aus Task 2)**
+
+Die folgenden Codeblöcke stehen nur noch als Referenz hier, damit du weißt, womit du
+arbeitest. Lege sie **nicht** erneut an.
 
 `api/Conditions.java`:
 
@@ -1134,10 +1286,14 @@ git commit -m "feat(operator): reconcile tenants into namespaces with quotas"
 
 ---
 
-### Task 4: BlueMapMap — Bucket und Konfiguration
+### Task 4: BlueMapMap — Bucket und Konfiguration *(parallel mit Task 3 und 5)*
+
+> Diese Aufgabe läuft gleichzeitig mit Task 3 und Task 5 in einem eigenen Worktree.
+> `BlueMapMap`, `BlueMapMapSpec`, `BlueMapMapStatus`, `ObjectBucketClaim` und
+> `OperatorConfig` stammen aus Task 2 — benutze sie unverändert, lege sie nicht erneut an.
+> Berühre keine Datei aus Task 3 (`tenant/`) oder Task 5 (`render/`).
 
 **Files:**
-- Create: `operator/src/main/java/net/onelitefeather/apus/operator/api/BlueMapMap.java`, `BlueMapMapSpec.java`, `BlueMapMapStatus.java`
 - Create: `operator/src/main/java/net/onelitefeather/apus/operator/map/BucketProvisioner.java`
 - Create: `operator/src/main/java/net/onelitefeather/apus/operator/map/BlueMapConfigBuilder.java`
 - Test: `operator/src/test/java/net/onelitefeather/apus/operator/map/BlueMapConfigBuilderTest.java`
@@ -1454,15 +1610,20 @@ git commit -m "feat(operator): provision map buckets through rook and build blue
 
 ---
 
-### Task 5: BlueMapRender — Job-Erzeugung
+### Task 5: BlueMapRender — Job-Erzeugung *(parallel mit Task 3 und 4)*
+
+> Diese Aufgabe läuft gleichzeitig mit Task 3 und Task 4 in einem eigenen Worktree.
+> `BlueMapRender`, `BlueMapMap` und `OperatorConfig` stammen aus Task 2 — benutze sie
+> unverändert. Berühre keine Datei aus Task 3 (`tenant/`) oder Task 4 (`map/`).
+> Insbesondere: `BlueMapMapStatus.getBucket()` ist bereits vorhanden und wird von Task 4
+> befüllt; für deinen Test setzt du die Werte selbst.
 
 **Files:**
-- Create: `operator/src/main/java/net/onelitefeather/apus/operator/api/BlueMapRender.java`, `BlueMapRenderSpec.java`, `BlueMapRenderStatus.java`
 - Create: `operator/src/main/java/net/onelitefeather/apus/operator/render/RenderJobBuilder.java`
 - Test: `operator/src/test/java/net/onelitefeather/apus/operator/render/RenderJobBuilderTest.java`
 
 **Interfaces:**
-- Consumes: `BlueMapMap` (Task 4), `OperatorConfig` (Task 3)
+- Consumes (alle aus Task 2, unverändert): `BlueMapMap`, `BlueMapRender`, `OperatorConfig`
 - Produces:
 ```java
 public final class RenderJobBuilder {
