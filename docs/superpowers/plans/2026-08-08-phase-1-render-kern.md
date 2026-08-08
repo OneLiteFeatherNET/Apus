@@ -1512,6 +1512,15 @@ Expected: FAIL, „cannot find symbol: class TelemetryServer"
 
 - [ ] **Step 7: `TelemetryServer` implementieren**
 
+**Nachgeführt auf den ausgelieferten Stand:** `HttpServer.createContext` matcht Pfade als
+Präfix, nicht exakt — ein Context für `/progress` würde ohne Weiteres auch
+`/progressX` oder `/progress/nested` bedienen. Das wurde während der Umsetzung entdeckt
+und behoben: Jeder Handler unten ist ausgeliefert in ein `exactPath(...)`-Wrapper gehüllt,
+das bei fehlendem exaktem Match 404 liefert, statt sich auf `createContext`s
+Präfix-Matching zu verlassen. Die Skizze unten zeigt bewusst noch die ursprüngliche,
+naive Fassung ohne `exactPath()` — den tatsächlich ausgelieferten Code siehe
+`telemetry-addon/src/main/java/net/onelitefeather/apus/telemetry/TelemetryServer.java`.
+
 ```java
 package net.onelitefeather.apus.telemetry;
 
@@ -1952,12 +1961,19 @@ echo "[apus] synced ${REGION_COUNT} region files"
 
 - [ ] **Step 4: `runner/entrypoint.sh` schreiben**
 
+**Nachgeführt auf den ausgelieferten Stand (Task 6/8):** `APUS_MC_VERSION` ist Pflicht,
+nicht optional — konsistent mit der Vertragstabelle oben, die es schon immer als `ja`
+führte. Der ursprünglich hier skizzierte `if [ -n ... ]`-Fallback ließ das BlueMap-CLI
+ohne `-v` starten, was BlueMap zwingt, die Minecraft-Version selbst zu raten; das wird
+nirgends unterstützt und wurde vor der Auslieferung korrigiert.
+
 ```bash
 #!/usr/bin/env bash
 set -euo pipefail
 
 : "${APUS_MAP_ID:?APUS_MAP_ID is required}"
 : "${APUS_DIMENSION:?APUS_DIMENSION is required}"
+: "${APUS_MC_VERSION:?APUS_MC_VERSION is required}"
 : "${APUS_WORLD_S3_URL:?APUS_WORLD_S3_URL is required}"
 : "${APUS_MAP_BUCKET:?APUS_MAP_BUCKET is required}"
 : "${APUS_S3_ENDPOINT:?APUS_S3_ENDPOINT is required}"
@@ -1970,14 +1986,10 @@ WORLD_DIR=/work/world
 /opt/apus/bin/bundle-sync.sh "${WORLD_DIR}"
 /opt/apus/bin/render-config.sh "${CONFIG_DIR}"
 
-ARGS=(-c "${CONFIG_DIR}" -r -m "${APUS_MAP_ID}")
+ARGS=(-c "${CONFIG_DIR}" -r -m "${APUS_MAP_ID}" -v "${APUS_MC_VERSION}")
 
 if [ "${APUS_FORCE_RENDER:-false}" = "true" ]; then
   ARGS+=(-f)
-fi
-
-if [ -n "${APUS_MC_VERSION:-}" ]; then
-  ARGS+=(-v "${APUS_MC_VERSION}")
 fi
 
 echo "[apus] starting BlueMap: ${ARGS[*]}"
@@ -1987,6 +1999,11 @@ exec java -jar /opt/bluemap/cli.jar "${ARGS[@]}"
 `exec` ist wichtig: BlueMap wird damit PID 1 und empfängt `SIGTERM` direkt, wenn Kubernetes den Pod beendet.
 
 - [ ] **Step 5: `runner/README.md` schreiben**
+
+**Nachgeführt auf den ausgelieferten Stand:** `releases/latest/download/BlueMapS3Storage.jar`
+liefert 404 — das Release-Asset ist versioniert (z.B. `BlueMapS3Storage-1.5.1.jar`). Die
+untenstehende URL ist daher bereits auf die versionierte Form korrigiert; die
+authoritative, jeweils aktuelle Fassung steht in `runner/README.md` selbst.
 
 ````markdown
 # Apus Runner Image
@@ -1999,7 +2016,7 @@ Renders a Minecraft world from S3 with BlueMap and writes the result back to S3.
 ./gradlew :telemetry-addon:shadowJar
 mkdir -p runner/vendor
 curl -fsSL -o runner/vendor/BlueMapS3Storage.jar \
-  https://github.com/TheMeinerLP/BlueMapS3Storage/releases/latest/download/BlueMapS3Storage.jar
+  https://github.com/TheMeinerLP/BlueMapS3Storage/releases/download/v1.5.1/BlueMapS3Storage-1.5.1.jar
 docker build -f runner/Dockerfile -t apus/runner:dev .
 ```
 
@@ -2037,7 +2054,7 @@ cd /mnt/projects/oss/onelitefeather/Apus
 ./gradlew :telemetry-addon:shadowJar
 mkdir -p runner/vendor
 curl -fsSL -o runner/vendor/BlueMapS3Storage.jar \
-  https://github.com/TheMeinerLP/BlueMapS3Storage/releases/latest/download/BlueMapS3Storage.jar
+  https://github.com/TheMeinerLP/BlueMapS3Storage/releases/download/v1.5.1/BlueMapS3Storage-1.5.1.jar
 docker build -f runner/Dockerfile -t apus/runner:dev .
 ```
 
@@ -2494,6 +2511,21 @@ Ergibt sich daraus ein anderer Weg (etwa ein zugänglicher `BlueMapService` oder
 
 Führt kein Weg über die API zum internen RenderManager, ist Reflection auf das private Feld `renderManager` in `RenderManagerImpl` der dokumentierte Rückfallweg (Feldname aus der Recherche in den Global Constraints). Auch das gehört ausschließlich in `BlueMapRenderManagerAccess`.
 
+**Nachgeführt auf den ausgelieferten Stand:** Der oben skizzierte Reflection-Rückfallweg
+wurde **nicht** umgesetzt. Die Diagnose in Step 3 bestätigte, dass `impl.plugin()` im
+CLI-Betrieb strukturell immer `null` liefert und BlueMap dafür auch keine
+`RenderManagerImpl`-Instanz baut — es gibt in diesem Modus kein Feld, auf das Reflection
+zugreifen könnte; der Rückfallweg liefe ins Leere. Stattdessen wurde
+`LogTailRenderManagerAccess` eingeführt: Es registriert sich auf BlueMaps eigenem
+`Logger.global` und parst die Fortschrittszeile, die die CLI ohnehin selbst loggt — ein
+dokumentierter Erweiterungspunkt, keine Reflection. Damit besteht der BlueMap-Zugriff
+entgegen der ursprünglichen Annahme aus **zwei** Implementierungen derselben
+`RenderManagerAccess`-Schnittstelle (`BlueMapRenderManagerAccess` für den — im CLI-Betrieb
+toten — API-Weg, `LogTailRenderManagerAccess` für den tatsächlich tragenden Weg), zwischen
+denen `ApusTelemetryAddon` wählt. Details, der vollständige Dekompilierungsbefund und die
+verworfene `java.util.Timer`-Reflection-Alternative stehen in `runner/README.md#telemetry`
+und Spec §7.2.
+
 - [ ] **Step 4: Korrektur umsetzen, bis der Test besteht**
 
 ```bash
@@ -2533,7 +2565,7 @@ Nach Task 8 ist erreicht:
 
 - Ein Container-Image rendert eine Welt aus S3 nach S3, ohne Kubernetes.
 - Der Fortschritt ist während des Laufs als JSON und als Prometheus-Metriken abrufbar.
-- Der gesamte BlueMap-Zugriff liegt in einer Klasse, abgesichert durch einen Contract-Test.
+- Der gesamte BlueMap-Zugriff liegt hinter der `RenderManagerAccess`-Schnittstelle, umgesetzt in zwei Klassen (`BlueMapRenderManagerAccess` für den API-Weg, `LogTailRenderManagerAccess` für den im CLI-Betrieb tatsächlich tragenden Log-Tail-Weg) — abgesichert durch einen Contract-Test, der den Log-Tail-Weg abdeckt.
 - Serialisierung, Fehlerbehandlung und Konfiguration sind ohne laufende BlueMap-Instanz getestet.
 
 **Nicht Teil von Phase 1** (folgt in eigenen Plänen): Operator und CRDs, Ingest/ETL, Hosting, Asset-Cache für die Minecraft-Client-JAR, Region-Sharding.
