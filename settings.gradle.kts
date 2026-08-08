@@ -35,6 +35,9 @@ dependencyResolutionManagement {
             library("crd.generator.api.v2", "io.fabric8", "crd-generator-api-v2").versionRef("fabric8")
             library("crd.generator.collector", "io.fabric8", "crd-generator-collector").versionRef("fabric8")
             library("fabric8.junit", "io.fabric8", "kubernetes-junit-jupiter").versionRef("fabric8")
+            // @EnableKubernetesMockClient lives here, NOT in kubernetes-junit-jupiter
+            // (that one targets tests against a real cluster and ships no mock classes).
+            library("fabric8.server.mock", "io.fabric8", "kubernetes-server-mock").versionRef("fabric8")
 
             plugin("spotless", "com.diffplug.spotless").versionRef("spotless")
             plugin("shadow", "com.gradleup.shadow").versionRef("shadow")

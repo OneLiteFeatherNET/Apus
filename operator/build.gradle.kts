@@ -9,6 +9,7 @@ dependencies {
     testImplementation(libs.junit.jupiter)
     testRuntimeOnly(libs.junit.platform.launcher)
     testImplementation(libs.fabric8.junit)
+    testImplementation(libs.fabric8.server.mock)
 }
 
 // Dedicated source set for the CRD generator entry point (CrdGeneratorMain). The fabric8
