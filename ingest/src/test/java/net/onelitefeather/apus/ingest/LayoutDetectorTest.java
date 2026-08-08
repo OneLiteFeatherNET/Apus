@@ -26,6 +26,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import net.onelitefeather.apus.ingest.LayoutDetector.LayoutDetectionException;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -119,6 +120,52 @@ class LayoutDetectorTest {
 
         assertThrows(
                 LayoutDetectionException.class, () -> LayoutDetector.detect(root, "world", "bukkit"));
+    }
+
+    @Test
+    void worldNameContainingDotDotSegmentsFailsInsteadOfEscapingRoot(@TempDir Path root) {
+        LayoutDetectionException exception = assertThrows(
+                LayoutDetectionException.class, () -> LayoutDetector.detect(root, "../../etc", null));
+
+        assertTrue(exception.getMessage().contains("path separators"), exception.getMessage());
+    }
+
+    @Test
+    void symlinkEscapingTheWorkingDirectoryIsNotReturnedAsADimensionPath(@TempDir Path root, @TempDir Path outside)
+            throws IOException {
+        createRegionDir(root.resolve("world"));
+        Path secretRegion = outside.resolve("secret").resolve("region");
+        Files.createDirectories(secretRegion);
+        Path netherLink = root.resolve("world").resolve("DIM-1");
+        try {
+            Files.createSymbolicLink(netherLink, outside.resolve("secret"));
+        } catch (IOException | UnsupportedOperationException e) {
+            Assumptions.abort("Symbolic links are not supported on this filesystem: " + e.getMessage());
+            return;
+        }
+
+        WorldLayout layout = LayoutDetector.detect(root, "world", null);
+
+        assertEquals("vanilla", layout.kind());
+        assertEquals(
+                root.resolve("world").resolve("region"),
+                layout.dimensions().get("overworld"));
+        assertFalse(
+                layout.dimensions().containsKey("the_nether"),
+                "a dimension reached only through a symlink escaping the root must not be reported");
+    }
+
+    @Test
+    void symlinkInPlaceOfARegionDirectoryIsRejected(@TempDir Path root, @TempDir Path outside) throws IOException {
+        Files.createDirectories(root.resolve("world"));
+        try {
+            Files.createSymbolicLink(root.resolve("world").resolve("region"), outside);
+        } catch (IOException | UnsupportedOperationException e) {
+            Assumptions.abort("Symbolic links are not supported on this filesystem: " + e.getMessage());
+            return;
+        }
+
+        assertThrows(LayoutDetectionException.class, () -> LayoutDetector.detect(root, "world", null));
     }
 
     private static void createRegionDir(Path dimensionDir) throws IOException {

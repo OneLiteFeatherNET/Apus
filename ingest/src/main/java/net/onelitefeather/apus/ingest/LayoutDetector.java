@@ -20,6 +20,7 @@ package net.onelitefeather.apus.ingest;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -39,6 +40,16 @@ import java.util.stream.Stream;
  * thing in one extra top-level directory. This class tells those apart so downstream rendering
  * always points at the correct region files instead of guessing -- if no known layout can be
  * recognized, detection fails loudly rather than picking a plausible-looking wrong answer.
+ *
+ * <p><b>This class operates on untrusted directory trees.</b> Its input is not first-party data:
+ * it is extracted Pterodactyl server backups and user-uploaded ZIP archives, both of which are
+ * fully attacker-controlled. A crafted archive may name a world {@code ../../etc}, or contain a
+ * symlink such as {@code world/region -> /etc} that a naive walk would happily report as a valid
+ * dimension path. Whatever this class returns is later read by the bundle writer and uploaded to
+ * S3, so every returned path is verified -- via real-path resolution -- to stay inside the given
+ * root, and every directory is checked with {@link LinkOption#NOFOLLOW_LINKS} so symlinks are
+ * never silently followed. Do not remove these checks to "simplify" traversal; they are the only
+ * thing standing between a hostile archive and reading/writing arbitrary files on the host.
  */
 public final class LayoutDetector {
 
@@ -68,25 +79,58 @@ public final class LayoutDetector {
      *     {@code "bukkit"}) is accepted; any other structure fails detection instead of falling
      *     back to a different kind
      * @return the recognized layout with its dimensions resolved to region directories
-     * @throws LayoutDetectionException if no known layout can be recognized
+     * @throws LayoutDetectionException if no known layout can be recognized, if {@code worldName}
+     *     is not a single safe path segment, or if resolving a candidate path would escape
+     *     {@code root} (whether via a {@code ..} segment or via a symlink)
      */
     public static WorldLayout detect(Path root, String worldName, String forcedLayout) {
-        return detect(root, root, worldName, forcedLayout);
+        validateWorldName(worldName);
+        Path realRoot = toRealPathOrFail(root);
+        return detect(root, root, realRoot, worldName, forcedLayout);
+    }
+
+    /**
+     * Rejects world names that are not a single, literal path segment.
+     *
+     * <p>The world name comes from a tenant-supplied custom resource and is used verbatim to
+     * build filesystem paths. Without this check a name such as {@code ../../etc} would let a
+     * tenant walk the resolved path straight out of the extracted archive root.
+     */
+    private static void validateWorldName(String worldName) {
+        if (worldName == null || worldName.isEmpty()) {
+            throw new LayoutDetectionException("World name must not be null or empty.");
+        }
+        if (worldName.contains("/") || worldName.contains("\\")) {
+            throw new LayoutDetectionException(
+                    "World name '" + worldName + "' must not contain path separators.");
+        }
+        if (worldName.equals(".") || worldName.equals("..")) {
+            throw new LayoutDetectionException(
+                    "World name '" + worldName + "' must not be a relative path segment.");
+        }
+    }
+
+    private static Path toRealPathOrFail(Path path) {
+        try {
+            return path.toRealPath();
+        } catch (IOException e) {
+            throw new LayoutDetectionException("Could not resolve real path of '" + path + "': " + e.getMessage());
+        }
     }
 
     private static WorldLayout detect(
-            Path searchRoot, Path originalRoot, String worldName, String forcedLayout) {
-        Optional<WorldLayout> vanilla = detectVanilla(searchRoot, worldName);
-        Optional<WorldLayout> bukkit = detectBukkit(searchRoot, worldName);
+            Path searchRoot, Path originalRoot, Path realRoot, String worldName, String forcedLayout) {
+        Optional<WorldLayout> vanilla = detectVanilla(realRoot, searchRoot, worldName);
+        Optional<WorldLayout> bukkit = detectBukkit(realRoot, searchRoot, worldName);
 
         Optional<WorldLayout> match = select(vanilla, bukkit, forcedLayout);
         if (match.isPresent()) {
             return match.get();
         }
 
-        Optional<Path> nestedChild = singleSubdirectory(searchRoot);
+        Optional<Path> nestedChild = singleSubdirectory(realRoot, searchRoot);
         if (nestedChild.isPresent()) {
-            return detect(nestedChild.get(), originalRoot, worldName, forcedLayout);
+            return detect(nestedChild.get(), originalRoot, realRoot, worldName, forcedLayout);
         }
 
         throw new LayoutDetectionException(failureMessage(originalRoot, searchRoot, worldName, forcedLayout));
@@ -110,30 +154,30 @@ public final class LayoutDetector {
         return vanilla.isPresent() ? vanilla : bukkit;
     }
 
-    private static Optional<WorldLayout> detectVanilla(Path searchRoot, String worldName) {
+    private static Optional<WorldLayout> detectVanilla(Path realRoot, Path searchRoot, String worldName) {
         Path worldDir = searchRoot.resolve(worldName);
         Path overworld = worldDir.resolve(REGION_DIR);
-        if (!isRegionDir(overworld)) {
+        if (!isRegionDir(realRoot, overworld)) {
             return Optional.empty();
         }
         Map<String, Path> dimensions = new LinkedHashMap<>();
         dimensions.put(DIM_OVERWORLD, overworld);
-        putIfRegionDir(dimensions, DIM_THE_NETHER, worldDir.resolve(NETHER_SUBDIR).resolve(REGION_DIR));
-        putIfRegionDir(dimensions, DIM_THE_END, worldDir.resolve(END_SUBDIR).resolve(REGION_DIR));
+        putIfRegionDir(realRoot, dimensions, DIM_THE_NETHER, worldDir.resolve(NETHER_SUBDIR).resolve(REGION_DIR));
+        putIfRegionDir(realRoot, dimensions, DIM_THE_END, worldDir.resolve(END_SUBDIR).resolve(REGION_DIR));
         return Optional.of(new WorldLayout(KIND_VANILLA, dimensions));
     }
 
-    private static Optional<WorldLayout> detectBukkit(Path searchRoot, String worldName) {
+    private static Optional<WorldLayout> detectBukkit(Path realRoot, Path searchRoot, String worldName) {
         Path overworld = searchRoot.resolve(worldName).resolve(REGION_DIR);
-        if (!isRegionDir(overworld)) {
+        if (!isRegionDir(realRoot, overworld)) {
             return Optional.empty();
         }
         Path netherRegion =
                 searchRoot.resolve(worldName + "_nether").resolve(NETHER_SUBDIR).resolve(REGION_DIR);
         Path endRegion =
                 searchRoot.resolve(worldName + "_the_end").resolve(END_SUBDIR).resolve(REGION_DIR);
-        boolean netherPresent = isRegionDir(netherRegion);
-        boolean endPresent = isRegionDir(endRegion);
+        boolean netherPresent = isRegionDir(realRoot, netherRegion);
+        boolean endPresent = isRegionDir(realRoot, endRegion);
         if (!netherPresent && !endPresent) {
             // Nothing here distinguishes this from a vanilla layout; do not claim it as bukkit.
             return Optional.empty();
@@ -149,22 +193,46 @@ public final class LayoutDetector {
         return Optional.of(new WorldLayout(KIND_BUKKIT, dimensions));
     }
 
-    private static void putIfRegionDir(Map<String, Path> dimensions, String key, Path candidate) {
-        if (isRegionDir(candidate)) {
+    private static void putIfRegionDir(Path realRoot, Map<String, Path> dimensions, String key, Path candidate) {
+        if (isRegionDir(realRoot, candidate)) {
             dimensions.put(key, candidate);
         }
     }
 
-    private static boolean isRegionDir(Path path) {
-        return Files.isDirectory(path);
+    /**
+     * Returns whether {@code path} is a real, non-symlink directory that resolves to somewhere
+     * inside {@code realRoot}.
+     *
+     * <p>Two independent checks guard against a hostile archive: {@link LinkOption#NOFOLLOW_LINKS}
+     * rejects {@code path} outright if it is itself a symlink (even one that would resolve back
+     * inside the tree -- convenience does not justify the risk), and the real-path containment
+     * check catches an escape introduced by a symlink higher up the chain, e.g. a world folder
+     * itself being a symlink to {@code /etc}.
+     */
+    private static boolean isRegionDir(Path realRoot, Path path) {
+        if (!Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)) {
+            return false;
+        }
+        return isWithinRoot(realRoot, path);
     }
 
-    private static Optional<Path> singleSubdirectory(Path dir) {
-        if (!Files.isDirectory(dir)) {
+    private static boolean isWithinRoot(Path realRoot, Path path) {
+        try {
+            return path.toRealPath().startsWith(realRoot);
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
+    private static Optional<Path> singleSubdirectory(Path realRoot, Path dir) {
+        if (!Files.isDirectory(dir, LinkOption.NOFOLLOW_LINKS)) {
             return Optional.empty();
         }
         try (Stream<Path> entries = Files.list(dir)) {
-            List<Path> subdirectories = entries.filter(Files::isDirectory).collect(Collectors.toList());
+            List<Path> subdirectories = entries
+                    .filter(p -> Files.isDirectory(p, LinkOption.NOFOLLOW_LINKS))
+                    .filter(p -> isWithinRoot(realRoot, p))
+                    .collect(Collectors.toList());
             return subdirectories.size() == 1 ? Optional.of(subdirectories.get(0)) : Optional.empty();
         } catch (IOException e) {
             throw new UncheckedIOException(e);
