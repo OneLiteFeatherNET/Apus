@@ -32,13 +32,16 @@ import io.javaoperatorsdk.operator.api.reconciler.UpdateControl;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import net.onelitefeather.apus.ingest.BundlePath;
 import net.onelitefeather.apus.operator.OperatorConfig;
 import net.onelitefeather.apus.operator.api.BlueMapRender;
 import net.onelitefeather.apus.operator.api.BundleRef;
 import net.onelitefeather.apus.operator.api.Conditions;
+import net.onelitefeather.apus.operator.api.Labels;
 import net.onelitefeather.apus.operator.api.WorldIngest;
 import net.onelitefeather.apus.operator.api.WorldSource;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
@@ -170,6 +173,9 @@ public class WorldIngestReconciler implements Reconciler<WorldIngest> {
         if (source == null) {
             return pending(ingest, SOURCE_NOT_FOUND_REASON, "source '" + sourceName + "' does not exist");
         }
+        if (!ownedBySameSource(ingest.getMetadata().getLabels(), source.getMetadata().getName(), source.getMetadata().getUid())) {
+            return conflict(ingest, "WorldSource", sourceName);
+        }
 
         Job existingJob = client.batch().v1().jobs().inNamespace(namespace).withName(ingestName).get();
         if (existingJob != null) {
@@ -240,9 +246,10 @@ public class WorldIngestReconciler implements Reconciler<WorldIngest> {
     private UpdateControl<WorldIngest> onJobSucceeded(
             WorldIngest ingest, WorldSource source, String namespace, IngestLogProgress progress) {
         String tenant = tenantNameForNamespace(namespace);
+        String sourceName = source.getMetadata().getName();
         String worldId = ingest.getSpec().getWorldName();
         String version = IngestJobBuilder.bundleVersion(ingest);
-        String bundlePath = tenant + "/" + worldId + "/" + version;
+        String bundlePath = BundlePath.of(tenant, sourceName, worldId, version);
         List<String> dimensions = progress == null ? List.of() : progress.dimensions();
 
         BundleRef sourceBundle = source.getStatus().getLatestBundle();
@@ -262,7 +269,7 @@ public class WorldIngestReconciler implements Reconciler<WorldIngest> {
             throw e;
         }
 
-        applyRetention(source, tenant, worldId, bundlePath);
+        applyRetention(source, tenant, sourceName, worldId, bundlePath);
 
         BundleRef ingestBundle = ingest.getStatus().getBundle();
         ingestBundle.setPath(bundlePath);
@@ -287,8 +294,18 @@ public class WorldIngestReconciler implements Reconciler<WorldIngest> {
      * failing the whole reconciliation -- the ingest itself already succeeded and its own bundle
      * is safe; a bucket temporarily unreachable for pruning is not a reason to leave the ingest
      * stuck retrying forever.
+     *
+     * <p><b>Never deletes any {@link WorldSource}'s {@code status.latestBundle}, not just this
+     * source's own.</b> Bundle listing/deletion is scoped to this source's own prefix ({@link
+     * BundlePath}, keyed by {@code sourceName}), so a different source's bundles are not even
+     * visible to this pass -- but that scoping is exactly the property a future change to the
+     * path scheme could accidentally weaken, and a stray/legacy object under this prefix is not
+     * inherently impossible either. Checking every source's recorded {@code latestBundle} here
+     * costs one cheap list call and closes that risk regardless of whether the scoping itself
+     * stays intact.
      */
-    private void applyRetention(WorldSource source, String tenant, String worldId, String justWrittenBundlePath) {
+    private void applyRetention(
+            WorldSource source, String tenant, String sourceName, String worldId, String justWrittenBundlePath) {
         int keepVersions = source.getSpec().getRetention().getKeepVersions();
         if (keepVersions <= 0) {
             keepVersions = DEFAULT_KEEP_VERSIONS;
@@ -298,20 +315,23 @@ public class WorldIngestReconciler implements Reconciler<WorldIngest> {
                     config.bundleS3Region(), config.bundleS3Endpoint(), source.getMetadata().getNamespace(),
                     config.bundleCredentialsSecretName()));
             List<BundleStore.BundleVersion> versions = new java.util.ArrayList<>(
-                    store.listVersions(tenant, worldId, config.bundleBucket()));
+                    store.listVersions(tenant, sourceName, worldId, config.bundleBucket()));
             versions.sort(java.util.Comparator.comparing(BundleStore.BundleVersion::lastModified).reversed());
 
             String namespace = source.getMetadata().getNamespace();
             for (int i = keepVersions; i < versions.size(); i++) {
                 String version = versions.get(i).version();
-                String versionPath = tenant + "/" + worldId + "/" + version;
+                String versionPath = BundlePath.of(tenant, sourceName, worldId, version);
                 if (versionPath.equals(justWrittenBundlePath)) {
                     continue; // never prune the version this very run just wrote
                 }
                 if (isReferencedByAnyRender(namespace, versionPath)) {
                     continue;
                 }
-                store.deleteVersion(tenant, worldId, version, config.bundleBucket());
+                if (isLatestBundleOfAnySource(namespace, versionPath)) {
+                    continue;
+                }
+                store.deleteVersion(tenant, sourceName, worldId, version, config.bundleBucket());
             }
         } catch (RuntimeException e) {
             // See method Javadoc: pruning failures must not block the ingest run itself.
@@ -319,9 +339,27 @@ public class WorldIngestReconciler implements Reconciler<WorldIngest> {
     }
 
     /**
+     * Whether {@code versionPath} is the recorded {@code status.latestBundle.path} of <em>any</em>
+     * {@link WorldSource} in {@code namespace} -- not just the one this retention pass is running
+     * for. See {@link #applyRetention}'s Javadoc for why this check exists alongside the
+     * source-scoped path prefix rather than relying on that scoping alone.
+     */
+    private boolean isLatestBundleOfAnySource(String namespace, String versionPath) {
+        List<WorldSource> sources =
+                client.resources(WorldSource.class).inNamespace(namespace).list().getItems();
+        for (WorldSource candidate : sources) {
+            String latestPath = candidate.getStatus().getLatestBundle().getPath();
+            if (versionPath.equals(latestPath)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
      * Whether any {@link BlueMapRender} in {@code namespace} references bundle version {@code
-     * versionPath} (the {@code <tenant>/<worldId>/<version>} root), regardless of that render's
-     * own phase. Deliberately not limited to "currently active" renders: a bundle a
+     * versionPath} (the {@code <tenant>/<sourceName>/<worldId>/<version>} root), regardless of
+     * that render's own phase. Deliberately not limited to "currently active" renders: a bundle a
      * <em>completed</em> render still names in its own spec is history worth keeping intact --
      * over-retaining a bundle costs storage, deleting one a render still names is unrecoverable
      * data loss (see the task brief's own framing of this exact risk).
@@ -347,8 +385,24 @@ public class WorldIngestReconciler implements Reconciler<WorldIngest> {
         return bundleUrl.contains("/" + versionPath + "/") || bundleUrl.endsWith("/" + versionPath);
     }
 
+    /**
+     * Mirrors the ingest pod's fine-grained progress into {@code status} -- <b>except</b> a
+     * terminal phase ({@code Succeeded}/{@code Failed}). {@code IngestMain} logs {@code
+     * phase=Succeeded} immediately before its process exits, which lands in the pod log strictly
+     * before the Kubernetes Job controller observes the pod's exit and updates {@code
+     * status.succeeded} -- a reconcile landing in that window would otherwise copy {@code
+     * Succeeded} out of the log here, and {@link #reconcile} treats any ingest already in a
+     * terminal phase as a permanent no-op on every future reconcile. That would skip {@link
+     * #onJobSucceeded} forever: the bundle the job wrote is never registered on {@code
+     * WorldSource.status.latestBundle} or {@code WorldIngest.status.bundle}, retention never
+     * runs, and nothing retries -- a fully-written bundle that is permanently invisible to the
+     * rest of the system. Terminality belongs exclusively to {@link #isJobSucceeded}/{@link
+     * #isJobFailed}, evaluated against the Job's own status one line above this method's only
+     * caller; this method only ever advances the phase to something non-terminal, and only ever
+     * updates progress numbers.
+     */
     private static void applyProgress(WorldIngest ingest, IngestLogProgress progress) {
-        if (progress.phase() != null) {
+        if (progress.phase() != null && !TERMINAL_PHASES.contains(progress.phase())) {
             ingest.getStatus().setPhase(progress.phase());
         }
         var status = ingest.getStatus().getProgress();
@@ -368,7 +422,7 @@ public class WorldIngestReconciler implements Reconciler<WorldIngest> {
                 .v1()
                 .jobs()
                 .inNamespace(namespace)
-                .withLabel(net.onelitefeather.apus.operator.api.Labels.SOURCE, sourceName)
+                .withLabel(Labels.SOURCE, sourceName)
                 .list()
                 .getItems();
         for (Job job : jobs) {
@@ -454,12 +508,24 @@ public class WorldIngestReconciler implements Reconciler<WorldIngest> {
         return (status.getSucceeded() != null && status.getSucceeded() > 0) || hasCondition(status, "Complete");
     }
 
+    /**
+     * A Job is terminally failed only once its {@code Failed} condition is set -- which the
+     * Kubernetes Job controller does exactly once, after {@code backoffLimit} retries are
+     * exhausted. {@code status.failed} (the count of failed pod attempts so far) is deliberately
+     * <b>not</b> consulted here: {@code backoffLimit} exists precisely so a single transient pod
+     * failure gets retried, not treated as the whole Job's outcome. Counting pod attempts would
+     * make this method return {@code true} after the very first failed attempt while the Job
+     * controller is still going to retry -- {@link #reconcile} would mark the {@link WorldIngest}
+     * terminally {@code Failed} immediately, yet the Job keeps running underneath it and can still
+     * write a complete bundle on a later attempt that then has nowhere to be registered, since a
+     * terminal ingest is never reconciled again.
+     */
     private static boolean isJobFailed(Job job) {
         JobStatus status = job.getStatus();
         if (status == null) {
             return false;
         }
-        return (status.getFailed() != null && status.getFailed() > 0) || hasCondition(status, "Failed");
+        return hasCondition(status, "Failed");
     }
 
     private static boolean hasCondition(JobStatus status, String type) {
@@ -468,6 +534,28 @@ public class WorldIngestReconciler implements Reconciler<WorldIngest> {
             return false;
         }
         return conditions.stream().anyMatch(c -> type.equals(c.getType()) && "True".equals(c.getStatus()));
+    }
+
+    /**
+     * Checks that {@code ingest}'s own labels name {@code source} by both name <em>and</em> UID --
+     * the same owner-check pattern {@code WorldSourceReconciler.ownedBySameSource} applies in the
+     * opposite direction (there, checking a {@link WorldIngest} it is about to treat as
+     * already-triggered; here, checking the {@link WorldIngest} being reconciled itself).
+     *
+     * <p>Without this, resolving {@code source} by name alone would let any {@link WorldIngest} --
+     * hand-written, or stale after its original source was deleted and a same-named-but-different
+     * source (a different UID) was created in its place -- read and overwrite that source's
+     * status and, worse, drive {@link #applyRetention} to delete its bundles. {@code
+     * WorldSourceReconciler} always stamps {@link Labels#SOURCE}/{@link Labels#SOURCE_UID} on
+     * every {@link WorldIngest} it creates, so a legitimately-triggered ingest always passes this
+     * check; one that does not is, by construction, not something this reconciler created the
+     * lock/retention trust relationship for.
+     */
+    private static boolean ownedBySameSource(Map<String, String> labels, String sourceName, String sourceUid) {
+        if (labels == null || sourceUid == null) {
+            return false;
+        }
+        return Objects.equals(sourceName, labels.get(Labels.SOURCE)) && Objects.equals(sourceUid, labels.get(Labels.SOURCE_UID));
     }
 
     private static boolean ownedBySameIngest(Job job, WorldIngest ingest) {
