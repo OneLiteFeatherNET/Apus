@@ -36,6 +36,21 @@ dependencyResolutionManagement {
             // MinIO-specific is needed. Version verified against Maven Central on 2026-08-08.
             version("aws-sdk", "2.46.7")
 
+            // cron-utils: parses/evaluates the Cron expression in WorldSourceSpec.poll
+            // (phase 2b, task 6). Chosen over hand-rolling a parser (an explicitly named
+            // known error source in the task brief) and over pulling in a full scheduler
+            // framework (Quartz, Spring) just for "is this cron string due yet" -- this
+            // operator never runs cron jobs itself, JOSDK's own reschedule mechanism does
+            // that; only expression parsing + next-execution-time math is needed, which is
+            // exactly cron-utils' scope. Verified against Maven Central on 2026-08-09: 9.2.1
+            // is the newest release (last published 2023-03, no newer version exists). Its
+            // POM (also checked directly) has exactly one non-test runtime dependency,
+            // slf4j-api (compile scope) -- javax.validation:validation-api is "provided"
+            // (only needed if bean-validation annotations are actually exercised, which
+            // CronParser/ExecutionTime do not do), so this stays the "slim library" the
+            // brief asks for rather than a heavyweight addition.
+            version("cron-utils", "9.2.1")
+
             library("bluemap.api", "de.bluecolored", "bluemap-api").versionRef("bluemap-api")
             library("bluemap.core", "de.bluecolored", "bluemap-core").versionRef("bluemap")
             library("bluemap.common", "de.bluecolored", "bluemap-common").versionRef("bluemap")
@@ -63,6 +78,8 @@ dependencyResolutionManagement {
 
             library("jackson.bom", "com.fasterxml.jackson", "jackson-bom").versionRef("jackson")
             library("jackson.databind", "com.fasterxml.jackson.core", "jackson-databind").withoutVersion()
+
+            library("cron.utils", "com.cronutils", "cron-utils").versionRef("cron-utils")
 
             plugin("spotless", "com.diffplug.spotless").versionRef("spotless")
             plugin("shadow", "com.gradleup.shadow").versionRef("shadow")

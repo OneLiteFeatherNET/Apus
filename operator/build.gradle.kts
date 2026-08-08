@@ -7,6 +7,25 @@ plugins {
 dependencies {
     implementation(libs.josdk)
 
+    // cron-utils -- see settings.gradle.kts for why. Backs CronSchedule, which
+    // WorldSourceReconciler (phase 2b, task 6) uses to evaluate spec.poll.
+    implementation(libs.cron.utils)
+
+    // The ingest connectors (WorldSourceConnector/S3SourceConnector/PterodactylConnector) are
+    // reused directly by WorldSourceReconciler to run discover() on a schedule -- see
+    // ingest/README.md's "Design notes" section, which already documents this split:
+    // discover() (listing available versions) belongs to the reconciler, fetch() (pulling one
+    // specific version) belongs to the ingest Job this reconciler schedules. Depending on the
+    // module rather than duplicating the connector interface keeps exactly one implementation
+    // of each source type.
+    implementation(project(":ingest"))
+
+    // AWS SDK v2 S3 client -- see settings.gradle.kts for why this over the MinIO Java client.
+    // Used by AwsBundleStore (phase 2b, task 6) to enforce WorldSource.spec.retention: listing
+    // and deleting older bundle versions in the destination bucket.
+    implementation(platform(libs.aws.sdk.bom))
+    implementation(libs.aws.sdk.s3)
+
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
     testRuntimeOnly(libs.junit.platform.launcher)
