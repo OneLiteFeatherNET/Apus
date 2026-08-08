@@ -66,6 +66,42 @@ final class TestTarBuilder {
         return this;
     }
 
+    /** Writes a PAX extended-header entry pair: an {@code 'x'} header carrying a {@code path} record, then the file. */
+    TestTarBuilder addFileWithPaxPathOverride(String name, byte[] content) {
+        byte[] paxBody = paxRecord("path", name).getBytes(StandardCharsets.UTF_8);
+        writeHeader("PaxHeaders.0/pax-entry", paxBody.length, 'x');
+        body.writeBytes(paxBody);
+        writePadding(paxBody.length);
+
+        // Same as addFileWithLongName: the following header's own name field is irrelevant once
+        // a preceding 'x' entry supplies the real path.
+        String truncated = name.length() > 100 ? name.substring(0, 100) : name;
+        writeHeader(truncated, content.length, '0');
+        body.writeBytes(content);
+        writePadding(content.length);
+        return this;
+    }
+
+    /** Writes a symlink entry ({@code typeflag '2'}) with no content, only a link target. */
+    TestTarBuilder addSymlink(String name, String linkTarget) {
+        writeHeader(name, 0, '2', linkTarget);
+        return this;
+    }
+
+    /**
+     * Builds one PAX extended-header record: {@code "<length> <key>=<value>\n"}, where {@code
+     * <length>} is the record's own total byte length including the length prefix itself (per
+     * the PAX format's self-describing, length-prefixed record layout).
+     */
+    private static String paxRecord(String key, String value) {
+        String keyValue = key + "=" + value + "\n";
+        int length = keyValue.length() + 2;
+        while (String.valueOf(length).length() + 1 + keyValue.length() != length) {
+            length = String.valueOf(length).length() + 1 + keyValue.length();
+        }
+        return length + " " + keyValue;
+    }
+
     byte[] toTarBytes() {
         ByteArrayOutputStream full = new ByteArrayOutputStream();
         full.writeBytes(body.toByteArray());
@@ -82,6 +118,11 @@ final class TestTarBuilder {
     }
 
     private void writeHeader(String name, int size, char typeflag) {
+        writeHeader(name, size, typeflag, null);
+    }
+
+    /** As {@link #writeHeader(String, int, char)}, but also fills in the linkname field (offset 157, 100 bytes) -- e.g. a symlink's target. */
+    private void writeHeader(String name, int size, char typeflag, String linkName) {
         byte[] header = new byte[BLOCK_SIZE];
         byte[] nameBytes = name.getBytes(StandardCharsets.UTF_8);
         System.arraycopy(nameBytes, 0, header, 0, Math.min(nameBytes.length, 100));
@@ -91,6 +132,10 @@ final class TestTarBuilder {
         writeOctal(header, 124, 12, size);
         writeOctal(header, 136, 12, 0); // mtime
         header[156] = (byte) typeflag;
+        if (linkName != null) {
+            byte[] linkNameBytes = linkName.getBytes(StandardCharsets.UTF_8);
+            System.arraycopy(linkNameBytes, 0, header, 157, Math.min(linkNameBytes.length, 100));
+        }
         byte[] magic = "ustar".getBytes(StandardCharsets.US_ASCII);
         System.arraycopy(magic, 0, header, 257, magic.length);
         header[263] = '0';

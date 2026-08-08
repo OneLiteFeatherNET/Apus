@@ -111,6 +111,30 @@ class TarStreamReaderTest {
     }
 
     @Test
+    void reconstructsAPaxPathOverrideEntryLongerThanTheHundredByteHeaderField() throws IOException {
+        // The PAX case (typeflag 'x') is the sibling of the GNU long-name case above
+        // (typeflag 'L') exercised by reconstructsAGnuLongNameEntryLongerThanTheHundredByteField
+        // -- both extend an entry's path past the classic 100-byte ustar name field, and a
+        // Pterodactyl backup of a server that has grown deep plugin/world directory trees
+        // routinely contains both. Only the GNU case had a dedicated test before this one.
+        String longName =
+                "plugins/AnotherReallyLongPluginNameThatDefinitelyExceedsTheClassicHundredByteUstarNameFieldLimitByAWideMargin/config.yml";
+        assertTrue(longName.length() > 100, "test setup must actually exercise the PAX path-override path");
+        byte[] content = "key: value".getBytes(StandardCharsets.UTF_8);
+        byte[] tar = new TestTarBuilder().addFileWithPaxPathOverride(longName, content).toTarBytes();
+
+        try (TarStreamReader reader = new TarStreamReader(new ByteArrayInputStream(tar))) {
+            TarStreamReader.Entry entry = reader.nextEntry();
+            assertEquals(longName, entry.name());
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            reader.transferTo(out);
+            assertArrayEquals(content, out.toByteArray());
+
+            assertNull(reader.nextEntry());
+        }
+    }
+
+    @Test
     void anEmptyArchiveYieldsNoEntries() throws IOException {
         byte[] tar = new TestTarBuilder().toTarBytes();
 
