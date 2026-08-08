@@ -26,6 +26,7 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -73,5 +74,61 @@ class ArchivesTest {
                 Files.isSymbolicLink(written),
                 "a tar symlink entry must never become a real filesystem symlink pointing outside the target");
         assertEquals(0L, Files.size(written), "the reader does not (yet) resolve link targets as content");
+    }
+
+    // --- S2: bounded extraction (zip-bomb protection) --------------------------------------
+
+    @Test
+    void extractTarAbortsOnceTheTotalSizeLimitIsExceeded(@TempDir Path targetDir) throws IOException {
+        byte[] tar = new TestTarBuilder()
+                .addFile("world/region/r.0.0.mca", "0123456789") // 10 bytes
+                .toTarBytes();
+
+        Archives.Limits limits = new Archives.Limits(5, Long.MAX_VALUE); // smaller than the one entry
+
+        IOException thrown = assertThrows(
+                IOException.class,
+                () -> Archives.extractTar(new ByteArrayInputStream(tar), targetDir, entryName -> true, limits));
+        assertTrue(
+                thrown.getMessage().contains("total size limit"),
+                "expected a total-size-limit message, got: " + thrown.getMessage());
+    }
+
+    @Test
+    void extractTarAbortsOnceTheEntryCountLimitIsExceeded(@TempDir Path targetDir) throws IOException {
+        byte[] tar = new TestTarBuilder()
+                .addFile("world/region/r.0.0.mca", "a")
+                .addFile("world/region/r.0.1.mca", "b")
+                .addFile("world/region/r.0.2.mca", "c")
+                .toTarBytes();
+
+        Archives.Limits limits = new Archives.Limits(Long.MAX_VALUE, 2);
+
+        IOException thrown = assertThrows(
+                IOException.class,
+                () -> Archives.extractTar(new ByteArrayInputStream(tar), targetDir, entryName -> true, limits));
+        assertTrue(
+                thrown.getMessage().contains("entry limit"), "expected an entry-limit message, got: " + thrown.getMessage());
+    }
+
+    @Test
+    void extractTarWithinLimitsSucceedsNormally(@TempDir Path targetDir) throws IOException {
+        byte[] tar = new TestTarBuilder().addFile("world/region/r.0.0.mca", "content").toTarBytes();
+
+        Archives.extractTar(new ByteArrayInputStream(tar), targetDir, entryName -> true, new Archives.Limits(1024, 10));
+
+        assertTrue(Files.exists(targetDir.resolve("world/region/r.0.0.mca")));
+    }
+
+    @Test
+    void limitsFromReadsConfiguredValuesAndDefaultsToUnboundedWhenAbsent() {
+        Archives.Limits configured = Archives.limitsFrom(
+                Map.of(Archives.CONFIG_MAX_TOTAL_BYTES, "42", Archives.CONFIG_MAX_ENTRIES, "7"));
+        assertEquals(42L, configured.maxTotalBytes());
+        assertEquals(7L, configured.maxEntries());
+
+        Archives.Limits defaulted = Archives.limitsFrom(Map.of());
+        assertEquals(Long.MAX_VALUE, defaulted.maxTotalBytes());
+        assertEquals(Long.MAX_VALUE, defaulted.maxEntries());
     }
 }

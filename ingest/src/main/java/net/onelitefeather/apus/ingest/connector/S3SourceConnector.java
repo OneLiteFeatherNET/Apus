@@ -109,7 +109,7 @@ public final class S3SourceConnector implements WorldSourceConnector {
                 GetObjectRequest.builder().bucket(bucket).key(key).build();
         try (ResponseInputStream<GetObjectResponse> object = client.getObject(request)) {
             if (Archives.isArchive(key)) {
-                Archives.extract(key, object, workDir);
+                Archives.extract(key, object, workDir, Archives.limitsFrom(config));
             } else {
                 Path target = workDir.resolve(fileNameOf(key));
                 Files.copy(object, target, StandardCopyOption.REPLACE_EXISTING);
