@@ -47,6 +47,17 @@ public final class IngestConfig {
     // -- Bundle destination --
     public static final String ENV_BUNDLE_BUCKET = "APUS_BUNDLE_BUCKET";
     public static final String ENV_BUNDLE_TENANT = "APUS_BUNDLE_TENANT";
+
+    /**
+     * The owning {@code WorldSource}'s name -- mandatory, and distinct from {@link
+     * #ENV_BUNDLE_WORLD_ID}: {@code worldId} is only the Minecraft world's own directory name
+     * (commonly the vanilla default {@code "world"}), which two different sources in the same
+     * namespace can share. Scoping the bundle path by source name as well keeps their bundles
+     * (and, critically, retention passes over them) from ever colliding -- see {@link
+     * BundlePath}.
+     */
+    public static final String ENV_BUNDLE_SOURCE_NAME = "APUS_BUNDLE_SOURCE_NAME";
+
     public static final String ENV_BUNDLE_WORLD_ID = "APUS_BUNDLE_WORLD_ID";
     public static final String ENV_BUNDLE_VERSION = "APUS_BUNDLE_VERSION";
     public static final String ENV_S3_ENDPOINT = "APUS_S3_ENDPOINT";
@@ -58,6 +69,15 @@ public final class IngestConfig {
     // without them; see ingest/README.md and task-5-report.md for why each one exists. --
     public static final String ENV_MC_VERSION = "APUS_MC_VERSION";
     public static final String ENV_PROGRESS_INTERVAL_SECONDS = "APUS_PROGRESS_INTERVAL_SECONDS";
+
+    // -- Archive extraction limits: a zip/tar.gz from an external source is untrusted input; a
+    // crafted "archive bomb" (either a huge declared/actual uncompressed size, or an enormous
+    // entry count producing many tiny files) could otherwise fill the ingest job's writable
+    // container layer -- no volume is mounted for it -- and starve the node it runs on. Both are
+    // configurable (rather than hardcoded) so an operator can tune them for genuinely large
+    // worlds without a code change; see Archives.Limits and IngestJobBuilder's `resources`. --
+    public static final String ENV_MAX_ARCHIVE_TOTAL_BYTES = "APUS_MAX_ARCHIVE_TOTAL_BYTES";
+    public static final String ENV_MAX_ARCHIVE_ENTRIES = "APUS_MAX_ARCHIVE_ENTRIES";
 
     // -- Source-specific: s3 --
     public static final String ENV_SOURCE_S3_ENDPOINT = "APUS_SOURCE_S3_ENDPOINT";
@@ -81,12 +101,19 @@ public final class IngestConfig {
     private static final String DEFAULT_S3_REGION = "us-east-1";
     private static final long DEFAULT_PROGRESS_INTERVAL_SECONDS = 10;
 
+    /** 5 GiB -- generous for a real world, still far short of filling a node's disk. */
+    private static final long DEFAULT_MAX_ARCHIVE_TOTAL_BYTES = 5L * 1024 * 1024 * 1024;
+
+    /** Generous for even a large multi-dimension world's region/entities/poi file count. */
+    private static final long DEFAULT_MAX_ARCHIVE_ENTRIES = 200_000;
+
     private final String sourceType;
     private final String worldName;
     private final String forcedLayout;
     private final String sourceVersionId;
     private final String bundleBucket;
     private final String bundleTenant;
+    private final String bundleSourceName;
     private final String bundleWorldId;
     private final String bundleVersion;
     private final String s3Endpoint;
@@ -95,6 +122,8 @@ public final class IngestConfig {
     private final String s3Region;
     private final String minecraftVersion;
     private final Duration progressInterval;
+    private final long maxArchiveTotalBytes;
+    private final long maxArchiveEntries;
     private final Map<String, String> sourceConfig;
 
     private IngestConfig(
@@ -104,6 +133,7 @@ public final class IngestConfig {
             String sourceVersionId,
             String bundleBucket,
             String bundleTenant,
+            String bundleSourceName,
             String bundleWorldId,
             String bundleVersion,
             String s3Endpoint,
@@ -112,6 +142,8 @@ public final class IngestConfig {
             String s3Region,
             String minecraftVersion,
             Duration progressInterval,
+            long maxArchiveTotalBytes,
+            long maxArchiveEntries,
             Map<String, String> sourceConfig) {
         this.sourceType = sourceType;
         this.worldName = worldName;
@@ -119,6 +151,7 @@ public final class IngestConfig {
         this.sourceVersionId = sourceVersionId;
         this.bundleBucket = bundleBucket;
         this.bundleTenant = bundleTenant;
+        this.bundleSourceName = bundleSourceName;
         this.bundleWorldId = bundleWorldId;
         this.bundleVersion = bundleVersion;
         this.s3Endpoint = s3Endpoint;
@@ -127,6 +160,8 @@ public final class IngestConfig {
         this.s3Region = s3Region;
         this.minecraftVersion = minecraftVersion;
         this.progressInterval = progressInterval;
+        this.maxArchiveTotalBytes = maxArchiveTotalBytes;
+        this.maxArchiveEntries = maxArchiveEntries;
         this.sourceConfig = sourceConfig;
     }
 
@@ -151,6 +186,7 @@ public final class IngestConfig {
 
         String bundleBucket = requireNonBlank(env, ENV_BUNDLE_BUCKET);
         String bundleTenant = requireNonBlank(env, ENV_BUNDLE_TENANT);
+        String bundleSourceName = requireNonBlank(env, ENV_BUNDLE_SOURCE_NAME);
         String bundleWorldId = requireNonBlank(env, ENV_BUNDLE_WORLD_ID);
         String bundleVersion = requireNonBlank(env, ENV_BUNDLE_VERSION);
 
@@ -162,11 +198,14 @@ public final class IngestConfig {
         String minecraftVersion = blankToNull(env.get(ENV_MC_VERSION));
         Duration progressInterval = Duration.ofSeconds(
                 parsePositiveLong(env, ENV_PROGRESS_INTERVAL_SECONDS, DEFAULT_PROGRESS_INTERVAL_SECONDS));
+        long maxArchiveTotalBytes =
+                parsePositiveLong(env, ENV_MAX_ARCHIVE_TOTAL_BYTES, DEFAULT_MAX_ARCHIVE_TOTAL_BYTES);
+        long maxArchiveEntries = parsePositiveLong(env, ENV_MAX_ARCHIVE_ENTRIES, DEFAULT_MAX_ARCHIVE_ENTRIES);
 
         Map<String, String> sourceConfig =
                 switch (sourceType) {
-                    case TYPE_S3 -> s3SourceConfig(env);
-                    case TYPE_PTERODACTYL -> pterodactylSourceConfig(env);
+                    case TYPE_S3 -> s3SourceConfig(env, maxArchiveTotalBytes, maxArchiveEntries);
+                    case TYPE_PTERODACTYL -> pterodactylSourceConfig(env, maxArchiveTotalBytes, maxArchiveEntries);
                     default -> throw new IllegalStateException("unreachable: " + sourceType);
                 };
 
@@ -177,6 +216,7 @@ public final class IngestConfig {
                 sourceVersionId,
                 bundleBucket,
                 bundleTenant,
+                bundleSourceName,
                 bundleWorldId,
                 bundleVersion,
                 s3Endpoint,
@@ -185,10 +225,13 @@ public final class IngestConfig {
                 s3Region,
                 minecraftVersion,
                 progressInterval,
+                maxArchiveTotalBytes,
+                maxArchiveEntries,
                 sourceConfig);
     }
 
-    private static Map<String, String> s3SourceConfig(Map<String, String> env) {
+    private static Map<String, String> s3SourceConfig(
+            Map<String, String> env, long maxArchiveTotalBytes, long maxArchiveEntries) {
         Map<String, String> config = new LinkedHashMap<>();
         config.put(S3SourceConnector.CONFIG_BUCKET, requireNonBlank(env, ENV_SOURCE_S3_BUCKET));
         putIfPresent(config, S3SourceConnector.CONFIG_ENDPOINT, env.get(ENV_SOURCE_S3_ENDPOINT));
@@ -196,16 +239,26 @@ public final class IngestConfig {
         putIfPresent(config, S3SourceConnector.CONFIG_ACCESS_KEY_ID, env.get(ENV_SOURCE_S3_ACCESS_KEY));
         putIfPresent(config, S3SourceConnector.CONFIG_SECRET_ACCESS_KEY, env.get(ENV_SOURCE_S3_SECRET_KEY));
         putIfPresent(config, S3SourceConnector.CONFIG_REGION, env.get(ENV_SOURCE_S3_REGION));
+        putArchiveLimits(config, maxArchiveTotalBytes, maxArchiveEntries);
         return config;
     }
 
-    private static Map<String, String> pterodactylSourceConfig(Map<String, String> env) {
+    private static Map<String, String> pterodactylSourceConfig(
+            Map<String, String> env, long maxArchiveTotalBytes, long maxArchiveEntries) {
         Map<String, String> config = new LinkedHashMap<>();
         config.put(PterodactylConnector.CONFIG_PANEL_URL, requireNonBlank(env, ENV_PTERODACTYL_PANEL_URL));
         config.put(PterodactylConnector.CONFIG_SERVER_ID, requireNonBlank(env, ENV_PTERODACTYL_SERVER_ID));
         config.put(PterodactylConnector.CONFIG_API_KEY, requireNonBlank(env, ENV_PTERODACTYL_API_KEY));
         config.put(PterodactylConnector.CONFIG_WORLD_PATHS, requireNonBlank(env, ENV_PTERODACTYL_WORLD_PATHS));
+        putArchiveLimits(config, maxArchiveTotalBytes, maxArchiveEntries);
         return config;
+    }
+
+    private static void putArchiveLimits(Map<String, String> config, long maxArchiveTotalBytes, long maxArchiveEntries) {
+        config.put(net.onelitefeather.apus.ingest.connector.Archives.CONFIG_MAX_TOTAL_BYTES,
+                Long.toString(maxArchiveTotalBytes));
+        config.put(
+                net.onelitefeather.apus.ingest.connector.Archives.CONFIG_MAX_ENTRIES, Long.toString(maxArchiveEntries));
     }
 
     private static void putIfPresent(Map<String, String> config, String key, String value) {
@@ -268,6 +321,11 @@ public final class IngestConfig {
         return bundleTenant;
     }
 
+    /** The owning {@code WorldSource}'s name -- see {@link #ENV_BUNDLE_SOURCE_NAME}. */
+    public String bundleSourceName() {
+        return bundleSourceName;
+    }
+
     public String bundleWorldId() {
         return bundleWorldId;
     }
@@ -299,6 +357,16 @@ public final class IngestConfig {
 
     public Duration progressInterval() {
         return progressInterval;
+    }
+
+    /** The configured cap on total bytes extracted from one source archive -- see {@link #ENV_MAX_ARCHIVE_TOTAL_BYTES}. */
+    public long maxArchiveTotalBytes() {
+        return maxArchiveTotalBytes;
+    }
+
+    /** The configured cap on the number of entries extracted from one source archive -- see {@link #ENV_MAX_ARCHIVE_ENTRIES}. */
+    public long maxArchiveEntries() {
+        return maxArchiveEntries;
     }
 
     /** The source-type-specific connector configuration, keyed by each connector's own config keys. */

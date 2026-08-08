@@ -38,6 +38,7 @@ class IngestConfigTest {
         env.put(IngestConfig.ENV_SOURCE_VERSION, "2026-08-01T00-00-00Z.zip");
         env.put(IngestConfig.ENV_BUNDLE_BUCKET, "bundles");
         env.put(IngestConfig.ENV_BUNDLE_TENANT, "acme");
+        env.put(IngestConfig.ENV_BUNDLE_SOURCE_NAME, "survival-source");
         env.put(IngestConfig.ENV_BUNDLE_WORLD_ID, "spawn");
         env.put(IngestConfig.ENV_BUNDLE_VERSION, "v1");
         env.put(IngestConfig.ENV_S3_ENDPOINT, "http://minio:9000");
@@ -166,6 +167,47 @@ class IngestConfigTest {
         env.put(IngestConfig.ENV_MC_VERSION, "1.21.10");
 
         assertEquals("1.21.10", IngestConfig.fromEnv(env).minecraftVersion());
+    }
+
+    @Test
+    void missingBundleSourceNameIsDetectedEvenWhenEverythingElseIsComplete() {
+        Map<String, String> env = minimalS3Env();
+        env.remove(IngestConfig.ENV_BUNDLE_SOURCE_NAME);
+
+        IngestConfig.ConfigurationException e =
+                assertThrows(IngestConfig.ConfigurationException.class, () -> IngestConfig.fromEnv(env));
+        assertTrue(e.getMessage().contains(IngestConfig.ENV_BUNDLE_SOURCE_NAME));
+    }
+
+    @Test
+    void archiveLimitsDefaultWhenNotConfigured() {
+        IngestConfig config = IngestConfig.fromEnv(minimalS3Env());
+
+        assertTrue(config.maxArchiveTotalBytes() > 0);
+        assertTrue(config.maxArchiveEntries() > 0);
+        assertEquals(
+                Long.toString(config.maxArchiveTotalBytes()),
+                config.sourceConfig().get(net.onelitefeather.apus.ingest.connector.Archives.CONFIG_MAX_TOTAL_BYTES));
+        assertEquals(
+                Long.toString(config.maxArchiveEntries()),
+                config.sourceConfig().get(net.onelitefeather.apus.ingest.connector.Archives.CONFIG_MAX_ENTRIES));
+    }
+
+    @Test
+    void archiveLimitsAreConfigurableAndFlowIntoTheSourceConfig() {
+        Map<String, String> env = minimalS3Env();
+        env.put(IngestConfig.ENV_MAX_ARCHIVE_TOTAL_BYTES, "1024");
+        env.put(IngestConfig.ENV_MAX_ARCHIVE_ENTRIES, "7");
+
+        IngestConfig config = IngestConfig.fromEnv(env);
+
+        assertEquals(1024L, config.maxArchiveTotalBytes());
+        assertEquals(7L, config.maxArchiveEntries());
+        assertEquals(
+                "1024",
+                config.sourceConfig().get(net.onelitefeather.apus.ingest.connector.Archives.CONFIG_MAX_TOTAL_BYTES));
+        assertEquals(
+                "7", config.sourceConfig().get(net.onelitefeather.apus.ingest.connector.Archives.CONFIG_MAX_ENTRIES));
     }
 
     @Test
