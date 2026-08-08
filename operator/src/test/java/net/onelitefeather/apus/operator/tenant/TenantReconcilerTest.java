@@ -22,12 +22,18 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.fabric8.kubernetes.api.model.Namespace;
+import io.fabric8.kubernetes.api.model.NamespaceBuilder;
 import io.fabric8.kubernetes.api.model.ObjectMetaBuilder;
 import io.fabric8.kubernetes.api.model.ResourceQuota;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.server.mock.EnableKubernetesMockClient;
 import io.fabric8.kubernetes.client.server.mock.KubernetesMockServer;
+import io.javaoperatorsdk.operator.api.reconciler.UpdateControl;
+import java.util.Map;
+import java.util.UUID;
 import net.onelitefeather.apus.operator.OperatorConfig;
+import net.onelitefeather.apus.operator.api.Conditions;
+import net.onelitefeather.apus.operator.api.Labels;
 import net.onelitefeather.apus.operator.api.Tenant;
 import net.onelitefeather.apus.operator.rook.CephObjectStoreUser;
 import org.junit.jupiter.api.Test;
@@ -40,10 +46,24 @@ class TenantReconcilerTest {
 
     private Tenant tenant(String name, String quota) {
         Tenant tenant = new Tenant();
-        tenant.setMetadata(new ObjectMetaBuilder().withName(name).build());
+        // A real API server always assigns a UID before a reconciler ever sees the resource;
+        // the ownership check the reconciler performs relies on it, so tests must supply one
+        // too rather than leaving reconcile() to see a tenant with no identity of its own.
+        tenant.setMetadata(new ObjectMetaBuilder()
+                .withName(name)
+                .withUid(UUID.randomUUID().toString())
+                .build());
         tenant.getSpec().setDisplayName(name);
         tenant.getSpec().getStorage().setQuota(quota);
         return tenant;
+    }
+
+    private String readyReason(Tenant tenant) {
+        return tenant.getStatus().getConditions().stream()
+                .filter(condition -> Conditions.READY.equals(condition.getType()))
+                .findFirst()
+                .orElseThrow()
+                .getReason();
     }
 
     @Test
@@ -104,5 +124,202 @@ class TenantReconcilerTest {
         assertEquals("bluemap-friends", tenant.getStatus().getNamespace());
         assertEquals("apus-friends", tenant.getStatus().getObjectStoreUser());
         assertTrue(control.isPatchStatus(), "status must be patched so the user can see the namespace");
+    }
+
+    @Test
+    void everyCreatedResourceCarriesTheManagedByLabel() {
+        TenantReconciler reconciler = new TenantReconciler(client, OperatorConfig.defaults());
+
+        reconciler.reconcile(tenant("friends", "500Gi"), null);
+
+        assertEquals(
+                Labels.MANAGED_BY_VALUE,
+                client.namespaces()
+                        .withName("bluemap-friends")
+                        .get()
+                        .getMetadata()
+                        .getLabels()
+                        .get(Labels.MANAGED_BY));
+        assertEquals(
+                Labels.MANAGED_BY_VALUE,
+                client.resourceQuotas()
+                        .inNamespace("bluemap-friends")
+                        .withName("apus-tenant")
+                        .get()
+                        .getMetadata()
+                        .getLabels()
+                        .get(Labels.MANAGED_BY));
+        assertEquals(
+                Labels.MANAGED_BY_VALUE,
+                client.limitRanges()
+                        .inNamespace("bluemap-friends")
+                        .withName("apus-tenant")
+                        .get()
+                        .getMetadata()
+                        .getLabels()
+                        .get(Labels.MANAGED_BY));
+        assertEquals(
+                Labels.MANAGED_BY_VALUE,
+                client.resources(CephObjectStoreUser.class)
+                        .inNamespace(OperatorConfig.defaults().rookNamespace())
+                        .withName("apus-friends")
+                        .get()
+                        .getMetadata()
+                        .getLabels()
+                        .get(Labels.MANAGED_BY));
+    }
+
+    @Test
+    void refusesToAdoptAnUnlabelledPreExistingNamespace() {
+        client.namespaces()
+                .resource(new NamespaceBuilder()
+                        .withNewMetadata()
+                        .withName("bluemap-friends")
+                        .endMetadata()
+                        .build())
+                .create();
+        TenantReconciler reconciler = new TenantReconciler(client, OperatorConfig.defaults());
+        Tenant tenant = tenant("friends", "500Gi");
+
+        UpdateControl<Tenant> control = reconciler.reconcile(tenant, null);
+
+        assertTrue(control.isPatchStatus());
+        assertEquals(TenantReconciler.RESOURCE_CONFLICT_REASON, readyReason(tenant));
+        Map<String, String> labels =
+                client.namespaces().withName("bluemap-friends").get().getMetadata().getLabels();
+        assertTrue(
+                labels == null || !labels.containsKey(Labels.TENANT),
+                "the pre-existing namespace must not be silently adopted");
+    }
+
+    @Test
+    void refusesToAdoptANamespaceOwnedByAnotherTenant() {
+        client.namespaces()
+                .resource(new NamespaceBuilder()
+                        .withNewMetadata()
+                        .withName("bluemap-friends")
+                        .withLabels(Map.of(
+                                Labels.TENANT, "friends",
+                                Labels.TENANT_UID, UUID.randomUUID().toString()))
+                        .endMetadata()
+                        .build())
+                .create();
+        TenantReconciler reconciler = new TenantReconciler(client, OperatorConfig.defaults());
+        Tenant tenant = tenant("friends", "500Gi");
+
+        UpdateControl<Tenant> control = reconciler.reconcile(tenant, null);
+
+        assertTrue(control.isPatchStatus());
+        assertEquals(TenantReconciler.RESOURCE_CONFLICT_REASON, readyReason(tenant));
+    }
+
+    @Test
+    void updatesANamespaceAlreadyOwnedByTheSameTenantIdempotently() {
+        Tenant tenant = tenant("friends", "500Gi");
+        client.namespaces()
+                .resource(new NamespaceBuilder()
+                        .withNewMetadata()
+                        .withName("bluemap-friends")
+                        .withLabels(Map.of(
+                                Labels.TENANT,
+                                tenant.getMetadata().getName(),
+                                Labels.TENANT_UID,
+                                tenant.getMetadata().getUid()))
+                        .endMetadata()
+                        .build())
+                .create();
+        TenantReconciler reconciler = new TenantReconciler(client, OperatorConfig.defaults());
+
+        UpdateControl<Tenant> control = reconciler.reconcile(tenant, null);
+
+        assertTrue(control.isPatchStatus());
+        assertEquals("Provisioned", readyReason(tenant));
+        assertNotNull(client.resourceQuotas().inNamespace("bluemap-friends").withName("apus-tenant").get());
+    }
+
+    @Test
+    void refusesToAdoptAnUnlabelledPreExistingCephUser() {
+        CephObjectStoreUser existing = new CephObjectStoreUser();
+        existing.getMetadata().setName("apus-friends");
+        existing.getMetadata().setNamespace(OperatorConfig.defaults().rookNamespace());
+        client.resources(CephObjectStoreUser.class)
+                .inNamespace(OperatorConfig.defaults().rookNamespace())
+                .resource(existing)
+                .create();
+        TenantReconciler reconciler = new TenantReconciler(client, OperatorConfig.defaults());
+        Tenant tenant = tenant("friends", "500Gi");
+
+        UpdateControl<Tenant> control = reconciler.reconcile(tenant, null);
+
+        assertTrue(control.isPatchStatus());
+        assertEquals(TenantReconciler.RESOURCE_CONFLICT_REASON, readyReason(tenant));
+    }
+
+    @Test
+    void refusesToAdoptACephUserOwnedByAnotherTenant() {
+        CephObjectStoreUser existing = new CephObjectStoreUser();
+        existing.getMetadata().setName("apus-friends");
+        existing.getMetadata().setNamespace(OperatorConfig.defaults().rookNamespace());
+        existing.getMetadata()
+                .setLabels(Map.of(
+                        Labels.TENANT, "friends",
+                        Labels.TENANT_UID, UUID.randomUUID().toString()));
+        client.resources(CephObjectStoreUser.class)
+                .inNamespace(OperatorConfig.defaults().rookNamespace())
+                .resource(existing)
+                .create();
+        TenantReconciler reconciler = new TenantReconciler(client, OperatorConfig.defaults());
+        Tenant tenant = tenant("friends", "500Gi");
+
+        UpdateControl<Tenant> control = reconciler.reconcile(tenant, null);
+
+        assertTrue(control.isPatchStatus());
+        assertEquals(TenantReconciler.RESOURCE_CONFLICT_REASON, readyReason(tenant));
+    }
+
+    @Test
+    void updatesACephUserAlreadyOwnedByTheSameTenantIdempotently() {
+        Tenant tenant = tenant("friends", "500Gi");
+        CephObjectStoreUser existing = new CephObjectStoreUser();
+        existing.getMetadata().setName("apus-friends");
+        existing.getMetadata().setNamespace(OperatorConfig.defaults().rookNamespace());
+        existing.getMetadata()
+                .setLabels(Map.of(
+                        Labels.TENANT,
+                        tenant.getMetadata().getName(),
+                        Labels.TENANT_UID,
+                        tenant.getMetadata().getUid()));
+        client.resources(CephObjectStoreUser.class)
+                .inNamespace(OperatorConfig.defaults().rookNamespace())
+                .resource(existing)
+                .create();
+        TenantReconciler reconciler = new TenantReconciler(client, OperatorConfig.defaults());
+
+        UpdateControl<Tenant> control = reconciler.reconcile(tenant, null);
+
+        assertTrue(control.isPatchStatus());
+        assertEquals("Provisioned", readyReason(tenant));
+        assertEquals(
+                "500Gi",
+                client.resources(CephObjectStoreUser.class)
+                        .inNamespace(OperatorConfig.defaults().rookNamespace())
+                        .withName("apus-friends")
+                        .get()
+                        .getSpec()
+                        .getQuotas()
+                        .getMaxSize());
+    }
+
+    @Test
+    void setsAnOwnerReferenceOnTheNamespacePointingAtTheTenant() {
+        TenantReconciler reconciler = new TenantReconciler(client, OperatorConfig.defaults());
+
+        reconciler.reconcile(tenant("friends", "500Gi"), null);
+
+        Namespace ns = client.namespaces().withName("bluemap-friends").get();
+        assertTrue(
+                ns.getMetadata().getOwnerReferences().stream()
+                        .anyMatch(ref -> "Tenant".equals(ref.getKind())),
+                "namespace must be owned by its Tenant so it is garbage-collected on deletion");
     }
 }
