@@ -17,11 +17,10 @@
  */
 package net.onelitefeather.apus.ingest;
 
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
-import java.util.Map;
-import java.util.stream.Collectors;
 
 /**
  * The commit point of one version of a world bundle in S3: a versioned, self-describing
@@ -55,6 +54,16 @@ public record BundleManifest(
         List<DimensionInfo> dimensions,
         long sizeBytes,
         Checksums checksums) {
+
+    // Jackson deserialises Java records out of the box (via their canonical constructor and
+    // record-component names, since jackson-databind 2.12 -- no annotations or extra module
+    // needed), so the record declarations above double as the JSON schema. Enabling
+    // FAIL_ON_TRAILING_TOKENS is the one piece of non-default configuration this class relies
+    // on: without it, `readValue` happily accepts and ignores anything after the first JSON
+    // value, which would make a manifest that got a stray extra document appended to it decode
+    // as if nothing were wrong.
+    private static final ObjectMapper MAPPER =
+            new ObjectMapper().enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
 
     /**
      * Where the bundled world data came from.
@@ -91,9 +100,14 @@ public record BundleManifest(
 
     /** Serialises this manifest to JSON. */
     public String toJson() {
-        StringBuilder sb = new StringBuilder();
-        Json.writeValue(sb, toMap());
-        return sb.toString();
+        try {
+            return MAPPER.writeValueAsString(this);
+        } catch (JsonProcessingException e) {
+            // A record made up entirely of the types declared above (primitives, strings,
+            // nested records, List<int[]>) cannot fail to serialise; this only exists because
+            // the checked exception has to go somewhere.
+            throw new IllegalStateException("failed to serialise BundleManifest to JSON", e);
+        }
     }
 
     /**
@@ -102,372 +116,10 @@ public record BundleManifest(
      * @throws IllegalArgumentException if {@code json} is not a valid manifest document
      */
     public static BundleManifest fromJson(String json) {
-        Object parsed = new Json.Parser(json).parse();
-        if (!(parsed instanceof Map<?, ?> root)) {
-            throw new IllegalArgumentException("Expected a JSON object at the manifest root");
-        }
-        Map<String, Object> map = asStringKeyedMap(root);
-        return new BundleManifest(
-                asInt(map.get("schemaVersion")),
-                (String) map.get("tenant"),
-                (String) map.get("worldId"),
-                (String) map.get("version"),
-                sourceInfoFromMap(asStringKeyedMap(map.get("source"))),
-                (String) map.get("minecraftVersion"),
-                dimensionsFromList((List<?>) map.get("dimensions")),
-                asLong(map.get("sizeBytes")),
-                checksumsFromMap(asStringKeyedMap(map.get("checksums"))));
-    }
-
-    private Map<String, Object> toMap() {
-        Map<String, Object> root = new LinkedHashMap<>();
-        root.put("schemaVersion", (long) schemaVersion);
-        root.put("tenant", tenant);
-        root.put("worldId", worldId);
-        root.put("version", version);
-        root.put("source", sourceToMap(source));
-        root.put("minecraftVersion", minecraftVersion);
-        root.put(
-                "dimensions",
-                dimensions.stream().map(BundleManifest::dimensionToMap).collect(Collectors.toList()));
-        root.put("sizeBytes", sizeBytes);
-        root.put("checksums", checksumsToMap(checksums));
-        return root;
-    }
-
-    private static Map<String, Object> sourceToMap(SourceInfo source) {
-        Map<String, Object> map = new LinkedHashMap<>();
-        map.put("type", source.type());
-        map.put("ref", source.ref());
-        map.put("detectedLayout", source.detectedLayout());
-        return map;
-    }
-
-    private static SourceInfo sourceInfoFromMap(Map<String, Object> map) {
-        return new SourceInfo(
-                (String) map.get("type"), (String) map.get("ref"), (String) map.get("detectedLayout"));
-    }
-
-    private static Map<String, Object> dimensionToMap(DimensionInfo dimension) {
-        Map<String, Object> map = new LinkedHashMap<>();
-        map.put("id", dimension.id());
-        map.put("path", dimension.path());
-        List<Object> regions = new ArrayList<>();
-        for (int[] region : dimension.regions()) {
-            regions.add(List.of((long) region[0], (long) region[1]));
-        }
-        map.put("regions", regions);
-        map.put("regionCount", (long) dimension.regionCount());
-        return map;
-    }
-
-    private static List<DimensionInfo> dimensionsFromList(List<?> raw) {
-        List<DimensionInfo> result = new ArrayList<>();
-        for (Object entry : raw) {
-            Map<String, Object> map = asStringKeyedMap(entry);
-            List<int[]> regions = new ArrayList<>();
-            for (Object rawRegion : (List<?>) map.get("regions")) {
-                List<?> pair = (List<?>) rawRegion;
-                regions.add(new int[] {asInt(pair.get(0)), asInt(pair.get(1))});
-            }
-            result.add(new DimensionInfo((String) map.get("id"), (String) map.get("path"), regions, asInt(
-                    map.get("regionCount"))));
-        }
-        return result;
-    }
-
-    private static Map<String, Object> checksumsToMap(Checksums checksums) {
-        Map<String, Object> map = new LinkedHashMap<>();
-        map.put("algorithm", checksums.algorithm());
-        map.put("manifest", checksums.manifest());
-        return map;
-    }
-
-    private static Checksums checksumsFromMap(Map<String, Object> map) {
-        return new Checksums((String) map.get("algorithm"), (String) map.get("manifest"));
-    }
-
-    @SuppressWarnings("unchecked")
-    private static Map<String, Object> asStringKeyedMap(Object value) {
-        if (!(value instanceof Map<?, ?> map)) {
-            throw new IllegalArgumentException("Expected a JSON object, got: " + value);
-        }
-        return (Map<String, Object>) map;
-    }
-
-    private static int asInt(Object value) {
-        return Math.toIntExact(asLong(value));
-    }
-
-    private static long asLong(Object value) {
-        if (value instanceof Number number) {
-            return number.longValue();
-        }
-        throw new IllegalArgumentException("Expected a JSON number, got: " + value);
-    }
-
-    /**
-     * A minimal, dependency-free JSON codec covering exactly the value shapes {@link
-     * BundleManifest} needs: objects, arrays, strings, integral numbers, and {@code null}.
-     */
-    private static final class Json {
-
-        private Json() {}
-
-        static void writeValue(StringBuilder sb, Object value) {
-            switch (value) {
-                case null -> sb.append("null");
-                case String s -> writeString(sb, s);
-                case Boolean b -> sb.append(b);
-                case Long l -> sb.append(l);
-                case Integer i -> sb.append(i);
-                case Map<?, ?> map -> writeObject(sb, map);
-                case List<?> list -> writeArray(sb, list);
-                default ->
-                        throw new IllegalArgumentException(
-                                "Unsupported JSON value type: " + value.getClass());
-            }
-        }
-
-        private static void writeObject(StringBuilder sb, Map<?, ?> map) {
-            sb.append('{');
-            boolean first = true;
-            for (Map.Entry<?, ?> entry : map.entrySet()) {
-                if (!first) {
-                    sb.append(',');
-                }
-                first = false;
-                writeString(sb, String.valueOf(entry.getKey()));
-                sb.append(':');
-                writeValue(sb, entry.getValue());
-            }
-            sb.append('}');
-        }
-
-        private static void writeArray(StringBuilder sb, List<?> list) {
-            sb.append('[');
-            boolean first = true;
-            for (Object item : list) {
-                if (!first) {
-                    sb.append(',');
-                }
-                first = false;
-                writeValue(sb, item);
-            }
-            sb.append(']');
-        }
-
-        private static void writeString(StringBuilder sb, String s) {
-            sb.append('"');
-            for (int i = 0; i < s.length(); i++) {
-                char c = s.charAt(i);
-                switch (c) {
-                    case '"' -> sb.append("\\\"");
-                    case '\\' -> sb.append("\\\\");
-                    case '\n' -> sb.append("\\n");
-                    case '\r' -> sb.append("\\r");
-                    case '\t' -> sb.append("\\t");
-                    default -> {
-                        if (c < 0x20) {
-                            sb.append(String.format("\\u%04x", (int) c));
-                        } else {
-                            sb.append(c);
-                        }
-                    }
-                }
-            }
-            sb.append('"');
-        }
-
-        /** A tiny recursive-descent parser for the same value subset {@link #writeValue} emits. */
-        static final class Parser {
-            private final String s;
-            private int pos;
-
-            Parser(String s) {
-                this.s = s;
-            }
-
-            Object parse() {
-                Object value = parseValue();
-                skipWhitespace();
-                if (pos != s.length()) {
-                    throw new IllegalArgumentException("Trailing content in JSON at offset " + pos);
-                }
-                return value;
-            }
-
-            private Object parseValue() {
-                skipWhitespace();
-                char c = peek();
-                return switch (c) {
-                    case '{' -> parseObject();
-                    case '[' -> parseArray();
-                    case '"' -> parseString();
-                    case 't', 'f' -> parseBoolean();
-                    case 'n' -> parseNull();
-                    default -> parseNumber();
-                };
-            }
-
-            private Map<String, Object> parseObject() {
-                expect('{');
-                Map<String, Object> result = new LinkedHashMap<>();
-                skipWhitespace();
-                if (peek() == '}') {
-                    pos++;
-                    return result;
-                }
-                while (true) {
-                    skipWhitespace();
-                    String key = parseString();
-                    skipWhitespace();
-                    expect(':');
-                    Object value = parseValue();
-                    result.put(key, value);
-                    skipWhitespace();
-                    char next = peek();
-                    if (next == ',') {
-                        pos++;
-                    } else if (next == '}') {
-                        pos++;
-                        break;
-                    } else {
-                        throw new IllegalArgumentException("Expected ',' or '}' at offset " + pos);
-                    }
-                }
-                return result;
-            }
-
-            private List<Object> parseArray() {
-                expect('[');
-                List<Object> result = new ArrayList<>();
-                skipWhitespace();
-                if (peek() == ']') {
-                    pos++;
-                    return result;
-                }
-                while (true) {
-                    result.add(parseValue());
-                    skipWhitespace();
-                    char next = peek();
-                    if (next == ',') {
-                        pos++;
-                    } else if (next == ']') {
-                        pos++;
-                        break;
-                    } else {
-                        throw new IllegalArgumentException("Expected ',' or ']' at offset " + pos);
-                    }
-                }
-                return result;
-            }
-
-            private String parseString() {
-                expect('"');
-                StringBuilder sb = new StringBuilder();
-                while (true) {
-                    char c = next();
-                    if (c == '"') {
-                        break;
-                    }
-                    if (c == '\\') {
-                        char escaped = next();
-                        switch (escaped) {
-                            case '"' -> sb.append('"');
-                            case '\\' -> sb.append('\\');
-                            case '/' -> sb.append('/');
-                            case 'n' -> sb.append('\n');
-                            case 'r' -> sb.append('\r');
-                            case 't' -> sb.append('\t');
-                            case 'b' -> sb.append('\b');
-                            case 'f' -> sb.append('\f');
-                            case 'u' -> {
-                                String hex = s.substring(pos, pos + 4);
-                                pos += 4;
-                                sb.append((char) Integer.parseInt(hex, 16));
-                            }
-                            default ->
-                                    throw new IllegalArgumentException(
-                                            "Unknown escape sequence '\\" + escaped + "' at offset " + pos);
-                        }
-                    } else {
-                        sb.append(c);
-                    }
-                }
-                return sb.toString();
-            }
-
-            private Boolean parseBoolean() {
-                if (s.startsWith("true", pos)) {
-                    pos += 4;
-                    return Boolean.TRUE;
-                }
-                if (s.startsWith("false", pos)) {
-                    pos += 5;
-                    return Boolean.FALSE;
-                }
-                throw new IllegalArgumentException("Invalid literal at offset " + pos);
-            }
-
-            private Object parseNull() {
-                if (s.startsWith("null", pos)) {
-                    pos += 4;
-                    return null;
-                }
-                throw new IllegalArgumentException("Invalid literal at offset " + pos);
-            }
-
-            private Object parseNumber() {
-                int start = pos;
-                if (peek() == '-') {
-                    pos++;
-                }
-                boolean isFloatingPoint = false;
-                while (pos < s.length() && isNumberChar(s.charAt(pos))) {
-                    char c = s.charAt(pos);
-                    if (c == '.' || c == 'e' || c == 'E') {
-                        isFloatingPoint = true;
-                    }
-                    pos++;
-                }
-                if (pos == start) {
-                    throw new IllegalArgumentException("Invalid character at offset " + pos);
-                }
-                String token = s.substring(start, pos);
-                return isFloatingPoint ? (Object) Double.parseDouble(token) : (Object) Long.parseLong(token);
-            }
-
-            private static boolean isNumberChar(char c) {
-                return Character.isDigit(c) || c == '.' || c == '-' || c == '+' || c == 'e' || c == 'E';
-            }
-
-            private void skipWhitespace() {
-                while (pos < s.length() && Character.isWhitespace(s.charAt(pos))) {
-                    pos++;
-                }
-            }
-
-            private char peek() {
-                if (pos >= s.length()) {
-                    throw new IllegalArgumentException("Unexpected end of JSON input");
-                }
-                return s.charAt(pos);
-            }
-
-            private char next() {
-                char c = peek();
-                pos++;
-                return c;
-            }
-
-            private void expect(char expected) {
-                char actual = next();
-                if (actual != expected) {
-                    throw new IllegalArgumentException(
-                            "Expected '" + expected + "' but found '" + actual + "' at offset " + (pos - 1));
-                }
-            }
+        try {
+            return MAPPER.readValue(json, BundleManifest.class);
+        } catch (JsonProcessingException e) {
+            throw new IllegalArgumentException("invalid BundleManifest JSON: " + e.getOriginalMessage(), e);
         }
     }
 }

@@ -17,6 +17,9 @@
  */
 package net.onelitefeather.apus.ingest.connector;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
@@ -81,6 +84,8 @@ public final class PterodactylConnector implements WorldSourceConnector {
     /** Comma-separated top-level archive paths that make up "the world directory". */
     public static final String CONFIG_WORLD_PATHS = "worldPaths";
 
+    private static final ObjectMapper MAPPER = new ObjectMapper();
+
     private final HttpClient httpClient;
 
     public PterodactylConnector() {
@@ -107,20 +112,19 @@ public final class PterodactylConnector implements WorldSourceConnector {
         HttpResponse<String> response = sendForString(authorizedRequest(uri, apiKey));
         requireSuccess(response, "list backups");
 
-        Map<String, Object> root = MinimalJson.asMap(MinimalJson.parse(response.body()));
-        List<Object> data = MinimalJson.asList(root.get("data"));
+        JsonNode root = parseJson(response.body());
 
         List<SourceVersion> versions = new ArrayList<>();
-        for (Object item : data) {
-            Map<String, Object> attributes = MinimalJson.asMap(MinimalJson.asMap(item).get("attributes"));
-            if (!Boolean.TRUE.equals(attributes.get("is_successful"))) {
+        for (JsonNode item : root.path("data")) {
+            JsonNode attributes = item.path("attributes");
+            if (!attributes.path("is_successful").asBoolean(false)) {
                 // A backup still running or that failed has nothing fetchable yet.
                 continue;
             }
-            String uuid = (String) attributes.get("uuid");
-            String name = (String) attributes.get("name");
-            String createdAt = (String) attributes.get("created_at");
-            long bytes = MinimalJson.asLong(attributes.get("bytes"));
+            String uuid = attributes.path("uuid").asText(null);
+            String name = attributes.path("name").asText(null);
+            String createdAt = attributes.path("created_at").asText(null);
+            long bytes = attributes.path("bytes").asLong();
             versions.add(new SourceVersion(uuid, name, OffsetDateTime.parse(createdAt).toInstant(), bytes));
         }
         return versions;
@@ -138,11 +142,11 @@ public final class PterodactylConnector implements WorldSourceConnector {
         HttpResponse<String> signed = sendForString(authorizedRequest(downloadUri, apiKey));
         requireSuccess(signed, "request signed backup download url");
 
-        Map<String, Object> body = MinimalJson.asMap(MinimalJson.parse(signed.body()));
-        Object url = MinimalJson.asMap(body.get("attributes")).get("url");
-        if (!(url instanceof String signedUrl)) {
+        JsonNode urlNode = parseJson(signed.body()).path("attributes").path("url");
+        if (!urlNode.isTextual()) {
             throw new IllegalStateException("Pterodactyl signed_url response had no attributes.url: " + signed.body());
         }
+        String signedUrl = urlNode.asText();
 
         // The backup is a tar.gz of the entire server -- plugins, configs and worlds mixed
         // together, potentially tens of gigabytes. gzip is not seekable, so the stream is walked
@@ -177,6 +181,14 @@ public final class PterodactylConnector implements WorldSourceConnector {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("interrupted during Pterodactyl API request: " + request.uri(), e);
+        }
+    }
+
+    private static JsonNode parseJson(String body) {
+        try {
+            return MAPPER.readTree(body);
+        } catch (JsonProcessingException e) {
+            throw new UncheckedIOException("failed to parse Pterodactyl API response as JSON: " + body, e);
         }
     }
 
