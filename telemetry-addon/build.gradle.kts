@@ -21,6 +21,11 @@ tasks {
     shadowJar {
         archiveClassifier.set("")
         archiveBaseName.set("apus-telemetry-addon")
+        // Fixed name instead of the default "apus-telemetry-addon-<version>.jar": the
+        // Dockerfile COPYs this file by name (no glob), and a glob over build/libs breaks
+        // the moment more than one version is present there -- which happens after the
+        // first release, once release-please bumps the project version.
+        archiveFileName.set("apus-telemetry-addon.jar")
     }
     build {
         dependsOn(shadowJar)
