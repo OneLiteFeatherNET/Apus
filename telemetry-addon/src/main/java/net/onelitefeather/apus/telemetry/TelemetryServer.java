@@ -18,6 +18,7 @@
 package net.onelitefeather.apus.telemetry;
 
 import com.sun.net.httpserver.HttpExchange;
+import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
 import java.io.OutputStream;
@@ -45,10 +46,15 @@ public final class TelemetryServer implements AutoCloseable {
 
     public void start() throws IOException {
         server = HttpServer.create(new InetSocketAddress(config.bindAddress(), config.port()), 0);
-        server.createContext("/progress", exchange -> respondWith(exchange, "application/json", JsonWriter::toJson));
         server.createContext(
-                "/metrics", exchange -> respondWith(exchange, "text/plain; version=0.0.4", PrometheusWriter::toPrometheus));
-        server.createContext("/healthz", exchange -> send(exchange, 200, "text/plain", "ok"));
+                "/progress",
+                exactPath("/progress", exchange -> respondWith(exchange, "application/json", JsonWriter::toJson)));
+        server.createContext(
+                "/metrics",
+                exactPath(
+                        "/metrics",
+                        exchange -> respondWith(exchange, "text/plain; version=0.0.4", PrometheusWriter::toPrometheus)));
+        server.createContext("/healthz", exactPath("/healthz", exchange -> send(exchange, 200, "text/plain", "ok")));
         server.createContext("/", exchange -> send(exchange, 404, "text/plain", "not found"));
         // A single daemon thread is plenty: the operator polls once per second.
         server.setExecutor(Executors.newSingleThreadExecutor(runnable -> {
@@ -72,6 +78,24 @@ public final class TelemetryServer implements AutoCloseable {
             server.stop(0);
             server = null;
         }
+    }
+
+    /**
+     * Wraps a handler so it only fires for an exact path match.
+     *
+     * <p>{@link HttpServer} matches contexts by string prefix, not path segments, so a
+     * context registered for {@code /progress} would otherwise also answer requests for
+     * {@code /progressX} or {@code /progress/nested}. Every route in this class must
+     * reject those instead, per the "everything else is 404" contract.
+     */
+    private static HttpHandler exactPath(String expectedPath, HttpHandler handler) {
+        return exchange -> {
+            if (expectedPath.equals(exchange.getRequestURI().getPath())) {
+                handler.handle(exchange);
+            } else {
+                send(exchange, 404, "text/plain", "not found");
+            }
+        };
     }
 
     private void respondWith(HttpExchange exchange, String contentType, Formatter formatter) throws IOException {

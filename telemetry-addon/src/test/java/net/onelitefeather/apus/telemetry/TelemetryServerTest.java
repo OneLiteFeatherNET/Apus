@@ -19,6 +19,7 @@ package net.onelitefeather.apus.telemetry;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.net.URI;
@@ -26,6 +27,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
 import org.junit.jupiter.api.Test;
 
@@ -98,6 +100,9 @@ class TelemetryServerTest {
             HttpResponse<String> response = get(server.boundPort(), "/metrics");
 
             assertEquals(200, response.statusCode());
+            assertEquals(
+                    "text/plain; version=0.0.4",
+                    response.headers().firstValue("content-type").orElse(""));
             assertTrue(response.body().contains("apus_render_progress_ratio"), response.body());
         }
     }
@@ -123,6 +128,52 @@ class TelemetryServerTest {
             server.start();
 
             assertEquals(404, get(server.boundPort(), "/nope").statusCode());
+        }
+    }
+
+    @Test
+    void returns404ForPathsThatOnlySharePrefixWithARoute() throws Exception {
+        // HttpServer matches contexts by string prefix, not path segments, so a naive
+        // registration of "/progress" would also answer "/progressX" and "/progress/nested".
+        try (TelemetryServer server = new TelemetryServer(
+                new TelemetryConfig("127.0.0.1", 0, true), () -> ProgressSnapshot.idle(0, 1))) {
+            server.start();
+
+            assertEquals(404, get(server.boundPort(), "/progressX").statusCode());
+            assertEquals(404, get(server.boundPort(), "/progress/nested").statusCode());
+            assertEquals(404, get(server.boundPort(), "/metricsX").statusCode());
+            assertEquals(404, get(server.boundPort(), "/metrics/nested").statusCode());
+            assertEquals(404, get(server.boundPort(), "/healthzX").statusCode());
+            assertEquals(404, get(server.boundPort(), "/healthz/nested").statusCode());
+        }
+    }
+
+    @Test
+    void handlesRequestsOnADaemonThread() throws Exception {
+        AtomicBoolean handlerThreadIsDaemon = new AtomicBoolean(false);
+        Supplier<ProgressSnapshot> recordingSupplier = () -> {
+            handlerThreadIsDaemon.set(Thread.currentThread().isDaemon());
+            return ProgressSnapshot.idle(0, 1);
+        };
+
+        try (TelemetryServer server =
+                new TelemetryServer(new TelemetryConfig("127.0.0.1", 0, true), recordingSupplier)) {
+            server.start();
+
+            get(server.boundPort(), "/progress");
+
+            assertTrue(
+                    handlerThreadIsDaemon.get(),
+                    "the server's request-handling thread must be a daemon thread, "
+                            + "otherwise a completed render pod would never let the JVM exit");
+        }
+    }
+
+    @Test
+    void boundPortThrowsBeforeTheServerIsStarted() {
+        try (TelemetryServer server = new TelemetryServer(
+                new TelemetryConfig("127.0.0.1", 0, true), () -> ProgressSnapshot.idle(0, 1))) {
+            assertThrows(IllegalStateException.class, server::boundPort);
         }
     }
 }
