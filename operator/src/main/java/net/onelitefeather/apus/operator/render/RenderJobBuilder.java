@@ -67,8 +67,13 @@ public final class RenderJobBuilder {
 
     private static final String CONTAINER_NAME = "bluemap";
 
-    /** Domain-specific label recording which {@link BlueMapMap} a render job belongs to. */
-    private static final String MAP_LABEL = "bluemap.onelitefeather.net/map";
+    /**
+     * Domain-specific label recording which {@link BlueMapMap} a render job belongs to.
+     * Package-private rather than private: {@link BlueMapRenderReconciler} queries Jobs by this
+     * label to enforce the {@code concurrencyPolicy: Forbid} default (only one active render
+     * job per map), so both classes must agree on the exact same key.
+     */
+    static final String MAP_LABEL = "bluemap.onelitefeather.net/map";
 
     private RenderJobBuilder() {}
 
