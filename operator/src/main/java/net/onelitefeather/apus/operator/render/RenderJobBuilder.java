@@ -26,10 +26,6 @@ import io.fabric8.kubernetes.api.model.OwnerReferenceBuilder;
 import io.fabric8.kubernetes.api.model.Quantity;
 import io.fabric8.kubernetes.api.model.ResourceRequirements;
 import io.fabric8.kubernetes.api.model.ResourceRequirementsBuilder;
-import io.fabric8.kubernetes.api.model.Volume;
-import io.fabric8.kubernetes.api.model.VolumeBuilder;
-import io.fabric8.kubernetes.api.model.VolumeMount;
-import io.fabric8.kubernetes.api.model.VolumeMountBuilder;
 import io.fabric8.kubernetes.api.model.batch.v1.Job;
 import io.fabric8.kubernetes.api.model.batch.v1.JobBuilder;
 import java.util.ArrayList;
@@ -39,6 +35,7 @@ import java.util.Map;
 import net.onelitefeather.apus.operator.OperatorConfig;
 import net.onelitefeather.apus.operator.api.BlueMapMap;
 import net.onelitefeather.apus.operator.api.BlueMapRender;
+import net.onelitefeather.apus.operator.api.Labels;
 
 /**
  * Turns a {@link BlueMapRender} plus the {@link BlueMapMap} it targets into the Kubernetes
@@ -47,8 +44,13 @@ import net.onelitefeather.apus.operator.api.BlueMapRender;
  *
  * <p>Pure function: no Kubernetes client, no side effects. The caller (a reconciler) is
  * responsible for actually submitting the returned {@link Job} and for having already
- * provisioned the bucket secret and config {@code ConfigMap} this builder only references
- * by name.
+ * provisioned the bucket secret this builder only references by name.
+ *
+ * <p>Deliberately does not mount a generated BlueMap configuration: the Phase 1 runner image
+ * (see {@code runner/entrypoint.sh}) always builds its own configuration from the environment
+ * variables below and never reads anything from a mounted path, so a ConfigMap mount here
+ * would be dead weight. See {@link net.onelitefeather.apus.operator.map.BlueMapConfigBuilder}
+ * for why that class still exists despite nothing calling it yet.
  */
 public final class RenderJobBuilder {
 
@@ -64,8 +66,9 @@ public final class RenderJobBuilder {
     private static final int BACKOFF_LIMIT = 2;
 
     private static final String CONTAINER_NAME = "bluemap";
-    private static final String CONFIG_VOLUME_NAME = "bluemap-config";
-    private static final String CONFIG_MOUNT_PATH = "/config";
+
+    /** Domain-specific label recording which {@link BlueMapMap} a render job belongs to. */
+    private static final String MAP_LABEL = "bluemap.onelitefeather.net/map";
 
     private RenderJobBuilder() {}
 
@@ -80,29 +83,18 @@ public final class RenderJobBuilder {
      * @param bucketSecretName name of the Kubernetes {@code Secret}, in the same namespace as
      *     {@code render}, that Rook populated with the bucket's S3 credentials; referenced via
      *     {@code secretKeyRef}, never inlined
-     * @param configMapName name of the {@code ConfigMap} carrying this map's generated BlueMap
-     *     configuration; mounted read-only into the container
      * @param config operator-wide settings, currently only the runner image to schedule
      * @return the {@link Job} manifest, not yet submitted to the API server
      */
-    public static Job build(
-            BlueMapRender render, BlueMapMap map, String bucketSecretName, String configMapName, OperatorConfig config) {
+    public static Job build(BlueMapRender render, BlueMapMap map, String bucketSecretName, OperatorConfig config) {
         String namespace = render.getMetadata().getNamespace();
         Map<String, String> labels = labels(render, map);
-
-        List<Volume> volumes = new ArrayList<>();
-        List<VolumeMount> volumeMounts = new ArrayList<>();
-        if (configMapName != null && !configMapName.isBlank()) {
-            volumes.add(configVolume(configMapName));
-            volumeMounts.add(configVolumeMount());
-        }
 
         Container container = new ContainerBuilder()
                 .withName(CONTAINER_NAME)
                 .withImage(config.runnerImage())
                 .withEnv(env(render, map, bucketSecretName))
                 .withResources(resources(map))
-                .withVolumeMounts(volumeMounts)
                 .build();
 
         return new JobBuilder()
@@ -121,7 +113,6 @@ public final class RenderJobBuilder {
                 .withNewSpec()
                 .withRestartPolicy("Never")
                 .withContainers(container)
-                .withVolumes(volumes)
                 .endSpec()
                 .endTemplate()
                 .endSpec()
@@ -129,11 +120,8 @@ public final class RenderJobBuilder {
     }
 
     private static Map<String, String> labels(BlueMapRender render, BlueMapMap map) {
-        Map<String, String> labels = new LinkedHashMap<>();
-        labels.put("app.kubernetes.io/managed-by", "apus-operator");
-        labels.put("app.kubernetes.io/name", "bluemap-render");
-        labels.put("app.kubernetes.io/instance", render.getMetadata().getName());
-        labels.put("bluemap.onelitefeather.net/map", map.getMetadata().getName());
+        Map<String, String> labels = Labels.standard("bluemap-render", render.getMetadata().getName());
+        labels.put(MAP_LABEL, map.getMetadata().getName());
         return labels;
     }
 
@@ -218,23 +206,6 @@ public final class RenderJobBuilder {
         return new ResourceRequirementsBuilder()
                 .withRequests(quantities)
                 .withLimits(quantities)
-                .build();
-    }
-
-    private static Volume configVolume(String configMapName) {
-        return new VolumeBuilder()
-                .withName(CONFIG_VOLUME_NAME)
-                .withNewConfigMap()
-                .withName(configMapName)
-                .endConfigMap()
-                .build();
-    }
-
-    private static VolumeMount configVolumeMount() {
-        return new VolumeMountBuilder()
-                .withName(CONFIG_VOLUME_NAME)
-                .withMountPath(CONFIG_MOUNT_PATH)
-                .withReadOnly(true)
                 .build();
     }
 }

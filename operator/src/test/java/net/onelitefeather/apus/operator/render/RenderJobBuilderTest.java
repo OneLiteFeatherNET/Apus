@@ -34,6 +34,7 @@ import java.util.stream.Collectors;
 import net.onelitefeather.apus.operator.OperatorConfig;
 import net.onelitefeather.apus.operator.api.BlueMapMap;
 import net.onelitefeather.apus.operator.api.BlueMapRender;
+import net.onelitefeather.apus.operator.api.Labels;
 import org.junit.jupiter.api.Test;
 
 class RenderJobBuilderTest {
@@ -71,7 +72,7 @@ class RenderJobBuilderTest {
 
     @Test
     void suppliesEveryMandatoryEnvironmentVariable() {
-        Job job = RenderJobBuilder.build(render(), map(), "bucket-secret", "map-config", OperatorConfig.defaults());
+        Job job = RenderJobBuilder.build(render(), map(), "bucket-secret", OperatorConfig.defaults());
 
         Map<String, EnvVar> env = envOf(job);
 
@@ -93,7 +94,7 @@ class RenderJobBuilderTest {
 
     @Test
     void takesCredentialsFromTheSecretRatherThanInliningThem() {
-        Job job = RenderJobBuilder.build(render(), map(), "bucket-secret", "map-config", OperatorConfig.defaults());
+        Job job = RenderJobBuilder.build(render(), map(), "bucket-secret", OperatorConfig.defaults());
 
         Map<String, EnvVar> env = envOf(job);
 
@@ -109,7 +110,7 @@ class RenderJobBuilderTest {
 
     @Test
     void doesNotRestartTheJobEndlessly() {
-        Job job = RenderJobBuilder.build(render(), map(), "bucket-secret", "map-config", OperatorConfig.defaults());
+        Job job = RenderJobBuilder.build(render(), map(), "bucket-secret", OperatorConfig.defaults());
 
         assertNotNull(job.getSpec().getBackoffLimit(), "a render must not retry forever");
         assertTrue(job.getSpec().getBackoffLimit() <= 6, "backoff limit unexpectedly high");
@@ -119,7 +120,7 @@ class RenderJobBuilderTest {
 
     @Test
     void isOwnedByTheRenderResourceSoItIsGarbageCollected() {
-        Job job = RenderJobBuilder.build(render(), map(), "bucket-secret", "map-config", OperatorConfig.defaults());
+        Job job = RenderJobBuilder.build(render(), map(), "bucket-secret", OperatorConfig.defaults());
 
         assertTrue(
                 job.getMetadata().getOwnerReferences().stream()
@@ -129,7 +130,7 @@ class RenderJobBuilderTest {
 
     @Test
     void suppliesTheOptionalPrefixVariableWhenTheMapStorageHasOne() {
-        Job job = RenderJobBuilder.build(render(), map(), "bucket-secret", "map-config", OperatorConfig.defaults());
+        Job job = RenderJobBuilder.build(render(), map(), "bucket-secret", OperatorConfig.defaults());
 
         Map<String, EnvVar> env = envOf(job);
 
@@ -141,7 +142,7 @@ class RenderJobBuilderTest {
         BlueMapMap map = map();
         map.getSpec().getStorage().setPrefix(null);
 
-        Job job = RenderJobBuilder.build(render(), map, "bucket-secret", "map-config", OperatorConfig.defaults());
+        Job job = RenderJobBuilder.build(render(), map, "bucket-secret", OperatorConfig.defaults());
 
         assertNull(envOf(job).get("APUS_MAP_PREFIX"), "runner already defaults an absent prefix to '.'");
     }
@@ -150,33 +151,42 @@ class RenderJobBuilderTest {
     void placesTheContainerImageFromTheOperatorConfig() {
         OperatorConfig config = new OperatorConfig("rook-ceph-fr01", "feather-s3", "ceph-bucket-fr01", "apus/runner:1.2.3");
 
-        Job job = RenderJobBuilder.build(render(), map(), "bucket-secret", "map-config", config);
+        Job job = RenderJobBuilder.build(render(), map(), "bucket-secret", config);
 
         Container container = job.getSpec().getTemplate().getSpec().getContainers().get(0);
         assertEquals("apus/runner:1.2.3", container.getImage());
     }
 
     @Test
-    void mountsTheGeneratedConfigMapReadOnly() {
-        Job job = RenderJobBuilder.build(render(), map(), "bucket-secret", "map-config", OperatorConfig.defaults());
+    void doesNotMountAnyConfigMap() {
+        // The Phase 1 runner is driven exclusively by environment variables (design spec
+        // §7.4); it never reads anything from a mounted path, so a ConfigMap mount here would
+        // be effectless.
+        Job job = RenderJobBuilder.build(render(), map(), "bucket-secret", OperatorConfig.defaults());
 
         List<Volume> volumes = job.getSpec().getTemplate().getSpec().getVolumes();
-        assertTrue(
-                volumes.stream()
-                        .anyMatch(volume -> volume.getConfigMap() != null
-                                && "map-config".equals(volume.getConfigMap().getName())),
-                "job must mount the ConfigMap the reconciler generated for this map");
+        assertTrue(volumes == null || volumes.isEmpty(), "job must not mount any volume");
 
         Container container = job.getSpec().getTemplate().getSpec().getContainers().get(0);
         assertTrue(
-                container.getVolumeMounts().stream().anyMatch(mount -> Boolean.TRUE.equals(mount.getReadOnly())),
-                "config must be mounted read-only, the runner never writes back to it");
+                container.getVolumeMounts() == null || container.getVolumeMounts().isEmpty(),
+                "container must not mount any volume");
     }
 
     @Test
     void isNamespacedLikeTheRenderItBelongsTo() {
-        Job job = RenderJobBuilder.build(render(), map(), "bucket-secret", "map-config", OperatorConfig.defaults());
+        Job job = RenderJobBuilder.build(render(), map(), "bucket-secret", OperatorConfig.defaults());
 
         assertEquals("bluemap-friends", job.getMetadata().getNamespace());
+    }
+
+    @Test
+    void carriesTheManagedByLabelOnBothJobAndPodTemplate() {
+        Job job = RenderJobBuilder.build(render(), map(), "bucket-secret", OperatorConfig.defaults());
+
+        assertEquals(Labels.MANAGED_BY_VALUE, job.getMetadata().getLabels().get(Labels.MANAGED_BY));
+        assertEquals(
+                Labels.MANAGED_BY_VALUE,
+                job.getSpec().getTemplate().getMetadata().getLabels().get(Labels.MANAGED_BY));
     }
 }
