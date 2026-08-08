@@ -42,6 +42,15 @@ import net.onelitefeather.apus.operator.rook.ObjectBucketClaim;
  * {@link net.onelitefeather.apus.operator.render.RenderJobBuilder} references that Secret by
  * name and reads exactly those two keys via {@code secretKeyRef} — this is Rook's contract, not
  * something Apus controls, so callers must not rename or reshape it.
+ *
+ * <p><b>Precondition: the caller has already checked Rook is installed.</b> This class does not
+ * itself check {@link io.fabric8.kubernetes.client.Client#supports(Class)} for {@link
+ * ObjectBucketClaim} -- {@link BlueMapMapReconciler}, its only caller, does that once up front
+ * (mirroring {@code TenantReconciler}'s identical check for {@code CephObjectStoreUser}) and
+ * reports a {@code RookUnavailable} condition instead of ever calling {@link #ensureBucket} when
+ * the CRD is missing. Calling this class directly against a cluster without that CRD registered
+ * would surface as a plain 404/"no matches for kind" from the underlying client call, not a
+ * graceful condition.
  */
 public final class BucketProvisioner {
 

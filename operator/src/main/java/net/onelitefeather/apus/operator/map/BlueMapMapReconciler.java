@@ -75,6 +75,14 @@ import net.onelitefeather.apus.operator.tenant.TenantReconciler;
  * published its endpoint, {@code status.bucket.name} is left empty on purpose.
  * {@code BlueMapRenderReconciler} treats an empty bucket name as "not ready yet" and refuses to
  * submit a render job for it.
+ *
+ * <p><b>Rook not (yet) installed:</b> mirrors {@code TenantReconciler}'s handling of {@code
+ * CephObjectStoreUser}. {@link #reconcile} checks {@link
+ * io.fabric8.kubernetes.client.Client#supports(Class)} for {@link ObjectBucketClaim} before this
+ * class -- or {@link BucketProvisioner} on its behalf -- ever touches one. If Rook's {@code
+ * ObjectBucketClaim} CRD is not registered on the cluster, nothing is read or written; the
+ * {@code Ready} condition is set to {@code False} with reason {@value #ROOK_UNAVAILABLE_REASON}
+ * instead of the reconciler throwing, and the next resync retries once Rook is ready.
  */
 @ControllerConfiguration
 public class BlueMapMapReconciler implements Reconciler<BlueMapMap> {
@@ -87,6 +95,12 @@ public class BlueMapMapReconciler implements Reconciler<BlueMapMap> {
 
     /** Reason set on the {@code Ready} condition when an existing resource fails the ownership check. */
     public static final String RESOURCE_CONFLICT_REASON = "ResourceConflict";
+
+    /**
+     * Reason set on the {@code Ready} condition when Rook's {@code ObjectBucketClaim} CRD is not
+     * registered on the cluster, so no bucket could be provisioned.
+     */
+    public static final String ROOK_UNAVAILABLE_REASON = "RookUnavailable";
 
     /** See {@link TenantReconciler#namespaceFor(Tenant)} -- every tenant namespace is named this way. */
     static final String TENANT_NAMESPACE_PREFIX = "bluemap-";
@@ -116,6 +130,13 @@ public class BlueMapMapReconciler implements Reconciler<BlueMapMap> {
         String name = map.getMetadata().getName();
         String mapUid = map.getMetadata().getUid();
         String cephUser = cephUserForNamespace(namespace);
+
+        // Rook may not be installed yet -- see TenantReconciler's identical check for why
+        // supports() rather than a get()/create() probe is used to tell "the CRD doesn't exist"
+        // apart from "the object doesn't exist" (both would otherwise look like a 404).
+        if (!client.supports(ObjectBucketClaim.class)) {
+            return rookUnavailable(map, name);
+        }
 
         ObjectBucketClaim existingClaim =
                 client.resources(ObjectBucketClaim.class).inNamespace(namespace).withName(name).get();
@@ -200,6 +221,24 @@ public class BlueMapMapReconciler implements Reconciler<BlueMapMap> {
 
     private static UpdateControl<BlueMapMap> pending(BlueMapMap map, String message) {
         Conditions.set(map.getStatus().getConditions(), Conditions.ready(false, BUCKET_PENDING_REASON, message));
+        return UpdateControl.patchStatus(map).rescheduleAfter(RECHECK_INTERVAL);
+    }
+
+    /**
+     * Reports that Rook's {@code ObjectBucketClaim} CRD is not registered on the cluster instead
+     * of letting a {@code get()}/{@code create()} against it throw. A missing CRD is an
+     * environment that has not finished coming up yet, not a bug -- see the class Javadoc's
+     * "Rook not (yet) installed" section, mirroring {@code TenantReconciler}.
+     */
+    private static UpdateControl<BlueMapMap> rookUnavailable(BlueMapMap map, String name) {
+        Conditions.set(
+                map.getStatus().getConditions(),
+                Conditions.ready(
+                        false,
+                        ROOK_UNAVAILABLE_REASON,
+                        "ObjectBucketClaim CRD (objectbucket.io) is not registered on this cluster -- Rook is"
+                                + " not installed or not ready yet; cannot provision a bucket for map '" + name
+                                + "'"));
         return UpdateControl.patchStatus(map).rescheduleAfter(RECHECK_INTERVAL);
     }
 

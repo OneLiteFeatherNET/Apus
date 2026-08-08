@@ -30,12 +30,15 @@ import io.fabric8.kubernetes.api.model.ResourceQuota;
 import io.fabric8.kubernetes.client.Config;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.KubernetesClientBuilder;
+import io.javaoperatorsdk.operator.api.reconciler.UpdateControl;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import net.onelitefeather.apus.operator.api.BlueMapMap;
 import net.onelitefeather.apus.operator.api.Conditions;
 import net.onelitefeather.apus.operator.api.Tenant;
+import net.onelitefeather.apus.operator.map.BlueMapMapReconciler;
 import net.onelitefeather.apus.operator.tenant.TenantReconciler;
 import org.junit.jupiter.api.Test;
 import org.testcontainers.k3s.K3sContainer;
@@ -62,7 +65,9 @@ import org.testcontainers.utility.DockerImageName;
  * throwing. That is itself a meaningful thing to prove against a real API server, since it is
  * exactly the "supports() must correctly say no" half of the behaviour that the mock server
  * cannot exercise (it answers {@code supports()} with an unconditional {@code true} -- see
- * task-8-report.md).
+ * task-8-report.md). {@link BlueMapMapReconciler} adopted the identical pattern for Rook's
+ * {@code ObjectBucketClaim} CRD (see {@link #reportsRookUnavailableForABlueMapMapWithoutThrowing()}),
+ * so it needs the same real-cluster proof for the same reason.
  */
 class OperatorIntegrationTest {
 
@@ -130,6 +135,55 @@ class OperatorIntegrationTest {
                         Boolean.parseBoolean(ready.getStatus()),
                         "Ready must be False while the storage user could not be provisioned");
                 assertEquals(TenantReconciler.ROOK_UNAVAILABLE_REASON, ready.getReason());
+            }
+        }
+    }
+
+    /**
+     * Same shape as {@link #appliesGeneratedCrdsAndReconcilesATenant()}, but for {@link
+     * BlueMapMapReconciler} and Rook's {@code ObjectBucketClaim} CRD instead of {@code
+     * CephObjectStoreUser}: no Rook on this cluster, so reconciling a {@code BlueMapMap} must
+     * report {@link BlueMapMapReconciler#ROOK_UNAVAILABLE_REASON} rather than throw when it
+     * tries to touch a CRD the API server does not know about.
+     */
+    @Test
+    void reportsRookUnavailableForABlueMapMapWithoutThrowing() throws Exception {
+        try (K3sContainer k3s = new K3sContainer(DockerImageName.parse("rancher/k3s:v1.31.2-k3s1"))) {
+            k3s.start();
+
+            Config config = Config.fromKubeconfig(k3s.getKubeConfigYaml());
+            try (KubernetesClient client =
+                    new KubernetesClientBuilder().withConfig(config).build()) {
+
+                applyGeneratedCrds(client);
+                awaitCrdRegistration(client, "bluemapmaps.bluemap.onelitefeather.net");
+
+                BlueMapMap map = new BlueMapMap();
+                map.setMetadata(new ObjectMetaBuilder()
+                        .withName("survival-overworld")
+                        .withNamespace("default")
+                        .build());
+                map.getSpec().getSource().setDimension("minecraft:overworld");
+                map.getSpec().getBluemap().setMinecraftVersion("1.21.10");
+                BlueMapMap created =
+                        client.resources(BlueMapMap.class).inNamespace("default").resource(map).create();
+
+                BlueMapMapReconciler reconciler = new BlueMapMapReconciler(client, OperatorConfig.defaults());
+                UpdateControl<BlueMapMap> control = reconciler.reconcile(created, null);
+
+                assertTrue(control.isPatchStatus(), "the missing-CRD outcome must still be reported in status");
+                assertNull(
+                        created.getStatus().getBucket().getName(),
+                        "no bucket exists to report -- ObjectBucketClaim CRD is not registered on this cluster");
+
+                Condition ready = created.getStatus().getConditions().stream()
+                        .filter(condition -> Conditions.READY.equals(condition.getType()))
+                        .findFirst()
+                        .orElseThrow(() -> new AssertionError("reconciler must set a Ready condition"));
+                assertFalse(
+                        Boolean.parseBoolean(ready.getStatus()),
+                        "Ready must be False while no bucket could be provisioned");
+                assertEquals(BlueMapMapReconciler.ROOK_UNAVAILABLE_REASON, ready.getReason());
             }
         }
     }
