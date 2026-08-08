@@ -21,7 +21,7 @@ RUN curl -fsSL -o bluemap-cli.jar \
 FROM eclipse-temurin:25-jre-jammy
 
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates jq curl \
+ && apt-get install -y --no-install-recommends ca-certificates curl \
  && curl -fsSL -o /usr/local/bin/mc https://dl.min.io/client/mc/release/linux-amd64/mc \
  && chmod +x /usr/local/bin/mc \
  && apt-get purge -y curl \
