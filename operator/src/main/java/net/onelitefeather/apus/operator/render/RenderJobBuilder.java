@@ -68,6 +68,16 @@ public final class RenderJobBuilder {
     private static final String CONTAINER_NAME = "bluemap";
 
     /**
+     * Without this, Kubernetes only populates a terminated container's {@code message} when the
+     * container itself writes to {@code /dev/termination-log} -- which the Phase 1 runner image
+     * does not do. {@code FallbackToLogsOnError} makes the Kubelet copy the last chunk of the
+     * container's own log output into that message on a non-zero exit instead, which is what
+     * lets {@code BlueMapRenderReconciler.quotaExceededMessage(Pod)} have anything to inspect at
+     * all. Still only a heuristic -- see that method's Javadoc.
+     */
+    private static final String TERMINATION_MESSAGE_POLICY = "FallbackToLogsOnError";
+
+    /**
      * Domain-specific label recording which {@link BlueMapMap} a render job belongs to.
      * Package-private rather than private: {@link BlueMapRenderReconciler} queries Jobs by this
      * label to enforce the {@code concurrencyPolicy: Forbid} default (only one active render
@@ -100,6 +110,7 @@ public final class RenderJobBuilder {
                 .withImage(config.runnerImage())
                 .withEnv(env(render, map, bucketSecretName))
                 .withResources(resources(map))
+                .withTerminationMessagePolicy(TERMINATION_MESSAGE_POLICY)
                 .build();
 
         return new JobBuilder()

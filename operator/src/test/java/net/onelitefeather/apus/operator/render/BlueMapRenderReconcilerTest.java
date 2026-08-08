@@ -444,6 +444,42 @@ class BlueMapRenderReconcilerTest {
         assertEquals("StorageQuotaExceeded", readyReason(render));
     }
 
+    @Test
+    void detectsAnS3QuotaMessageEvenWithoutTheExactQuotaExceededToken() {
+        client.resources(BlueMapMap.class).inNamespace("bluemap-friends").resource(boundMap()).create();
+        BlueMapRenderReconciler reconciler = new BlueMapRenderReconciler(client, OperatorConfig.defaults());
+        BlueMapRender render = renderWithUid("render-1");
+        reconciler.reconcile(render, null);
+        createPodForJob("render-1", terminatedContainer("Error", "PutObject to bucket failed: quota reached"));
+
+        reconciler.reconcile(render, null);
+
+        assertEquals("Failed", render.getStatus().getPhase());
+        assertEquals("StorageQuotaExceeded", readyReason(render));
+    }
+
+    @Test
+    void aHarmlessMessageThatMerelyMentionsQuotaIsNotTreatedAsAStorageQuotaFailure() {
+        client.resources(BlueMapMap.class).inNamespace("bluemap-friends").resource(boundMap()).create();
+        BlueMapRenderReconciler reconciler = new BlueMapRenderReconciler(client, OperatorConfig.defaults());
+        BlueMapRender render = renderWithUid("render-1");
+        reconciler.reconcile(render, null);
+        // A Kubernetes resource-quota rejection (e.g. ephemeral-storage) also contains the word
+        // "quota", but has nothing to do with the S3 bucket the render writes to -- must not be
+        // reported as a terminal StorageQuotaExceeded, which is never retried.
+        createPodForJob(
+                "render-1",
+                terminatedContainer("Error", "exceeded quota: requests.ephemeral-storage=2Gi"));
+
+        reconciler.reconcile(render, null);
+
+        assertEquals(
+                "Rendering",
+                render.getStatus().getPhase(),
+                "a non-S3 quota mention must not end the render as a storage-quota failure");
+        assertEquals("Rendering", readyReason(render));
+    }
+
     private ContainerStateTerminated terminatedContainer(
             String reason, String message) {
         if (reason == null && message == null) {

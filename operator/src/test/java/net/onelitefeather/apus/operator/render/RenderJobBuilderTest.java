@@ -189,4 +189,15 @@ class RenderJobBuilderTest {
                 Labels.MANAGED_BY_VALUE,
                 job.getSpec().getTemplate().getMetadata().getLabels().get(Labels.MANAGED_BY));
     }
+
+    @Test
+    void fallsBackToLogsOnErrorSoAFailureHasSomethingToInspect() {
+        // Without this, the terminated container's status.message stays empty on failure
+        // (nothing writes to /dev/termination-log), leaving BlueMapRenderReconciler's
+        // quota-failure detection with nothing to match against.
+        Job job = RenderJobBuilder.build(render(), map(), "bucket-secret", OperatorConfig.defaults());
+
+        Container container = job.getSpec().getTemplate().getSpec().getContainers().get(0);
+        assertEquals("FallbackToLogsOnError", container.getTerminationMessagePolicy());
+    }
 }

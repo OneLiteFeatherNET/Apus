@@ -82,11 +82,13 @@ import net.onelitefeather.apus.operator.api.Conditions;
  * <p><b>Storage quota is not retried.</b> Ceph enforces a tenant's storage quota (see {@code
  * TenantReconciler}), so a render can fail because the bucket is simply full. That failure is
  * detected from the render pod's terminated container state (heuristically: its reason/message
- * mentioning "quota", case-insensitively -- Phase 1 does not yet define a dedicated exit code or
- * telemetry field for this, so this is a best-effort signal that should be tightened once one
- * exists) and reported via {@link #onQuotaExceeded(BlueMapRender, String)}: phase {@code Failed},
- * condition {@code StorageQuotaExceeded}, no further reschedule. Retrying against a full bucket
- * would just burn the same finite {@link RenderJobBuilder} backoff budget for nothing.
+ * matching a narrow set of S3-quota-specific patterns, case-insensitively -- see {@link
+ * #quotaExceededMessage(Pod)}. Phase 1 does not yet define a dedicated exit code or telemetry
+ * field for this, so this remains a best-effort signal, not a load-bearing contract, until the
+ * runner image grows one) and reported via {@link #onQuotaExceeded(BlueMapRender, String)}: phase
+ * {@code Failed}, condition {@code StorageQuotaExceeded}, no further reschedule. Retrying against
+ * a full bucket would just burn the same finite {@link RenderJobBuilder} backoff budget for
+ * nothing. See design spec §15 for the open point of a dedicated signal.
  *
  * <p><b>Ownership check, mirroring {@code TenantReconciler}:</b> the render job is named after
  * the {@link BlueMapRender} itself, so a render name can be reused after the original render is
@@ -373,9 +375,42 @@ public class BlueMapRenderReconciler implements Reconciler<BlueMapRender> {
     }
 
     /**
+     * S3 error codes/phrases that unambiguously mean a quota was hit -- no further context
+     * needed to treat a message mentioning one of these as a storage-quota failure.
+     */
+    private static final Set<String> UNAMBIGUOUS_QUOTA_TOKENS = Set.of("quotaexceeded", "exceededquota");
+
+    /**
+     * Terms that tie a bare mention of "quota" to S3/object storage specifically, as opposed to
+     * some unrelated Kubernetes quota (ephemeral-storage, pod count, ...). Required alongside a
+     * plain "quota" match -- see {@link #quotaExceededMessage(Pod)}.
+     */
+    private static final Set<String> S3_CONTEXT_TOKENS = Set.of("s3", "bucket", "rgw", "ceph", "object storage");
+
+    /**
      * Best-effort detection of a storage-quota failure from the render pod's terminated
-     * container state. See the class Javadoc for why this is a heuristic rather than a defined
-     * contract.
+     * container state's reason and message.
+     *
+     * <p><b>This is a heuristic, not a defined contract.</b> Two problems limit what it can
+     * reliably see, and both remain open (design spec §15) until the runner image grows a proper
+     * signal (e.g. a dedicated exit code):
+     *
+     * <ul>
+     *   <li>The Kubelet's terminated-container {@code reason} comes from a small fixed vocabulary
+     *       ({@code Error}, {@code OOMKilled}, ...) and never mentions "quota". The {@code
+     *       message} is only populated if the container writes to {@code
+     *       /dev/termination-log}, which does not happen by default -- {@link RenderJobBuilder}
+     *       sets {@code terminationMessagePolicy: FallbackToLogsOnError} precisely so a failing
+     *       container's last log lines end up here instead of an empty message.
+     *   <li>A bare substring match on "quota" would be too broad: an unrelated failure (e.g. an
+     *       ephemeral-storage quota killing the pod) also contains that word and must not be
+     *       reported -- wrongly -- as a permanent {@code StorageQuotaExceeded}, since that phase
+     *       is never retried.
+     * </ul>
+     *
+     * <p>To stay narrow, this only matches an unambiguous S3 quota error code/phrase ({@link
+     * #UNAMBIGUOUS_QUOTA_TOKENS}, e.g. the AWS S3 {@code QuotaExceeded} error code), or the word
+     * "quota" combined with an S3/object-storage-specific term ({@link #S3_CONTEXT_TOKENS}).
      */
     private static Optional<String> quotaExceededMessage(Pod pod) {
         if (pod.getStatus() == null || pod.getStatus().getContainerStatuses() == null) {
@@ -389,7 +424,11 @@ public class BlueMapRenderReconciler implements Reconciler<BlueMapRender> {
             }
             String reason = terminated.getReason() == null ? "" : terminated.getReason();
             String message = terminated.getMessage() == null ? "" : terminated.getMessage();
-            if ((reason + " " + message).toLowerCase(Locale.ROOT).contains("quota")) {
+            String combined = (reason + " " + message).toLowerCase(Locale.ROOT);
+            boolean unambiguousQuotaError = UNAMBIGUOUS_QUOTA_TOKENS.stream().anyMatch(combined::contains);
+            boolean quotaWithS3Context =
+                    combined.contains("quota") && S3_CONTEXT_TOKENS.stream().anyMatch(combined::contains);
+            if (unambiguousQuotaError || quotaWithS3Context) {
                 return Optional.of(!message.isBlank() ? message : reason);
             }
         }

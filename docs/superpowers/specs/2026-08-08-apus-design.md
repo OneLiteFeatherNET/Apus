@@ -802,6 +802,7 @@ Ebenen.
 4. **CRD-Generierung unter Gradle.** Vorgehen beim Aufsetzen von Phase 2 verifizieren (§13.2).
 5. **`render-mask` und Kanten.** Nur relevant, falls in Phase 4 der Maskenweg statt des eigenen Runners gewählt wird: Ob sich das Auffüllen mit Luft außerhalb der Maske abschalten lässt, ist dann zu prüfen.
 6. **Volume-Typ für große Welten.** `emptyDir` genügt bis zu einer Größe, die von der Node-Ausstattung abhängt; darüber ist ein PVC nötig. **Offen:** Diese Grenze wurde in Phase 1 entgegen der ursprünglichen Zusage **nicht** gemessen — es ist eigener Scope, keine bloße Verifikation eines bestehenden Plans. Muss vor Phase 2 nachgeholt werden, bevor der Operator einen Default für die CR festlegt.
+7. **Kein belastbares Quota-Signal aus dem Runner-Image.** `BlueMapRenderReconciler` erkennt ein Speicherlimit derzeit heuristisch aus dem Grund/der Meldung des terminierten Render-Pods (Muster wie `QuotaExceeded` oder "quota" kombiniert mit einem S3-Bezug wie `bucket`/`rgw`/`ceph`), gestützt auf `terminationMessagePolicy: FallbackToLogsOnError`, damit überhaupt eine Meldung ankommt. Das bleibt Best-Effort: das Kubelet-Vokabular für den Terminierungsgrund enthält "quota" nie, und die Meldung ist nur ein Log-Ausschnitt ohne Vertrag. Ein belastbares Signal (z. B. ein eigener Exit-Code des Runners für "Quota erschöpft") muss vor einem produktiven Einsatz nachgezogen werden, bevor mehr Verhalten (etwa automatische Benachrichtigungen) darauf aufbaut.
 
 ---
 
