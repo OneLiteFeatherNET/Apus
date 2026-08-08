@@ -27,6 +27,7 @@ docker run --rm \
   -e APUS_SOURCE_VERSION=2026-08-01T00-00-00Z.zip \
   -e APUS_BUNDLE_BUCKET=bundles \
   -e APUS_BUNDLE_TENANT=acme \
+  -e APUS_BUNDLE_SOURCE_NAME=survival-source \
   -e APUS_BUNDLE_WORLD_ID=survival \
   -e APUS_BUNDLE_VERSION=v1 \
   -e APUS_S3_ENDPOINT=http://minio:9000 \
@@ -52,14 +53,17 @@ builds Kubernetes Jobs against -- the ingest equivalent of `runner/README.md`'s 
 | `APUS_SOURCE_VERSION` | yes | — | The exact source version id to fetch, as previously resolved by `WorldSourceReconciler`'s `discover()` poll (task 6) and recorded on the owning `WorldIngest.spec.sourceVersion`. This job never calls `discover()` itself -- see "Design notes" below |
 | `APUS_BUNDLE_BUCKET` | yes | — | Destination bucket for the bundle |
 | `APUS_BUNDLE_TENANT` | yes | — | Tenant id, becomes the first path segment of the bundle |
-| `APUS_BUNDLE_WORLD_ID` | yes | — | World id, becomes the second path segment |
-| `APUS_BUNDLE_VERSION` | yes | — | This bundle version's identifier, becomes the third path segment |
+| `APUS_BUNDLE_SOURCE_NAME` | yes | — | The owning `WorldSource`'s name, becomes the second path segment. Required so two different sources ingesting a world with the same id (e.g. the vanilla default `world`) never collide on the same bundle path -- see `BundlePath` |
+| `APUS_BUNDLE_WORLD_ID` | yes | — | World id, becomes the third path segment |
+| `APUS_BUNDLE_VERSION` | yes | — | This bundle version's identifier, becomes the fourth path segment |
 | `APUS_S3_ENDPOINT` | yes | — | Bundle destination S3-compatible endpoint, e.g. `http://minio:9000` |
 | `APUS_S3_ACCESS_KEY` | yes | — | Bundle destination access key |
 | `APUS_S3_SECRET_KEY` | yes | — | Bundle destination secret key |
 | `APUS_S3_REGION` | no | `us-east-1` | Bundle destination region |
 | `APUS_MC_VERSION` | no | — | Minecraft version recorded as `manifest.minecraftVersion`. Not part of the original task-5 contract -- added because nothing else can supply this value reliably; see "Design notes" |
 | `APUS_PROGRESS_INTERVAL_SECONDS` | no | `10` | Minimum seconds between progress lines on stdout; the final update always prints regardless |
+| `APUS_MAX_ARCHIVE_TOTAL_BYTES` | no | `5368709120` (5 GiB) | Upper bound on total bytes extracted from one source archive; extraction aborts once exceeded. The work directory has no mounted volume, so this bounds how much of the node's own disk an archive (hostile or just unexpectedly large) can consume -- see `Archives` |
+| `APUS_MAX_ARCHIVE_ENTRIES` | no | `200000` | Upper bound on the number of entries (files + directories) extracted from one source archive; extraction aborts once exceeded |
 | `APUS_SOURCE_S3_BUCKET` | yes, if `APUS_SOURCE_TYPE=s3` | — | Source bucket |
 | `APUS_SOURCE_S3_ENDPOINT` | no | AWS default | Source S3-compatible endpoint |
 | `APUS_SOURCE_S3_PREFIX` | no | `""` | Prefix under which each object is one fetchable version |
@@ -111,9 +115,12 @@ dependency (none of the ones already in this project's catalog expose it publicl
 module's layer -- `bluemap-core` has one internally, but `ingest` deliberately does not depend on
 BlueMap) or hand-rolling a gzip+NBT reader for a single, easily-gotten-wrong field, for every
 supported Minecraft version's `level.dat` shape. Given that `WorldSource`/`WorldIngest` are
-already tenant-authored custom resources where the operator (or the source connector's `discover`)
-could just as easily be told the version up front, and that a wrong guess here silently mislabels
-a manifest forever, this was decided against: `APUS_MC_VERSION` is optional, and if unset,
+already tenant-authored custom resources, this was decided against in favour of a user-supplied
+field: `WorldSource.spec.worlds[].minecraftVersion`, which `IngestJobBuilder` reads for the
+matching world selector and passes straight through as `APUS_MC_VERSION` -- the tenant already
+knows which version they run, and a wrong guess parsed out of `level.dat` would silently mislabel
+a manifest forever instead. `APUS_MC_VERSION` itself stays optional at this image's own contract
+level (nothing here requires the operator to have set it), and if unset,
 `manifest.minecraftVersion` stays `null`, matching `BundleManifest`'s existing "or `null` if not
 known at bundle time" contract rather than inventing a new failure mode. If a future task adds
 real NBT parsing, it becomes an *additional* fallback ahead of the environment variable, not a
