@@ -443,9 +443,11 @@ git commit -m "build: set up Apus gradle monorepo with telemetry-addon module"
 
 **Files:**
 - Create: `telemetry-addon/src/main/java/net/onelitefeather/apus/telemetry/ProgressSnapshot.java`
+- Create: `telemetry-addon/src/main/java/net/onelitefeather/apus/telemetry/Numbers.java`
 - Create: `telemetry-addon/src/main/java/net/onelitefeather/apus/telemetry/JsonWriter.java`
 - Create: `telemetry-addon/src/main/java/net/onelitefeather/apus/telemetry/PrometheusWriter.java`
 - Test: `telemetry-addon/src/test/java/net/onelitefeather/apus/telemetry/ProgressSnapshotTest.java`
+- Test: `telemetry-addon/src/test/java/net/onelitefeather/apus/telemetry/NumbersTest.java`
 - Test: `telemetry-addon/src/test/java/net/onelitefeather/apus/telemetry/JsonWriterTest.java`
 - Test: `telemetry-addon/src/test/java/net/onelitefeather/apus/telemetry/PrometheusWriterTest.java`
 
@@ -468,6 +470,11 @@ public record ProgressSnapshot(
     public static ProgressSnapshot idle(int queuedTasks, int renderThreads);
 }
 
+public final class Numbers {
+    /** Formats a double without trailing zeros, locale-independent. */
+    public static String compact(double value);
+}
+
 public final class JsonWriter {
     public static String toJson(ProgressSnapshot snapshot);
 }
@@ -476,6 +483,8 @@ public final class PrometheusWriter {
     public static String toPrometheus(ProgressSnapshot snapshot);
 }
 ```
+
+`Numbers.compact` wird von **beiden** Writern genutzt. Es ist die einzige Stelle mit Zahlenformatierung — dieselbe Logik zweimal zu schreiben wäre ein Duplikat.
 
 - [ ] **Step 1: Den fehlschlagenden Test für `ProgressSnapshot` schreiben**
 
@@ -571,7 +580,84 @@ public record ProgressSnapshot(
 Run: `./gradlew :telemetry-addon:test --tests '*ProgressSnapshotTest*'`
 Expected: PASS
 
-- [ ] **Step 5: Den fehlschlagenden Test für `JsonWriter` schreiben**
+- [ ] **Step 5: Den fehlschlagenden Test für `Numbers` schreiben**
+
+`NumbersTest.java`:
+
+```java
+package net.onelitefeather.apus.telemetry;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+import org.junit.jupiter.api.Test;
+
+class NumbersTest {
+
+    @Test
+    void dropsTrailingZeros() {
+        assertEquals("0.5", Numbers.compact(0.5));
+        assertEquals("0.674", Numbers.compact(0.674));
+    }
+
+    @Test
+    void dropsTheDecimalPointForWholeNumbers() {
+        assertEquals("1", Numbers.compact(1.0));
+        assertEquals("-1", Numbers.compact(-1.0));
+        assertEquals("0", Numbers.compact(0.0));
+    }
+
+    @Test
+    void usesADotRegardlessOfTheHostLocale() {
+        java.util.Locale previous = java.util.Locale.getDefault();
+        try {
+            // German locale would otherwise render 0.5 as "0,5", producing invalid JSON.
+            java.util.Locale.setDefault(java.util.Locale.GERMANY);
+            assertEquals("0.5", Numbers.compact(0.5));
+        } finally {
+            java.util.Locale.setDefault(previous);
+        }
+    }
+}
+```
+
+- [ ] **Step 6: Test ausführen, Fehlschlag prüfen, `Numbers` implementieren**
+
+Run: `./gradlew :telemetry-addon:test --tests '*NumbersTest*'`
+Expected: FAIL, „cannot find symbol: class Numbers"
+
+```java
+package net.onelitefeather.apus.telemetry;
+
+import java.util.Locale;
+
+/**
+ * Locale-independent number formatting shared by the JSON and Prometheus writers.
+ *
+ * <p>Both output formats require a dot as the decimal separator; the host locale must
+ * never leak into a payload.
+ */
+public final class Numbers {
+
+    private Numbers() {}
+
+    /** Formats {@code value} with up to six decimals, without trailing zeros. */
+    public static String compact(double value) {
+        String formatted = String.format(Locale.ROOT, "%.6f", value);
+        if (formatted.indexOf('.') >= 0) {
+            formatted = formatted.replaceAll("0+$", "");
+            if (formatted.endsWith(".")) {
+                formatted = formatted.substring(0, formatted.length() - 1);
+            }
+        }
+        return formatted;
+    }
+}
+```
+
+Run: `./gradlew :telemetry-addon:test --tests '*NumbersTest*'`
+Expected: PASS
+
+- [ ] **Step 7: Den fehlschlagenden Test für `JsonWriter` schreiben**
 
 `JsonWriterTest.java`:
 
@@ -619,12 +705,12 @@ class JsonWriterTest {
 }
 ```
 
-- [ ] **Step 6: Test ausführen und Fehlschlag prüfen**
+- [ ] **Step 8: Test ausführen und Fehlschlag prüfen**
 
 Run: `./gradlew :telemetry-addon:test --tests '*JsonWriterTest*'`
 Expected: FAIL, „cannot find symbol: class JsonWriter"
 
-- [ ] **Step 7: `JsonWriter` implementieren**
+- [ ] **Step 9: `JsonWriter` implementieren**
 
 ```java
 package net.onelitefeather.apus.telemetry;
@@ -676,18 +762,7 @@ public final class JsonWriter {
     }
 
     private static void appendNumber(StringBuilder out, String key, double value) {
-        out.append('"').append(key).append("\":");
-        // Locale.ROOT keeps the decimal separator a dot regardless of the host locale.
-        out.append(String.format(Locale.ROOT, "%s", trimTrailingZeros(value)));
-    }
-
-    private static String trimTrailingZeros(double value) {
-        String formatted = String.format(Locale.ROOT, "%.6f", value);
-        formatted = formatted.replaceAll("0+$", "");
-        if (formatted.endsWith(".")) {
-            formatted = formatted.substring(0, formatted.length() - 1);
-        }
-        return formatted;
+        out.append('"').append(key).append("\":").append(Numbers.compact(value));
     }
 
     private static void escape(StringBuilder out, String value) {
@@ -712,14 +787,14 @@ public final class JsonWriter {
 }
 ```
 
-- [ ] **Step 8: Test ausführen und Erfolg prüfen**
+- [ ] **Step 10: Test ausführen und Erfolg prüfen**
 
 Run: `./gradlew :telemetry-addon:test --tests '*JsonWriterTest*'`
 Expected: PASS
 
 Falls `progress` als `-1` statt `-1.0` erwartet wird: Der Test in Step 5 fordert `0.674` exakt; `trimTrailingZeros` liefert dafür `0.674`. Für `-1.0` liefert es `-1`. Beides ist gültiges JSON.
 
-- [ ] **Step 9: Den fehlschlagenden Test für `PrometheusWriter` schreiben**
+- [ ] **Step 11: Den fehlschlagenden Test für `PrometheusWriter` schreiben**
 
 `PrometheusWriterTest.java`:
 
@@ -760,12 +835,12 @@ class PrometheusWriterTest {
 }
 ```
 
-- [ ] **Step 10: Test ausführen und Fehlschlag prüfen**
+- [ ] **Step 12: Test ausführen und Fehlschlag prüfen**
 
 Run: `./gradlew :telemetry-addon:test --tests '*PrometheusWriterTest*'`
 Expected: FAIL, „cannot find symbol: class PrometheusWriter"
 
-- [ ] **Step 11: `PrometheusWriter` implementieren**
+- [ ] **Step 13: `PrometheusWriter` implementieren**
 
 ```java
 package net.onelitefeather.apus.telemetry;
@@ -790,7 +865,7 @@ public final class PrometheusWriter {
             out.append("# HELP apus_render_progress_ratio Progress of the current render task, 0 to 1.\n");
             out.append("# TYPE apus_render_progress_ratio gauge\n");
             out.append("apus_render_progress_ratio{map=\"").append(escapeLabel(map)).append("\"} ")
-                    .append(number(snapshot.progress())).append('\n');
+                    .append(Numbers.compact(snapshot.progress())).append('\n');
         }
 
         if (snapshot.etaSeconds() >= 0 && map != null) {
@@ -819,27 +894,18 @@ public final class PrometheusWriter {
         return out.toString();
     }
 
-    private static String number(double value) {
-        String formatted = String.format(Locale.ROOT, "%.6f", value);
-        formatted = formatted.replaceAll("0+$", "");
-        if (formatted.endsWith(".")) {
-            formatted = formatted.substring(0, formatted.length() - 1);
-        }
-        return formatted;
-    }
-
     private static String escapeLabel(String value) {
         return value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n");
     }
 }
 ```
 
-- [ ] **Step 12: Test ausführen und Erfolg prüfen**
+- [ ] **Step 14: Test ausführen und Erfolg prüfen**
 
 Run: `./gradlew :telemetry-addon:test --tests '*PrometheusWriterTest*'`
 Expected: PASS
 
-- [ ] **Step 13: Commit**
+- [ ] **Step 15: Commit**
 
 ```bash
 ./gradlew spotlessApply
