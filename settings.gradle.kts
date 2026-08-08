@@ -1,6 +1,6 @@
 rootProject.name = "Apus"
 
-include("telemetry-addon", "runner", "operator")
+include("telemetry-addon", "runner", "operator", "ingest")
 
 dependencyResolutionManagement {
     repositories {
@@ -17,6 +17,14 @@ dependencyResolutionManagement {
             version("shadow", "9.3.2")
             version("josdk", "5.5.1")
             version("fabric8", "7.8.0")
+            // AWS SDK v2, not the MinIO Java client: runner/vendor/BlueMapS3Storage.jar (the
+            // BlueMap storage addon the render container already uses) is itself built on
+            // software.amazon.nio.spi.s3, which wraps this same SDK. Using it here too keeps
+            // exactly one S3 client family/credential-provider chain across the project
+            // instead of two competing ones, and it works against any S3-compatible endpoint
+            // (Rook/Ceph, MinIO, R2, ...) via endpoint override + path-style access -- nothing
+            // MinIO-specific is needed. Version verified against Maven Central on 2026-08-08.
+            version("aws-sdk", "2.46.7")
 
             library("bluemap.api", "de.bluecolored", "bluemap-api").versionRef("bluemap-api")
             library("bluemap.core", "de.bluecolored", "bluemap-core").versionRef("bluemap")
@@ -39,6 +47,9 @@ dependencyResolutionManagement {
             // @EnableKubernetesMockClient lives here, NOT in kubernetes-junit-jupiter
             // (that one targets tests against a real cluster and ships no mock classes).
             library("fabric8.server.mock", "io.fabric8", "kubernetes-server-mock").versionRef("fabric8")
+
+            library("aws.sdk.bom", "software.amazon.awssdk", "bom").versionRef("aws-sdk")
+            library("aws.sdk.s3", "software.amazon.awssdk", "s3").withoutVersion()
 
             plugin("spotless", "com.diffplug.spotless").versionRef("spotless")
             plugin("shadow", "com.gradleup.shadow").versionRef("shadow")
