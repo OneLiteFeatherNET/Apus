@@ -19,18 +19,13 @@ package net.onelitefeather.apus.ingest.connector;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -44,6 +39,10 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.testcontainers.containers.MinIOContainer;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.utility.DockerImageName;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.core.sync.RequestBody;
@@ -57,82 +56,41 @@ import software.amazon.awssdk.services.s3.model.PutObjectRequest;
  * semantics (delimiter-scoped listing, last-modified/size metadata) are exactly the kind of
  * behaviour a hand-rolled stub would get subtly wrong.
  *
- * <p>The brief for this task asks for this to run against "a MinIO Testcontainer". This class
- * drives MinIO through the plain {@code docker} CLI via {@link ProcessBuilder} instead of the
- * {@code org.testcontainers} library: that library is not a dependency of this module, and this
- * task's file restriction (only {@code ingest/.../connector/*} and its tests -- no build files)
- * means the dependency cannot be added from here. See {@code task-4-report.md} for the exact
- * one-line fix and why it was not applied. Functionally this achieves the same thing the brief
- * asks for -- a real, disposable MinIO container, started and torn down per test run -- just
- * without the Testcontainers library itself. The container binds its published port to {@code
- * 127.0.0.1} only, and is force-removed in {@link #stopMinio()} regardless of individual test
- * outcomes.
+ * <p>MinIO is started via Testcontainers ({@link MinIOContainer}), the same mechanism the
+ * {@code operator} and {@code runner} modules already use for their own container-based tests.
+ * Testcontainers reaps the container even if a test crashes, which the previous {@code
+ * ProcessBuilder}-driven {@code docker run}/{@code docker stop} pairing here could not guarantee.
  */
+@Testcontainers
 class S3SourceConnectorTest {
 
-    private static final String IMAGE = "minio/minio:RELEASE.2024-11-07T00-52-20Z";
     private static final String BUCKET = "worlds";
     private static final String ACCESS_KEY = "minioadmin";
     private static final String SECRET_KEY = "minioadmin";
-    private static final Duration READY_TIMEOUT = Duration.ofSeconds(30);
 
-    private static String containerName;
+    @Container
+    private static final MinIOContainer MINIO =
+            new MinIOContainer(DockerImageName.parse("minio/minio:RELEASE.2024-11-07T00-52-20Z"))
+                    .withUserName(ACCESS_KEY)
+                    .withPassword(SECRET_KEY);
+
     private static S3Client sharedClient;
 
     @BeforeAll
-    static void startMinioAndClient() throws IOException, InterruptedException {
-        assumeTrue(isDockerAvailable(), "docker CLI is required for this test and is not available here");
-
-        containerName = "apus-ingest-test-minio-" + System.nanoTime();
-        int exitCode = runDocker(
-                "run",
-                "-d",
-                "--rm",
-                "--name",
-                containerName,
-                "-p",
-                "127.0.0.1::9000",
-                "-e",
-                "MINIO_ROOT_USER=" + ACCESS_KEY,
-                "-e",
-                "MINIO_ROOT_PASSWORD=" + SECRET_KEY,
-                IMAGE,
-                "server",
-                "/data");
-        if (exitCode != 0) {
-            containerName = null;
-            throw new IllegalStateException("docker run failed for the MinIO test container, exit code " + exitCode);
-        }
-
-        try {
-            String endpoint = "http://" + publishedAddress();
-            awaitReady(endpoint);
-
-            sharedClient = S3Client.builder()
-                    .endpointOverride(URI.create(endpoint))
-                    .region(Region.US_EAST_1)
-                    .credentialsProvider(
-                            StaticCredentialsProvider.create(AwsBasicCredentials.create(ACCESS_KEY, SECRET_KEY)))
-                    .forcePathStyle(true)
-                    .build();
-            sharedClient.createBucket(
-                    CreateBucketRequest.builder().bucket(BUCKET).build());
-        } catch (RuntimeException | IOException | InterruptedException e) {
-            stopMinio();
-            throw e;
-        }
+    static void createClientAndBucket() {
+        sharedClient = S3Client.builder()
+                .endpointOverride(URI.create(MINIO.getS3URL()))
+                .region(Region.US_EAST_1)
+                .credentialsProvider(
+                        StaticCredentialsProvider.create(AwsBasicCredentials.create(ACCESS_KEY, SECRET_KEY)))
+                .forcePathStyle(true)
+                .build();
+        sharedClient.createBucket(CreateBucketRequest.builder().bucket(BUCKET).build());
     }
 
     @AfterAll
-    static void stopMinio() throws IOException, InterruptedException {
-        if (sharedClient != null) {
-            sharedClient.close();
-            sharedClient = null;
-        }
-        if (containerName != null) {
-            runDocker("stop", containerName);
-            containerName = null;
-        }
+    static void closeClient() {
+        sharedClient.close();
     }
 
     private final S3SourceConnector connector = new S3SourceConnector();
@@ -221,56 +179,5 @@ class S3SourceConnectorTest {
             }
         }
         return buffer.toByteArray();
-    }
-
-    private static boolean isDockerAvailable() {
-        try {
-            return runDocker("info") == 0;
-        } catch (IOException | InterruptedException e) {
-            return false;
-        }
-    }
-
-    private static String publishedAddress() throws IOException, InterruptedException {
-        Process process = new ProcessBuilder("docker", "port", containerName, "9000/tcp")
-                .redirectErrorStream(true)
-                .start();
-        String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-        int exit = process.waitFor();
-        if (exit != 0) {
-            throw new IllegalStateException("docker port failed to resolve the MinIO container's published port: " + output);
-        }
-        // Bound to 127.0.0.1 explicitly at `docker run` time, so exactly one "127.0.0.1:PORT" line.
-        return output.lines().findFirst().orElseThrow(() -> new IllegalStateException("docker port returned no mapping"));
-    }
-
-    private static void awaitReady(String endpoint) throws InterruptedException {
-        HttpClient httpClient = HttpClient.newHttpClient();
-        HttpRequest healthRequest = HttpRequest.newBuilder(URI.create(endpoint + "/minio/health/live"))
-                .timeout(Duration.ofSeconds(2))
-                .GET()
-                .build();
-
-        Instant deadline = Instant.now().plus(READY_TIMEOUT);
-        while (Instant.now().isBefore(deadline)) {
-            try {
-                HttpResponse<Void> response = httpClient.send(healthRequest, HttpResponse.BodyHandlers.discarding());
-                if (response.statusCode() == 200) {
-                    return;
-                }
-            } catch (IOException e) {
-                // not ready yet -- keep polling until the deadline
-            }
-            Thread.sleep(300);
-        }
-        throw new IllegalStateException("MinIO test container did not become ready within " + READY_TIMEOUT);
-    }
-
-    private static int runDocker(String... args) throws IOException, InterruptedException {
-        String[] command = new String[args.length + 1];
-        command[0] = "docker";
-        System.arraycopy(args, 0, command, 1, args.length);
-        Process process = new ProcessBuilder(command).inheritIO().start();
-        return process.waitFor();
     }
 }
