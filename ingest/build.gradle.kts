@@ -1,3 +1,10 @@
+import java.time.Duration
+
+plugins {
+    application
+    alias(libs.plugins.shadow)
+}
+
 dependencies {
     // AWS SDK v2 S3 client -- see settings.gradle.kts for why this over the MinIO Java client.
     implementation(platform(libs.aws.sdk.bom))
@@ -16,4 +23,43 @@ dependencies {
     testImplementation(platform(libs.testcontainers.bom))
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.minio)
+}
+
+application {
+    mainClass.set("net.onelitefeather.apus.ingest.IngestMain")
+}
+
+tasks {
+    shadowJar {
+        archiveClassifier.set("")
+        archiveBaseName.set("apus-ingest")
+        // Fixed name instead of the default "apus-ingest-<version>.jar": ingest/Dockerfile
+        // COPYs this file by name (no glob) -- see telemetry-addon/build.gradle.kts for the
+        // same rationale applied to the render container's addon jar.
+        archiveFileName.set("apus-ingest.jar")
+    }
+    build {
+        dependsOn(shadowJar)
+    }
+}
+
+// S3SourceConnectorTest starts a real MinIO container via Testcontainers and therefore needs
+// Docker. Exactly like runner/build.gradle.kts and operator/build.gradle.kts do for their own
+// container-based tests, that must not run as part of the routine `./gradlew build`/`check` --
+// it would make every build slow and fail outright on a machine without Docker. Excluded from
+// the default `test` task and exposed only via the explicit `integrationTest` task below. See
+// ingest/README.md for how to run it.
+tasks.test {
+    exclude("**/S3SourceConnectorTest.class")
+}
+
+val integrationTest by tasks.registering(Test::class) {
+    group = "verification"
+    description = "Runs S3SourceConnectorTest against a real MinIO container via Testcontainers. " +
+        "Requires Docker. Not part of build/check."
+    testClassesDirs = sourceSets.test.get().output.classesDirs
+    classpath = sourceSets.test.get().runtimeClasspath
+    include("**/S3SourceConnectorTest.class")
+    timeout.set(Duration.ofMinutes(5))
+    outputs.upToDateWhen { false }
 }
