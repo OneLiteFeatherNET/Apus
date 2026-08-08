@@ -17,6 +17,16 @@ dependencyResolutionManagement {
             version("shadow", "9.3.2")
             version("josdk", "5.5.1")
             version("fabric8", "7.8.0")
+            // Jackson: not a new dependency family for the project -- fabric8's kubernetes-client
+            // already pulls jackson-databind transitively for the operator module -- just the
+            // first place it's declared explicitly, for the ingest module's BundleManifest
+            // serialisation and Pterodactyl JSON parsing (replacing two hand-rolled JSON
+            // parsers). Version verified against Maven Central on 2026-08-08: 2.22.1 is the
+            // newest jackson-bom release (2.22.2 does not exist yet). Note that jackson-bom
+            // 2.20+ pins jackson-annotations to a patch-less "2.22" version, by design (see the
+            // bom's own POM comment) -- only jackson-databind itself needs a version("jackson")
+            // reference here.
+            version("jackson", "2.22.1")
             // AWS SDK v2, not the MinIO Java client: runner/vendor/BlueMapS3Storage.jar (the
             // BlueMap storage addon the render container already uses) is itself built on
             // software.amazon.nio.spi.s3, which wraps this same SDK. Using it here too keeps
@@ -50,6 +60,9 @@ dependencyResolutionManagement {
 
             library("aws.sdk.bom", "software.amazon.awssdk", "bom").versionRef("aws-sdk")
             library("aws.sdk.s3", "software.amazon.awssdk", "s3").withoutVersion()
+
+            library("jackson.bom", "com.fasterxml.jackson", "jackson-bom").versionRef("jackson")
+            library("jackson.databind", "com.fasterxml.jackson.core", "jackson-databind").withoutVersion()
 
             plugin("spotless", "com.diffplug.spotless").versionRef("spotless")
             plugin("shadow", "com.gradleup.shadow").versionRef("shadow")
