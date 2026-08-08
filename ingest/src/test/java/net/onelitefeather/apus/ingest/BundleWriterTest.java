@@ -20,6 +20,7 @@ package net.onelitefeather.apus.ingest;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -94,7 +95,7 @@ class BundleWriterTest {
         LoggingFakeS3Client fake = new LoggingFakeS3Client();
         BundleWriter writer = new BundleWriter(fake, BUCKET);
 
-        String bundlePath = writer.write("acme", "spawn", "v1", layout, null);
+        String bundlePath = writer.write("acme", "spawn", "v1", "s3", "1.21.10", layout, null);
 
         assertEquals("acme/spawn/v1", bundlePath);
         assertEquals(4, fake.keysInOrder.size(), "3 region files + 1 manifest");
@@ -124,7 +125,8 @@ class BundleWriterTest {
         LoggingFakeS3Client fake = new LoggingFakeS3Client("r.0.1.mca");
         BundleWriter writer = new BundleWriter(fake, BUCKET);
 
-        assertThrows(RuntimeException.class, () -> writer.write("acme", "spawn", "v1", layout, null));
+        assertThrows(
+                RuntimeException.class, () -> writer.write("acme", "spawn", "v1", "s3", "1.21.10", layout, null));
 
         assertTrue(fake.objects.keySet().stream().noneMatch(key -> key.endsWith("manifest.json")),
                 "no manifest may exist after a failed write: " + fake.objects.keySet());
@@ -148,7 +150,7 @@ class BundleWriterTest {
         LoggingFakeS3Client fake = new LoggingFakeS3Client();
         BundleWriter writer = new BundleWriter(fake, BUCKET);
 
-        writer.write("acme", "spawn", "v1", layout, null);
+        writer.write("acme", "spawn", "v1", "s3", "1.21.10", layout, null);
 
         byte[] manifestBytes = fake.objects.get("acme/spawn/v1/manifest.json");
         BundleManifest manifest = BundleManifest.fromJson(new String(manifestBytes, StandardCharsets.UTF_8));
@@ -182,7 +184,7 @@ class BundleWriterTest {
         RecordingProgressSink progress = new RecordingProgressSink();
         BundleWriter writer = new BundleWriter(fake, BUCKET);
 
-        writer.write("acme", "spawn", "v1", layout, progress);
+        writer.write("acme", "spawn", "v1", "s3", "1.21.10", layout, progress);
 
         assertEquals(2, progress.updates.size());
         long[] first = progress.updates.get(0);
@@ -204,8 +206,52 @@ class BundleWriterTest {
 
         BundleWriter writer = new BundleWriter(new LoggingFakeS3Client(), BUCKET);
 
-        String bundlePath = writer.write("acme", "spawn", "v1", layout, null);
+        String bundlePath = writer.write("acme", "spawn", "v1", "s3", "1.21.10", layout, null);
 
         assertEquals("acme/spawn/v1", bundlePath);
+    }
+
+    @Test
+    void manifestRecordsTheSourceTypeAndMinecraftVersionSuppliedByTheCaller(@TempDir Path tempDir)
+            throws IOException {
+        Path overworld = tempDir.resolve("overworld");
+        writeRegionFile(overworld, "r.0.0.mca", "a".getBytes(StandardCharsets.UTF_8));
+
+        Map<String, Path> dimensions = new LinkedHashMap<>();
+        dimensions.put("overworld", overworld);
+        FakeLayout layout = new FakeLayout("bukkit", dimensions);
+
+        LoggingFakeS3Client fake = new LoggingFakeS3Client();
+        BundleWriter writer = new BundleWriter(fake, BUCKET);
+
+        writer.write("acme", "spawn", "v1", "pterodactyl", "1.20.4", layout, null);
+
+        byte[] manifestBytes = fake.objects.get("acme/spawn/v1/manifest.json");
+        BundleManifest manifest = BundleManifest.fromJson(new String(manifestBytes, StandardCharsets.UTF_8));
+
+        assertEquals("pterodactyl", manifest.source().type());
+        assertEquals("bukkit", manifest.source().detectedLayout());
+        assertEquals("1.20.4", manifest.minecraftVersion());
+    }
+
+    @Test
+    void aNullSourceTypeAndMinecraftVersionAreToleratedAndRoundTripAsNull(@TempDir Path tempDir) throws IOException {
+        Path overworld = tempDir.resolve("overworld");
+        writeRegionFile(overworld, "r.0.0.mca", "a".getBytes(StandardCharsets.UTF_8));
+
+        Map<String, Path> dimensions = new LinkedHashMap<>();
+        dimensions.put("overworld", overworld);
+        FakeLayout layout = new FakeLayout("vanilla", dimensions);
+
+        LoggingFakeS3Client fake = new LoggingFakeS3Client();
+        BundleWriter writer = new BundleWriter(fake, BUCKET);
+
+        writer.write("acme", "spawn", "v1", null, null, layout, null);
+
+        byte[] manifestBytes = fake.objects.get("acme/spawn/v1/manifest.json");
+        BundleManifest manifest = BundleManifest.fromJson(new String(manifestBytes, StandardCharsets.UTF_8));
+
+        assertNull(manifest.source().type());
+        assertNull(manifest.minecraftVersion());
     }
 }

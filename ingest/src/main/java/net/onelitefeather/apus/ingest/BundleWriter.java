@@ -86,10 +86,26 @@ public final class BundleWriter {
      * Writes every region file of {@code layout}'s dimensions, then the manifest describing them
      * as the bundle's last object.
      *
+     * <p>{@code sourceType} and {@code minecraftVersion} are opaque to this class -- neither the
+     * layout detector nor the bundle writer has any way to know where the data came from or which
+     * Minecraft version produced it. Only the orchestrator ({@code IngestMain}) knows both, so it
+     * passes them straight through into {@link BundleManifest#source()} and {@link
+     * BundleManifest#minecraftVersion()}.
+     *
+     * @param sourceType the source connector type (e.g. {@code "s3"}, {@code "pterodactyl"}), or
+     *     {@code null} if not known to the caller
+     * @param minecraftVersion the Minecraft version the world was generated/played under, or
+     *     {@code null} if not known to the caller
      * @return the bundle's root path within the bucket, {@code <tenant>/<worldId>/<version>}
      */
     public String write(
-            String tenant, String worldId, String version, WorldLayoutLike layout, ProgressSink progress) {
+            String tenant,
+            String worldId,
+            String version,
+            String sourceType,
+            String minecraftVersion,
+            WorldLayoutLike layout,
+            ProgressSink progress) {
         String bundlePath = tenant + "/" + worldId + "/" + version;
 
         Map<String, List<RegionFile>> filesByDimension = new LinkedHashMap<>();
@@ -131,8 +147,8 @@ public final class BundleWriter {
                 tenant,
                 worldId,
                 version,
-                new BundleManifest.SourceInfo(null, version, layout.kind()),
-                null,
+                new BundleManifest.SourceInfo(sourceType, version, layout.kind()),
+                minecraftVersion,
                 dimensionInfos,
                 sizeBytes,
                 new BundleManifest.Checksums(DIGEST_ALGORITHM, toHex(digest.digest())));

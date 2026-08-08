@@ -24,12 +24,17 @@ import java.util.Map;
  * The recognized on-disk layout of a Minecraft world, with each present dimension resolved to
  * the region directory that holds its chunk data.
  *
+ * <p>Implements {@link BundleWriter.WorldLayoutLike} -- the narrow view {@link BundleWriter} was
+ * deliberately written against so it could be built in parallel without depending on this class
+ * directly -- so a detected layout can be handed straight to {@link BundleWriter#write} without
+ * an adapter.
+ *
  * @param kind the recognized layout kind, either {@code "vanilla"} or {@code "bukkit"}
  * @param dimensions logical dimension name ({@code "overworld"}, {@code "the_nether"}, or
  *     {@code "the_end"}) mapped to the resolved path of its region directory; dimensions that do
  *     not exist for this world are simply absent from the map
  */
-public record WorldLayout(String kind, Map<String, Path> dimensions) {
+public record WorldLayout(String kind, Map<String, Path> dimensions) implements BundleWriter.WorldLayoutLike {
 
     public WorldLayout {
         dimensions = Map.copyOf(dimensions);
