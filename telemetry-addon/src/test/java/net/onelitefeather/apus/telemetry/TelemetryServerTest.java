@@ -22,6 +22,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -192,6 +193,50 @@ class TelemetryServerTest {
                 }
             }
             assertTrue(foundDispatcherThread, "expected to find the HttpServer's internal dispatcher thread");
+        }
+    }
+
+    @Test
+    void secondStartOnTheSamePortFailsInsteadOfReportingSuccess() throws Exception {
+        // Port 0 lets the OS pick a free port for the first server; the second server then
+        // deliberately targets that same, now-occupied port, so its start() is guaranteed to
+        // hit a real bind failure -- no mocking needed to prove failures reach the caller.
+        try (TelemetryServer first =
+                new TelemetryServer(new TelemetryConfig("127.0.0.1", 0, true), () -> ProgressSnapshot.idle(0, 1))) {
+            first.start();
+            int occupiedPort = first.boundPort();
+
+            try (TelemetryServer second = new TelemetryServer(
+                    new TelemetryConfig("127.0.0.1", occupiedPort, true), () -> ProgressSnapshot.idle(0, 1))) {
+                assertThrows(
+                        IOException.class,
+                        second::start,
+                        "binding an already-occupied port must surface as a failure from start(), not report success");
+                assertThrows(
+                        IllegalStateException.class,
+                        second::boundPort,
+                        "a server that failed to start must not claim to have a bound port");
+            }
+        }
+    }
+
+    @Test
+    void startPropagatesRuntimeExceptionsFromTheInitThreadInsteadOfSwallowingThem() {
+        // -1 is not a valid port; InetSocketAddress rejects it with an IllegalArgumentException
+        // -- a RuntimeException, not an IOException -- raised on the init thread. Before this
+        // fix, that thread's catch clause only caught IOException, so this exception died
+        // silently on the init thread: join() still returned normally, the failure slot stayed
+        // empty, and start() reported success even though `server` was never assigned.
+        try (TelemetryServer server = new TelemetryServer(
+                new TelemetryConfig("127.0.0.1", -1, true), () -> ProgressSnapshot.idle(0, 1))) {
+            assertThrows(
+                    IllegalArgumentException.class,
+                    server::start,
+                    "a RuntimeException raised while starting the server must reach the caller, not vanish on the init thread");
+            assertThrows(
+                    IllegalStateException.class,
+                    server::boundPort,
+                    "a server that failed to start must not claim to have a bound port");
         }
     }
 

@@ -55,7 +55,12 @@ public final class TelemetryServer implements AutoCloseable {
         //
         // Building the server from inside a short-lived daemon thread makes the internally
         // spawned dispatcher thread daemon too, so it can never block JVM shutdown.
-        IOException[] failure = new IOException[1];
+        //
+        // The init thread must forward *any* Throwable it catches, not just IOException.
+        // Letting an unexpected RuntimeException (or Error) die silently on this thread
+        // would leave `server` unset, join() would still return normally, and start()
+        // would report success despite the server never having come up.
+        Throwable[] failure = new Throwable[1];
         Thread initThread = new Thread(
                 () -> {
                     try {
@@ -81,8 +86,8 @@ public final class TelemetryServer implements AutoCloseable {
                             return thread;
                         }));
                         server.start();
-                    } catch (IOException e) {
-                        failure[0] = e;
+                    } catch (Throwable t) {
+                        failure[0] = t;
                     }
                 },
                 "apus-telemetry-init");
@@ -94,9 +99,30 @@ public final class TelemetryServer implements AutoCloseable {
             Thread.currentThread().interrupt();
             throw new IOException("interrupted while starting the telemetry server", e);
         }
-        if (failure[0] != null) {
-            throw failure[0];
+        rethrowIfFailed(failure[0]);
+    }
+
+    /**
+     * Re-throws whatever the init thread caught, preserving its original type where the
+     * caller can observe it: an {@link IOException} comes back as one (the signature
+     * declares it), a {@link RuntimeException} or {@link Error} comes back unchanged, and
+     * anything else (a checked exception {@code start()} never declared) is wrapped so it
+     * still surfaces instead of vanishing.
+     */
+    private static void rethrowIfFailed(Throwable failure) throws IOException {
+        if (failure == null) {
+            return;
         }
+        if (failure instanceof IOException ioException) {
+            throw ioException;
+        }
+        if (failure instanceof RuntimeException runtimeException) {
+            throw runtimeException;
+        }
+        if (failure instanceof Error error) {
+            throw error;
+        }
+        throw new IOException("failed to start the telemetry server", failure);
     }
 
     public int boundPort() {
