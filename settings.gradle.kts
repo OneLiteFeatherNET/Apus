@@ -1,11 +1,14 @@
 rootProject.name = "Apus"
 
-include("telemetry-addon", "runner", "operator", "ingest", "api")
+include("telemetry-addon", "runner", "operator", "ingest", "api", "paper-worldpush")
 
 dependencyResolutionManagement {
     repositories {
         mavenCentral()
         maven("https://repo.bluecolored.de/releases")
+        // paper-api, for :paper-worldpush -- see that module's own note in this file for why
+        // it depends on a foreign version track instead of the rest of this catalog.
+        maven("https://repo.papermc.io/repository/maven-public/")
     }
     versionCatalogs {
         create("libs") {
@@ -139,6 +142,22 @@ dependencyResolutionManagement {
             library("jackson.databind", "com.fasterxml.jackson.core", "jackson-databind").withoutVersion()
 
             library("cron.utils", "com.cronutils", "cron-utils").versionRef("cron-utils")
+
+            // Paper API, for :paper-worldpush (phase 6, task 1) -- the plugin that lets a live
+            // Paper server push its own world instead of Apus pulling it. Deliberately its own
+            // version() entry rather than reusing anything above: like bluemap-core/bluemap-api,
+            // this tracks a fast-moving third-party project (see §4 of the design spec, "eigene
+            // Release-Spur"), not this repo's own version. Pinned to a specific stable build
+            // rather than the floating "26.2.build.+" range PaperMC's own setup docs show, to
+            // keep this build reproducible -- the same reasoning already applied to every other
+            // pinned version in this catalog. Verified against
+            // https://repo.papermc.io/repository/maven-public/io/papermc/paper/paper-api/maven-metadata.xml
+            // on 2026-08-09: 26.2.build.111-stable is the newest build on the "stable" channel
+            // (id 111, 2026-08-07). Minecraft/Paper 26.2 is the current version line (PaperMC
+            // moved off the old 1.21.x scheme); api-version in paper-plugin.yml uses the short
+            // "26.2" form the same metadata/docs use.
+            version("paper-api", "26.2.build.111-stable")
+            library("paper.api", "io.papermc.paper", "paper-api").versionRef("paper-api")
 
             plugin("spotless", "com.diffplug.spotless").versionRef("spotless")
             plugin("shadow", "com.gradleup.shadow").versionRef("shadow")
