@@ -27,9 +27,22 @@ import org.reactivestreams.Subscription;
  * external push source -- a Kubernetes watch, a log tail -- without Reactor or RxJava. Neither is
  * a compile-time dependency of the {@code api} module (only the bare {@code reactive-streams} API
  * that {@code micronaut-http} itself depends on is; {@code reactor-core} only appears on the
- * runtime classpath, pulled in transitively by {@code micronaut-http-server-netty}, so it cannot
- * be imported from this module's main source without adding an explicit dependency -- out of
- * scope for this task, see the task 3 report).
+ * runtime classpath, pulled in transitively by {@code micronaut-http-server-netty}).
+ *
+ * <p><b>Phase 5a consolidation decision: kept, {@code reactor-core} was not added.</b> Task 3's
+ * report flagged the missing compile-time dependency as an open question for whoever merged this
+ * module back together. Weighing it now: adding {@code reactor-core} explicitly would cost
+ * nothing at runtime (it is already on the classpath transitively, as above) -- but replacing
+ * this class with {@code Flux.create}/{@code Sinks} would mean rewriting, by hand, protocol code
+ * that already works and is already covered by {@code SseSourceTest} for exactly the failure
+ * modes that matter for a hand-rolled reactive-streams {@link Publisher}: cancellation ({@code
+ * cancellingTheSubscriptionRunsCleanupWithoutCompletingOrErroring}), producer error ({@code
+ * erroringTheSinkPropagatesTheThrowableAndRunsCleanup}), double-completion, and the
+ * reactive-streams §3.9 non-positive-request case. A rewrite would trade known-correct, tested
+ * ~140 lines for the risk of re-introducing a subtle concurrency bug in the same code, for no
+ * behavioural gain -- nothing else in this module needs Reactor's operators. If a genuine
+ * multi-step reactive pipeline shows up in a later phase, that is the point to reconsider, not
+ * this one.
  *
  * <p>Deliberately does not implement per-item backpressure: the first {@link Subscription#request}
  * call (whatever {@code n} it carries) is treated as "start delivering, and keep delivering
