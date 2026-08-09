@@ -40,6 +40,15 @@ dependencies {
     annotationProcessor(platform(libs.micronaut.serde.bom))
     annotationProcessor(libs.micronaut.serde.processor)
 
+    // AWS SDK v2 -- see settings.gradle.kts for why this SDK family. Backs both this module's own
+    // authenticated staging-bucket calls (CreateMultipartUpload, ListParts,
+    // CompleteMultipartUpload/AbortMultipartUpload -- see MultipartUploadService's Javadoc for why
+    // those specifically are never presigned) and the presigned UploadPart URLs POST /api/uploads
+    // hands back to the caller (design spec §11.1) via S3Presigner, which ships inside this same
+    // `s3` artifact (see settings.gradle.kts).
+    implementation(platform(libs.aws.sdk.bom))
+    implementation(libs.aws.sdk.s3)
+
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
     testRuntimeOnly(libs.junit.platform.launcher)
@@ -50,6 +59,15 @@ dependencies {
     // main-code dependency of this module -- the api module never reconciles anything -- so it
     // is scoped to testImplementation only, not the dependency added above for production code.
     testImplementation(libs.josdk)
+
+    // Test-only, for FabricPushTokenRepositoryTest (phase 6): the same `@EnableKubernetesMockClient`
+    // fake-but-CRUD-real Kubernetes API server operator/build.gradle.kts already uses, needed here
+    // to prove the cluster-wide, label-selected Secret lookup actually works -- an in-memory fake
+    // repository (as InMemoryPushTokenRepository provides for the controller-level tests) cannot
+    // prove that the real fabric8 `inAnyNamespace().withLabel(...)` query and Secret.data
+    // base64 decoding are wired correctly.
+    testImplementation(libs.fabric8.junit)
+    testImplementation(libs.fabric8.server.mock)
 
     // Phase 5a consolidation: both parallel worktrees reported this as missing, which meant
     // every existing test called controller/repository methods directly instead of going
@@ -65,9 +83,13 @@ dependencies {
 
     // Test-only, for TenantIsolationIntegrationTest: a real k3s API server via Testcontainers,
     // the same pattern operator/build.gradle.kts and ingest/build.gradle.kts already use.
+    // MinIO backs MultipartUploadServiceIntegrationTest (phase 6): the only way to actually prove
+    // a presigned UploadPart URL is confined to its signed key/size is to drive real HTTP PUTs
+    // against a real S3-compatible server -- see that test's Javadoc.
     testImplementation(platform(libs.testcontainers.bom))
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.k3s)
+    testImplementation(libs.testcontainers.minio)
 }
 
 // io.micronaut.test:micronaut-test-bom imports its own, newer org.testcontainers:testcontainers-

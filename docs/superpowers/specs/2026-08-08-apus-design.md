@@ -10,6 +10,39 @@ und erlaubt Bedienung ohne YAML.
 
 ---
 
+## 0. Stand der Umsetzung
+
+*(Ergänzt nach Abschluss von Phase 6 — Einstieg für alle, die neu dazukommen.)*
+
+**Alle sechs Phasen aus §14 sind gebaut**, einschließlich Phase 6 (Push-Quellen:
+`paper-worldpush` sowie der UI-Upload-Weg über `POST /api/uploads`). Render-Kern,
+Operator/Ingest mit allen vier Connectoren (`s3`, `pterodactyl`, `push`, `upload`),
+Hosting, API/UI/Mandanten und die Push-Quellen liegen alle im Hauptzweig. Die
+Modul-Tabelle in §4 spiegelt den heutigen Stand wider (inkl. `hosting`, `api`, `ui`,
+`paper-worldpush`).
+
+**Region-Sharding (Phase 4) wurde nach dem Spike bewusst nicht gebaut.** Der Spike
+(`docs/superpowers/spikes/2026-08-09-lowres-sharding-spike.md`) wies Kachel-Korruption
+bei gleichzeitig laufenden Shards nach; die Entscheidung fiel zugunsten vertikaler
+Skalierung über `render-threads` — siehe §14, Phase 4, für die volle Begründung.
+`BlueMapMap.spec.shards` existiert und bleibt bis auf Weiteres auf `1` beschränkt.
+
+**Bewusst offen gelassene Punkte** (Details in §15):
+
+- **Identity-Broker nicht ausgewählt.** Die API validiert JWTs gegen einen
+  konfigurierbaren Issuer; welches Produkt (Keycloak, Zitadel, ...) tatsächlich davor
+  steht, ist nicht entschieden (§15, Punkt 3).
+- **OIDC-Anmeldung nie gegen einen echten Broker getestet.** Die Auth-Tests im
+  `api`-Modul laufen gegen einen Fake-Kubernetes-Client bzw. selbst ausgestellte
+  Test-JWTs (§13.2); ein Ende-zu-Ende-Lauf gegen einen echten Identity-Broker (Keycloak/
+  Zitadel) hat nie stattgefunden.
+- **Speicher-/Save-Fenster von `paper-worldpush` ungetestet gegen einen echten
+  Paper-Server.** Die Kopierlogik ist per Unit-Test abgedeckt, aber `BukkitSaveCoordinator`
+  (der eigentliche Autosave-Pause-und-Force-Save-Schritt) wurde nie gegen eine laufende
+  Paper-Instanz oder mit MockBukkit geprüft, anders als in §13.2 ursprünglich vorgesehen.
+
+---
+
 ## 1. Ziel und Abgrenzung
 
 ### 1.1 Problem
@@ -84,7 +117,7 @@ BlueMap-Version zu verifizieren:
                     │
                     ▼
          ┌──────────────────────┐
-         │  world-ingest (ETL)  │  Extract → Transform → Load
+         │     ingest (ETL)     │  Extract → Transform → Load
          └──────────┬───────────┘
                     ▼
           World Bundle in S3   ◄────── Vertrag zwischen Ingest und Render
@@ -119,16 +152,22 @@ Alle in einem Gradle-Monorepo `Apus`, mehrmodulig.
 
 | Modul | Sprache/Stack | Zweck |
 |---|---|---|
-| `telemetry-addon` | Java 21, BlueMap-Addon | Exponiert Render-Fortschritt als JSON und Prometheus-Metriken |
-| `world-ingest` | Java 21, Micronaut | ETL: Connector-SPI, Layout-Erkennung, Bundle-Writer. Läuft als Job |
-| `runner-image` | Dockerfile + Entrypoint | BlueMap-CLI + beide Addons + Bundle-Sync |
-| `operator` | Java 21, Micronaut + Java Operator SDK | Sechs CRDs, erzeugt Jobs/Deployments/Ingresses/Buckets |
-| `api` | Java 21, Micronaut | REST + SSE über den CRs, Log-Aggregation, Auth-Durchsetzung |
-| `ui` | Nuxt 4, Vue 3, Tailwind 4, Nuxt UI | Zwei Dashboard-Ebenen |
-| `paper-worldpush` | Java 21, Paper-Plugin | Async, inkrementeller Welt-Upload vom laufenden Server |
+| `telemetry-addon` | Java 25, BlueMap-Addon | Exponiert Render-Fortschritt als JSON und Prometheus-Metriken |
+| `ingest` | Java 25 | ETL: Connector-SPI (s3, pterodactyl, push, upload), Layout-Erkennung, Bundle-Writer. Läuft als Job |
+| `runner` | Dockerfile + Entrypoint | BlueMap-CLI + beide Addons + Bundle-Sync |
+| `hosting` | Dockerfile + Entrypoint | Langlebiger Webserver (BlueMap-CLI im `-w`-Modus); liest gerenderte Karten direkt aus S3 über `BlueMapS3Storage`, Konfiguration per gemountetem ConfigMap statt Umgebungsvariablen |
+| `operator` | Java 25, Java Operator SDK (fabric8) | Sechs CRDs (`Tenant`, `WorldSource`, `WorldIngest`, `BlueMapMap`, `BlueMapRender`, `BlueMapHosting`), erzeugt Jobs/Deployments/Ingresses/Buckets/Secrets |
+| `api` | Java 25, Micronaut | REST + SSE über den CRs, Log-Aggregation, Auth-Durchsetzung |
+| `ui` | Nuxt 4, Vue 3, Tailwind 4, Nuxt UI, VueUse | Zwei Dashboard-Ebenen |
+| `paper-worldpush` | Java 25, Paper-Plugin | Async, inkrementeller Welt-Upload vom laufenden Server |
 
-`telemetry-addon` und `paper-worldpush` hängen an fremden Versionen (BlueMap bzw. Paper)
-und bekommen eine eigene Release-Spur mit eigener Versionsmatrix.
+`telemetry-addon` und `paper-worldpush` hängen an fremden Versionen (BlueMap- bzw.
+Paper-API) und bekommen eine eigene Release-Spur mit eigener Versionsmatrix — die
+Java-*Sprachversion* (Toolchain, einheitlich 25 für das ganze Monorepo, siehe Root-
+`build.gradle.kts`) ist davon unabhängig und gilt für jedes Java-Modul gleichermaßen.
+`runner` und `hosting` sind reine Dockerfile/Entrypoint-Images ohne eigenen
+Gradle-Anwendungscode (kein Java-Sprachversion-Eintrag oben deshalb); `runner` trägt
+lediglich Integrationstests, die den Vertrag mit `ingest` prüfen.
 
 ---
 
@@ -720,18 +759,21 @@ Credentials erscheinen nie in CR-Status, Events oder Logs.
 
 | Baustein | Vorgehen |
 |---|---|
-| `world-ingest` | Fixture-Archive je Layout (Pterodactyl-`tar.gz`, Bukkit-Split, Vanilla, ZIP mit Unterordner, defektes Archiv) gegen den Layout-Detektor. Reine Unit-Tests |
+| `ingest` | Fixture-Archive je Layout (Pterodactyl-`tar.gz`, Bukkit-Split, Vanilla, ZIP mit Unterordner, defektes Archiv) gegen den Layout-Detektor. Reine Unit-Tests, plus MinIO-gestützte Integrationstests je Connector (`s3`, `pterodactyl`, `push`, `upload`) und ein Ende-zu-Ende-Test (`PushIngestEndToEndTest`), der einen kompletten Ingest-Lauf für Push/Upload-Quellen gegen echtes MinIO fährt |
 | `telemetry-addon` | Contract-Test pro BlueMap-Version: Mini-Welt rendern, `/progress` auf plausible Werte prüfen (deckt den Log-Tail-Weg ab, siehe §7.2). **Offen:** Eine CI-Matrix über unterstützte BlueMap-Versionen als Frühwarnsystem existiert nicht — Phase 1 hat im Repository keinerlei CI-Konfiguration angelegt. Bis dahin muss der Contract-Test vor jedem BlueMap-Upgrade manuell laufen |
-| `runner-image` | Integrationstest gegen S3-Testcontainer mit kleiner Welt |
-| `operator` | JOSDK `LocallyRunOperatorExtension` gegen k3s via Testcontainers |
-| `api` | Micronaut-Tests gegen einen Fake-Kubernetes-Client, Auth-Fälle je Rolle |
+| `runner` | Integrationstest gegen S3-Testcontainer mit kleiner Welt, inkl. `IngestRenderContractTest` (Ingest → Bundle → Render Ende-zu-Ende) |
+| `operator` | JOSDK `LocallyRunOperatorExtension` gegen k3s via Testcontainers, plus `EnableKubernetesMockClient`-Tests je Reconciler |
+| `api` | Micronaut-Tests gegen einen Fake-Kubernetes-Client bzw. `EnableKubernetesMockClient`, Auth-Fälle je Rolle. **Offen:** kein Lauf gegen einen echten Identity-Broker (siehe §0/§15, Punkt 3) |
 | `ui` | Komponententests plus Accessibility-Lint |
-| `paper-worldpush` | MockBukkit für die Kopierlogik, zusätzlich ein Lauf gegen einen echten Paper-Server für das Save-Fenster |
+| `paper-worldpush` | Unit-Tests für Kopierlogik, Konfiguration und den HTTP-Report-Weg gegen einen lokalen JDK-`HttpServer`-Stub. **Offen:** kein MockBukkit-Test und kein Lauf gegen einen echten Paper-Server für das Save-Fenster (`BukkitSaveCoordinator`) — siehe §0 |
 | E2E | k3s + S3: kompletter Durchlauf Ingest → Render → Hosting mit Mini-Welt |
 
-**Hinweis zur CRD-Generierung:** Der Fabric8-CRD-Generator ist auf Maven ausgerichtet. Im
-Gradle-Monorepo wird er über den Annotation-Processor bzw. eine Gradle-Task eingebunden,
-die die `CRDGenerator`-API aufruft. Das ist beim Aufsetzen von Phase 2 zu verifizieren.
+**Hinweis zur CRD-Generierung — erledigt.** Der Fabric8-CRD-Generator ist auf Maven
+ausgerichtet und bringt keine unterstützte CLI für die genutzte Version (7.8.0). Gelöst
+über ein eigenes `crdgen`-Source-Set in `operator/build.gradle.kts` mit einem kleinen
+`CrdGeneratorMain`-Einstiegspunkt, der die programmatische `crd-generator-api-v2`/
+`CustomResourceCollector`-API aufruft; eine `generateCrds`-Task erzeugt daraus die sechs
+CRD-YAMLs. Siehe §15, Punkt 4.
 
 ---
 
@@ -742,7 +784,7 @@ MVP-Bestandteil.
 
 ### Phase 1 — Render-Kern *(MVP)*
 
-`telemetry-addon` und `runner-image`. Ergebnis: Ein `docker run` rendert eine Welt aus S3
+`telemetry-addon` und `runner`. Ergebnis: Ein `docker run` rendert eine Welt aus S3
 nach S3 und meldet Fortschritt. Vollständig ohne Kubernetes testbar.
 
 ### Phase 2 — Operator und Ingest *(MVP)*
@@ -800,21 +842,43 @@ ein höherer Wert wird nicht umgesetzt und sollte vom Operator abgelehnt werden.
 Identity-Broker, `Tenant`-Verwaltung mit Quotas, REST/SSE-API, Vue-Dashboard in zwei
 Ebenen.
 
-### Phase 6 — Push-Quellen
+### Phase 6 — Push-Quellen *(fertig)*
 
-`paper-worldpush` und UI-Upload inklusive Bucket-Notifications.
+`paper-worldpush` und UI-Upload. Tatsächlich umgesetzt statt Bucket-Notifications: ein
+direkter Completion-Callback vom Schreiber selbst (`POST /api/push/{token}` vom
+Paper-Plugin, `POST /api/uploads/{id}/complete` vom UI-Upload-Flow) statt eines
+Postfach-artigen Signals aus Ceph oder Polling des Staging-Prefix — siehe §15, Punkt 2,
+für die Begründung.
 
 ---
 
 ## 15. Offene Punkte
 
-1. **Connector-Reihenfolge im MVP.** Angenommen wird: zuerst `s3` und `pterodactyl`, weil beide ohne zusätzliche Client-Software auskommen; `upload` und `push` folgen in Phase 6. Falls das Paper-Plugin der wichtigere Weg ist, verschiebt sich die Reihenfolge — ohne Auswirkung auf die Architektur, da alle Connectoren hinter derselben Schnittstelle liegen.
-2. **Bucket-Notifications.** Ob `CephBucketTopic`/`CephBucketNotification` im Cluster nutzbar sind, ist vor Phase 6 zu prüfen. Fallback ist Polling.
-3. **Produktwahl Identity-Broker.** Zu Beginn von Phase 5, abgestimmt auf den bestehenden OIDC-Betrieb.
-4. **CRD-Generierung unter Gradle.** Vorgehen beim Aufsetzen von Phase 2 verifizieren (§13.2).
+1. ~~**Connector-Reihenfolge im MVP.**~~ **Erledigt.** Die angenommene Reihenfolge hat
+   sich bestätigt: `s3` und `pterodactyl` zuerst (Phase 2), `push` und `upload` in Phase
+   6 — das Paper-Plugin hat sich nicht als der wichtigere Weg erwiesen, eine Umsortierung
+   war nicht nötig. Alle vier Connectoren liegen hinter derselben `WorldSourceConnector`-
+   Schnittstelle (`ingest/.../connector/`); `IngestConfig`/`IngestMain` verdrahten alle
+   vier gleichermaßen.
+2. ~~**Bucket-Notifications.**~~ **Anders gelöst, nicht mehr offen.** Weder
+   `CephBucketTopic`/`CephBucketNotification` noch Prefix-Polling wird für Push-Quellen
+   verwendet: Stattdessen meldet der Schreiber selbst den Abschluss direkt an die API
+   (`POST /api/push/{token}` vom Paper-Plugin, `POST /api/uploads/{id}/complete` vom
+   UI-Upload-Flow) — die Prüfung, ob Rook-Notifications im Cluster aktiviert sind, war
+   damit für den MVP nicht nötig. Bleibt als mögliche spätere Härtung im Hinterkopf,
+   falls ein Schreiber den Callback verlieren kann (Netzwerkfehler nach dem letzten
+   Upload, bevor die Meldung rausgeht) und ein zweiter, unabhängiger Erkennungsweg
+   gewünscht wird.
+3. **Produktwahl Identity-Broker.** Weiterhin offen — siehe §0. Die API validiert JWTs
+   gegen einen konfigurierbaren Issuer, ohne dass ein konkretes Broker-Produkt
+   (Keycloak/Zitadel) ausgewählt oder gegen einen echten Broker getestet wurde.
+4. ~~**CRD-Generierung unter Gradle.**~~ **Erledigt** — siehe §13.2's "Hinweis zur
+   CRD-Generierung".
 5. **`render-mask` und Kanten.** Nur relevant, falls in Phase 4 der Maskenweg statt des eigenen Runners gewählt wird: Ob sich das Auffüllen mit Luft außerhalb der Maske abschalten lässt, ist dann zu prüfen.
 6. **Volume-Typ für große Welten.** `emptyDir` genügt bis zu einer Größe, die von der Node-Ausstattung abhängt; darüber ist ein PVC nötig. **Offen:** Diese Grenze wurde in Phase 1 entgegen der ursprünglichen Zusage **nicht** gemessen — es ist eigener Scope, keine bloße Verifikation eines bestehenden Plans. Muss vor Phase 2 nachgeholt werden, bevor der Operator einen Default für die CR festlegt.
 7. **Kein belastbares Quota-Signal aus dem Runner-Image.** `BlueMapRenderReconciler` erkennt ein Speicherlimit derzeit heuristisch aus dem Grund/der Meldung des terminierten Render-Pods (Muster wie `QuotaExceeded` oder "quota" kombiniert mit einem S3-Bezug wie `bucket`/`rgw`/`ceph`), gestützt auf `terminationMessagePolicy: FallbackToLogsOnError`, damit überhaupt eine Meldung ankommt. Das bleibt Best-Effort: das Kubelet-Vokabular für den Terminierungsgrund enthält "quota" nie, und die Meldung ist nur ein Log-Ausschnitt ohne Vertrag. Ein belastbares Signal (z. B. ein eigener Exit-Code des Runners für "Quota erschöpft") muss vor einem produktiven Einsatz nachgezogen werden, bevor mehr Verhalten (etwa automatische Benachrichtigungen) darauf aufbaut.
+8. **`paper-worldpush`'s Save-Fenster ungetestet gegen einen echten Paper-Server.** §13.2 sah ursprünglich MockBukkit für die Kopierlogik plus einen Lauf gegen einen echten Paper-Server für `BukkitSaveCoordinator`s Autosave-Pause-und-Force-Save-Schritt vor; tatsächlich existiert nur Unit-Testabdeckung für Kopierlogik, Konfiguration und den HTTP-Report-Weg (`HttpPushNotifierTest` gegen einen lokalen `HttpServer`-Stub). Ob das kurze Zeitfenster zwischen `disableAutoSave()`/`forceSave()` und dem Beginn des inkrementellen Kopierens auf einem echten, unter Last laufenden Server tatsächlich einen konsistenten Snapshot liefert, ist vor einem produktiven Einsatz zu verifizieren.
+9. **RBAC für den Push-Token-Lookup der API breiter als ideal.** `FabricPushTokenRepository#resolveNamespace` sucht (mangels Tenant-Hinweis im Request) per Label über alle Namespaces nach Service-Token-Secrets; Kubernetes-RBAC kann diesen Zugriff nicht auf das Label einschränken, sodass die schmalste *funktionierende* Berechtigung für das heutige Vorgehen trotzdem `get`/`list` auf **alle** Secrets im Cluster ist (siehe die Klassendoku für die volle Abwägung und einen skizzierten, aber nicht umgesetzten schmaleren Weg über `Tenant`-Enumeration + `get` mit festem Secret-Namen).
 
 ---
 
