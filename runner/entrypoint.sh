@@ -1,14 +1,23 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-: "${APUS_MAP_ID:?APUS_MAP_ID is required}"
-: "${APUS_DIMENSION:?APUS_DIMENSION is required}"
-: "${APUS_MC_VERSION:?APUS_MC_VERSION is required}"
-: "${APUS_WORLD_S3_URL:?APUS_WORLD_S3_URL is required}"
-: "${APUS_MAP_BUCKET:?APUS_MAP_BUCKET is required}"
-: "${APUS_S3_ENDPOINT:?APUS_S3_ENDPOINT is required}"
-: "${APUS_S3_ACCESS_KEY:?APUS_S3_ACCESS_KEY is required}"
-: "${APUS_S3_SECRET_KEY:?APUS_S3_SECRET_KEY is required}"
+# Aborts immediately with a clear message if the named environment variable is unset or empty.
+require_env() {
+  local name="$1"
+  if [ -z "${!name:-}" ]; then
+    echo "${name} is required" >&2
+    exit 1
+  fi
+}
+
+require_env APUS_MAP_ID
+require_env APUS_DIMENSION
+require_env APUS_MC_VERSION
+require_env APUS_WORLD_S3_URL
+require_env APUS_MAP_BUCKET
+require_env APUS_S3_ENDPOINT
+require_env APUS_S3_ACCESS_KEY
+require_env APUS_S3_SECRET_KEY
 
 CONFIG_DIR=/work/config
 WORLD_DIR=/work/world
