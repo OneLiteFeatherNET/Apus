@@ -217,6 +217,7 @@ class IngestJobBuilderTest {
                 "ceph-bucket-fr01",
                 "apus/runner:dev",
                 "apus/ingest:1.2.3",
+                "apus/hosting:dev",
                 "apus-bundles",
                 "http://rgw.example.svc:80",
                 "us-east-1",
