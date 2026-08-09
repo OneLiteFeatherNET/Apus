@@ -1,9 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-: "${APUS_S3_ENDPOINT:?APUS_S3_ENDPOINT is required}"
-: "${APUS_S3_ACCESS_KEY:?APUS_S3_ACCESS_KEY is required}"
-: "${APUS_S3_SECRET_KEY:?APUS_S3_SECRET_KEY is required}"
+# Aborts immediately with a clear message if the named environment variable is unset or empty.
+require_env() {
+  local name="$1"
+  if [ -z "${!name:-}" ]; then
+    echo "${name} is required" >&2
+    exit 1
+  fi
+}
+
+require_env APUS_S3_ENDPOINT
+require_env APUS_S3_ACCESS_KEY
+require_env APUS_S3_SECRET_KEY
 
 APUS_S3_REGION="${APUS_S3_REGION:-us-east-1}"
 APUS_WEBSERVER_PORT="${APUS_WEBSERVER_PORT:-8100}"
