@@ -70,6 +70,21 @@ public final class Labels {
      */
     public static final String MAP_UID = "apus.onelitefeather.net/map-uid";
 
+    /**
+     * The {@code WorldSource} a per-source resource (e.g. a {@code WorldIngest} created by
+     * {@code WorldSourceReconciler}) belongs to, by name. Mirrors {@link #MAP}: not unique on
+     * its own once a source can be deleted and recreated with the same name -- see {@link
+     * #SOURCE_UID}.
+     */
+    public static final String SOURCE = "apus.onelitefeather.net/world-source";
+
+    /**
+     * The UID of the owning {@code WorldSource} resource. Mirrors {@link #MAP_UID}: a source
+     * name can be reused after deletion, but its UID never is, so ownership checks must
+     * compare this label, not just {@link #SOURCE}.
+     */
+    public static final String SOURCE_UID = "apus.onelitefeather.net/world-source-uid";
+
     private Labels() {}
 
     /**

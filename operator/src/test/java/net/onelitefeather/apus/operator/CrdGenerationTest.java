@@ -169,4 +169,37 @@ class CrdGenerationTest {
 
         assertEquals("Namespaced", crd.getSpec().getScope(), "BlueMapRender must be namespace-scoped");
     }
+
+    @Test
+    void generatesTheWorldSourceCrdWithExpectedIdentity() {
+        CustomResourceDefinition crd = loadCrd("worldsources.bluemap.onelitefeather.net-v1.yml");
+
+        assertEquals("bluemap.onelitefeather.net", crd.getSpec().getGroup());
+        assertEquals("WorldSource", crd.getSpec().getNames().getKind());
+        assertEquals("worldsources", crd.getSpec().getNames().getPlural());
+    }
+
+    @Test
+    void worldSourceIsNamespaceScoped() {
+        CustomResourceDefinition crd = loadCrd("worldsources.bluemap.onelitefeather.net-v1.yml");
+
+        // A source belongs to exactly one tenant's namespace, exactly like BlueMapMap.
+        assertEquals("Namespaced", crd.getSpec().getScope(), "WorldSource must be namespace-scoped");
+    }
+
+    @Test
+    void generatesTheWorldIngestCrdWithExpectedIdentity() {
+        CustomResourceDefinition crd = loadCrd("worldingests.bluemap.onelitefeather.net-v1.yml");
+
+        assertEquals("bluemap.onelitefeather.net", crd.getSpec().getGroup());
+        assertEquals("WorldIngest", crd.getSpec().getNames().getKind());
+        assertEquals("worldingests", crd.getSpec().getNames().getPlural());
+    }
+
+    @Test
+    void worldIngestIsNamespaceScoped() {
+        CustomResourceDefinition crd = loadCrd("worldingests.bluemap.onelitefeather.net-v1.yml");
+
+        assertEquals("Namespaced", crd.getSpec().getScope(), "WorldIngest must be namespace-scoped");
+    }
 }
