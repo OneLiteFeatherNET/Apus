@@ -26,6 +26,7 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.SecureRandom;
 import java.time.Instant;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -63,8 +64,12 @@ import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 abstract class AbstractStagedSourceConnectorTest {
 
     private static final String BUCKET = "worlds";
-    private static final String ACCESS_KEY = "minioadmin";
-    private static final String SECRET_KEY = "minioadmin";
+
+    // Generated fresh per test run rather than pinned to a fixed literal, so nothing checked
+    // into source ever looks like a real credential. Lengths follow MinIO's own
+    // accessKeyMinLen/secretKeyMinLen (3 / 8 characters) with generous headroom.
+    private static final String ACCESS_KEY = randomAlphanumeric(20);
+    private static final String SECRET_KEY = randomAlphanumeric(40);
 
     @Container
     private static final MinIOContainer MINIO =
@@ -73,6 +78,17 @@ abstract class AbstractStagedSourceConnectorTest {
                     .withPassword(SECRET_KEY);
 
     private static S3Client sharedClient;
+
+    /** Generates a random alphanumeric string of {@code length} characters. */
+    private static String randomAlphanumeric(int length) {
+        String alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+        SecureRandom random = new SecureRandom();
+        StringBuilder value = new StringBuilder(length);
+        for (int i = 0; i < length; i++) {
+            value.append(alphabet.charAt(random.nextInt(alphabet.length())));
+        }
+        return value.toString();
+    }
 
     @BeforeAll
     static void createClientAndBucket() {

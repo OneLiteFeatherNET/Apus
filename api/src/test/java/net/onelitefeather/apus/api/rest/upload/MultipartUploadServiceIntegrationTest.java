@@ -25,6 +25,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.security.SecureRandom;
 import net.onelitefeather.apus.api.rest.support.BadRequestException;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -57,8 +58,12 @@ import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 class MultipartUploadServiceIntegrationTest {
 
     private static final String BUCKET = "staging";
-    private static final String ACCESS_KEY = "minioadmin";
-    private static final String SECRET_KEY = "minioadmin";
+
+    // Generated fresh per test run rather than pinned to a fixed literal, so nothing checked
+    // into source ever looks like a real credential. Lengths follow MinIO's own
+    // accessKeyMinLen/secretKeyMinLen (3 / 8 characters) with generous headroom.
+    private static final String ACCESS_KEY = randomAlphanumeric(20);
+    private static final String SECRET_KEY = randomAlphanumeric(40);
 
     @Container
     private static final MinIOContainer MINIO =
@@ -69,6 +74,17 @@ class MultipartUploadServiceIntegrationTest {
     private static S3Client s3Client;
     private static S3Presigner presigner;
     private static final HttpClient HTTP = HttpClient.newHttpClient();
+
+    /** Generates a random alphanumeric string of {@code length} characters. */
+    private static String randomAlphanumeric(int length) {
+        String alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+        SecureRandom random = new SecureRandom();
+        StringBuilder value = new StringBuilder(length);
+        for (int i = 0; i < length; i++) {
+            value.append(alphabet.charAt(random.nextInt(alphabet.length())));
+        }
+        return value.toString();
+    }
 
     @BeforeAll
     static void createClientsAndBucket() {
