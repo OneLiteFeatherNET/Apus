@@ -23,8 +23,10 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.util.Map;
 import net.onelitefeather.apus.ingest.connector.PterodactylConnector;
+import net.onelitefeather.apus.ingest.connector.PushSourceConnector;
 import net.onelitefeather.apus.ingest.connector.S3SourceConnector;
 import net.onelitefeather.apus.ingest.connector.SourceVersion;
+import net.onelitefeather.apus.ingest.connector.UploadSourceConnector;
 import net.onelitefeather.apus.ingest.connector.WorldSourceConnector;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
@@ -140,6 +142,8 @@ public final class IngestMain {
         return switch (sourceType) {
             case "s3" -> new S3SourceConnector();
             case "pterodactyl" -> new PterodactylConnector();
+            case "push" -> new PushSourceConnector();
+            case "upload" -> new UploadSourceConnector();
             // IngestConfig.fromEnv already rejects any other value; reaching this would mean the
             // two disagree about which source types are supported.
             default -> throw new IllegalStateException("unsupported source type: " + sourceType);

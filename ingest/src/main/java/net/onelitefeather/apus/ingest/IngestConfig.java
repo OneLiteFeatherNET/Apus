@@ -22,7 +22,9 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
 import net.onelitefeather.apus.ingest.connector.PterodactylConnector;
+import net.onelitefeather.apus.ingest.connector.PushSourceConnector;
 import net.onelitefeather.apus.ingest.connector.S3SourceConnector;
+import net.onelitefeather.apus.ingest.connector.UploadSourceConnector;
 
 /**
  * The ingest job's complete configuration, read from environment variables and validated eagerly.
@@ -93,9 +95,26 @@ public final class IngestConfig {
     public static final String ENV_PTERODACTYL_API_KEY = "APUS_PTERODACTYL_API_KEY";
     public static final String ENV_PTERODACTYL_WORLD_PATHS = "APUS_PTERODACTYL_WORLD_PATHS";
 
+    // -- Source-specific: push / upload (both are "staged" sources -- see
+    // AbstractStagedSourceConnector). The data is already sitting in a staging prefix in S3
+    // before this job ever starts: paper-worldpush writes it directly with its own tenant-scoped
+    // credentials (type "push"), or the UI completes a presigned multipart upload to the same
+    // kind of prefix (type "upload"). Only one of the two types runs per job (APUS_SOURCE_TYPE
+    // picks exactly one connector), so both share one env var contract rather than duplicating it
+    // per type -- whichever connector is selected reads the same "staging" values. --
+    public static final String ENV_SOURCE_STAGING_ENDPOINT = "APUS_SOURCE_STAGING_ENDPOINT";
+    public static final String ENV_SOURCE_STAGING_BUCKET = "APUS_SOURCE_STAGING_BUCKET";
+    public static final String ENV_SOURCE_STAGING_PREFIX = "APUS_SOURCE_STAGING_PREFIX";
+    public static final String ENV_SOURCE_STAGING_ACCESS_KEY = "APUS_SOURCE_STAGING_ACCESS_KEY";
+    public static final String ENV_SOURCE_STAGING_SECRET_KEY = "APUS_SOURCE_STAGING_SECRET_KEY";
+    public static final String ENV_SOURCE_STAGING_REGION = "APUS_SOURCE_STAGING_REGION";
+
     private static final String TYPE_S3 = "s3";
     private static final String TYPE_PTERODACTYL = "pterodactyl";
-    private static final Set<String> SUPPORTED_SOURCE_TYPES = Set.of(TYPE_S3, TYPE_PTERODACTYL);
+    private static final String TYPE_PUSH = "push";
+    private static final String TYPE_UPLOAD = "upload";
+    private static final Set<String> SUPPORTED_SOURCE_TYPES =
+            Set.of(TYPE_S3, TYPE_PTERODACTYL, TYPE_PUSH, TYPE_UPLOAD);
 
     private static final String AUTO_LAYOUT = "auto";
     private static final String DEFAULT_S3_REGION = "us-east-1";
@@ -175,8 +194,7 @@ public final class IngestConfig {
         String sourceType = requireNonBlank(env, ENV_SOURCE_TYPE);
         if (!SUPPORTED_SOURCE_TYPES.contains(sourceType)) {
             throw new ConfigurationException("Unsupported " + ENV_SOURCE_TYPE + " '" + sourceType
-                    + "': this image implements only " + SUPPORTED_SOURCE_TYPES
-                    + ". The push sources ('upload', 'push') have no connector yet -- see the phase 2b plan.");
+                    + "': this image implements only " + SUPPORTED_SOURCE_TYPES + ".");
         }
 
         String worldName = requireNonBlank(env, ENV_WORLD_NAME);
@@ -206,6 +224,7 @@ public final class IngestConfig {
                 switch (sourceType) {
                     case TYPE_S3 -> s3SourceConfig(env, maxArchiveTotalBytes, maxArchiveEntries);
                     case TYPE_PTERODACTYL -> pterodactylSourceConfig(env, maxArchiveTotalBytes, maxArchiveEntries);
+                    case TYPE_PUSH, TYPE_UPLOAD -> stagingSourceConfig(env, maxArchiveTotalBytes, maxArchiveEntries);
                     default -> throw new IllegalStateException("unreachable: " + sourceType);
                 };
 
@@ -250,6 +269,27 @@ public final class IngestConfig {
         config.put(PterodactylConnector.CONFIG_SERVER_ID, requireNonBlank(env, ENV_PTERODACTYL_SERVER_ID));
         config.put(PterodactylConnector.CONFIG_API_KEY, requireNonBlank(env, ENV_PTERODACTYL_API_KEY));
         config.put(PterodactylConnector.CONFIG_WORLD_PATHS, requireNonBlank(env, ENV_PTERODACTYL_WORLD_PATHS));
+        putArchiveLimits(config, maxArchiveTotalBytes, maxArchiveEntries);
+        return config;
+    }
+
+    /**
+     * Builds the connector config for both push-style sources ({@code push}, {@code upload}).
+     * Both are handled by {@code AbstractStagedSourceConnector} (via {@link PushSourceConnector}
+     * or {@link UploadSourceConnector}, chosen by {@code IngestMain} from {@code sourceType}),
+     * whose config keys are identical between the two subclasses -- only one of the two runs per
+     * job, so borrowing the constants off {@code PushSourceConnector} here is equivalent to using
+     * {@code UploadSourceConnector}'s.
+     */
+    private static Map<String, String> stagingSourceConfig(
+            Map<String, String> env, long maxArchiveTotalBytes, long maxArchiveEntries) {
+        Map<String, String> config = new LinkedHashMap<>();
+        config.put(PushSourceConnector.CONFIG_BUCKET, requireNonBlank(env, ENV_SOURCE_STAGING_BUCKET));
+        putIfPresent(config, PushSourceConnector.CONFIG_ENDPOINT, env.get(ENV_SOURCE_STAGING_ENDPOINT));
+        putIfPresent(config, PushSourceConnector.CONFIG_PREFIX, env.get(ENV_SOURCE_STAGING_PREFIX));
+        putIfPresent(config, PushSourceConnector.CONFIG_ACCESS_KEY_ID, env.get(ENV_SOURCE_STAGING_ACCESS_KEY));
+        putIfPresent(config, PushSourceConnector.CONFIG_SECRET_ACCESS_KEY, env.get(ENV_SOURCE_STAGING_SECRET_KEY));
+        putIfPresent(config, PushSourceConnector.CONFIG_REGION, env.get(ENV_SOURCE_STAGING_REGION));
         putArchiveLimits(config, maxArchiveTotalBytes, maxArchiveEntries);
         return config;
     }

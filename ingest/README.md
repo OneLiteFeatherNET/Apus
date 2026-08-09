@@ -47,7 +47,7 @@ builds Kubernetes Jobs against -- the ingest equivalent of `runner/README.md`'s 
 
 | Variable | Required | Default | Meaning |
 |---|---|---|---|
-| `APUS_SOURCE_TYPE` | yes | — | `s3` or `pterodactyl`. `upload`/`push` are recognised by `WorldSource.spec.type` but have no connector yet (phase 6) -- an unsupported value fails fast rather than being guessed at |
+| `APUS_SOURCE_TYPE` | yes | — | `s3`, `pterodactyl`, `push`, or `upload` -- an unsupported value fails fast rather than being guessed at |
 | `APUS_WORLD_NAME` | yes | — | The world's folder name at the source, e.g. `world` |
 | `APUS_LAYOUT` | no | `auto` | `auto`, `vanilla`, or `bukkit`. `auto` lets `LayoutDetector` decide; any other value forces that layout and fails detection rather than falling back if the fetched data doesn't actually match it |
 | `APUS_SOURCE_VERSION` | yes | — | The exact source version id to fetch, as previously resolved by `WorldSourceReconciler`'s `discover()` poll (task 6) and recorded on the owning `WorldIngest.spec.sourceVersion`. This job never calls `discover()` itself -- see "Design notes" below |
@@ -74,6 +74,12 @@ builds Kubernetes Jobs against -- the ingest equivalent of `runner/README.md`'s 
 | `APUS_PTERODACTYL_SERVER_ID` | yes, if pterodactyl | — | Server identifier (short id) |
 | `APUS_PTERODACTYL_API_KEY` | yes, if pterodactyl | — | Client API key (`ptlc_...`) |
 | `APUS_PTERODACTYL_WORLD_PATHS` | yes, if pterodactyl | — | Comma-separated top-level archive paths that make up the world, e.g. `world,world_nether,world_the_end` |
+| `APUS_SOURCE_STAGING_BUCKET` | yes, if `push` or `upload` | — | Bucket the staged object was written to -- by `paper-worldpush` (its own tenant-scoped credentials) for `push`, or by the browser completing a presigned multipart upload for `upload`. Both types share this one env var contract since only one connector runs per job -- see `AbstractStagedSourceConnector` |
+| `APUS_SOURCE_STAGING_ENDPOINT` | no | AWS default | Staging S3-compatible endpoint |
+| `APUS_SOURCE_STAGING_PREFIX` | no | `""` | Prefix under which the staged object lives; the object fetched is `prefix + APUS_SOURCE_VERSION` -- there is no `discover()` for these types, the version id is already known (it is the very same id that was used as the staged object's key suffix when it was written; see "Design notes") |
+| `APUS_SOURCE_STAGING_ACCESS_KEY` | no | credential chain | Staging access key; if unset, falls back to the AWS SDK default credentials chain |
+| `APUS_SOURCE_STAGING_SECRET_KEY` | no | credential chain | Staging secret key |
+| `APUS_SOURCE_STAGING_REGION` | no | `us-east-1` | Staging region |
 
 Missing a required variable (including the source-specific ones for the chosen
 `APUS_SOURCE_TYPE`) aborts with a clear `[apus-ingest] ERROR: <VAR> is required but was not set.`
@@ -132,14 +138,21 @@ polling operation -- it belongs to `WorldSourceReconciler` (task 6), which resol
 new version" on a schedule and records the chosen id on `WorldIngest.spec.sourceVersion`. The job
 itself only ever calls `fetch()` for the one version it was told to fetch (`APUS_SOURCE_VERSION`);
 it never lists what's available. This keeps a single ingest run deterministic and keeps the
-"what's new" decision in exactly one place.
+"what's new" decision in exactly one place. Push-style sources (`push`, `upload`) go one step
+further: `discover()` *always* returns an empty list for them (`AbstractStagedSourceConnector`),
+because nothing ever polls for their versions in the first place -- the `POST /api/uploads` /
+`POST /api/push/{token}` endpoint that creates their `WorldIngest` already knows the version id,
+since it is the very same id it used as the staged object's key suffix when it wrote (or arranged
+for the client to write) the data. `APUS_SOURCE_VERSION` is that id verbatim.
 
 ## Integration tests
 
-`S3SourceConnectorTest` (`ingest/src/test/java/net/onelitefeather/apus/ingest/connector/`) starts
-a real MinIO container via Testcontainers and therefore needs Docker. Like `runner` and
-`operator` do for their own container-based tests, it is **not** part of `./gradlew build` or
-`check` -- it is excluded from the default `test` task and runs only via the explicit task below:
+`S3SourceConnectorTest`, `PushSourceConnectorTest`, `UploadSourceConnectorTest`
+(`ingest/src/test/java/net/onelitefeather/apus/ingest/connector/`) and `PushIngestEndToEndTest`
+(`ingest/src/test/java/net/onelitefeather/apus/ingest/`) all start a real MinIO container via
+Testcontainers and therefore need Docker. Like `runner` and `operator` do for their own
+container-based tests, none of them are part of `./gradlew build` or `check` -- all four are
+excluded from the default `test` task and run only via the explicit task below:
 
 ```bash
 ./gradlew :ingest:integrationTest
@@ -150,8 +163,13 @@ Every other test in this module (`IngestConfigTest`, `IngestMainTest`, `Throttle
 `PterodactylConnectorTest`, `ArchivesTest`, `TarStreamReaderTest`) runs Docker-free as part of the
 routine `./gradlew :ingest:test`.
 
-A full source-to-bundle-to-render end-to-end test (ingest a Bukkit-layout world fixture against
-real MinIO, check the resulting manifest, then start a real render against the produced bundle
-with the `runner` image) lives in `runner`'s `:runner:integrationTest`
-(`IngestRenderContractTest`), not here -- proving the contract between this module's output and
-`runner`'s input needs both modules in the same test.
+`PushIngestEndToEndTest` is the proof that `push`/`upload` ingest works end to end, not just that
+`PushSourceConnector`/`UploadSourceConnector` behave correctly in isolation: it stages a world
+archive in a MinIO prefix (as `paper-worldpush` or a completed presigned upload would leave it),
+runs `IngestMain.run` with `APUS_SOURCE_TYPE=push` (and again with `upload`), and asserts the
+resulting bundle's manifest and region file are actually there. A separate full
+source-to-bundle-to-render end-to-end test (ingest a Bukkit-layout world fixture against real
+MinIO, check the resulting manifest, then start a real render against the produced bundle with the
+`runner` image) lives in `runner`'s `:runner:integrationTest` (`IngestRenderContractTest`), not
+here -- proving the contract between this module's output and `runner`'s input needs both modules
+in the same test.
