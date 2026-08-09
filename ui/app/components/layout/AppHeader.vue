@@ -6,7 +6,7 @@ const { user, logout } = useAuth()
   <header class="flex items-center justify-between border-b border-default px-6 py-4">
     <div class="flex items-center gap-8">
       <span class="text-lg font-semibold">Apus</span>
-      <AppNav />
+      <LayoutAppNav />
     </div>
     <div class="flex items-center gap-4">
       <span v-if="user" class="text-sm text-muted">

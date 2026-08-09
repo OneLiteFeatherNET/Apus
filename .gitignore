@@ -15,3 +15,6 @@ ui/.output/
 ui/dist/
 ui/coverage/
 ui/.env
+# Local marker @nuxt/test-utils writes recording which version last ran -- see
+# vitest.nuxt.config.ts/tests/nuxt/ (added for the layout render regression test).
+ui/.nuxtrc

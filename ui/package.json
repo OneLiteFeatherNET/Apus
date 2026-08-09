@@ -17,14 +17,15 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "typecheck": "vue-tsc --noEmit -p tsconfig.json",
-    "test": "vitest run",
-    "test:watch": "vitest"
+    "test": "vitest run -c vitest.config.ts && vitest run -c vitest.nuxt.config.ts",
+    "test:watch": "vitest -c vitest.config.ts"
   },
   "dependencies": {
     "oidc-client-ts": "3.5.0"
   },
   "devDependencies": {
     "@nuxt/eslint": "1.17.0",
+    "@nuxt/test-utils": "4.1.0",
     "@nuxt/ui": "4.10.0",
     "@types/node": "26.2.0",
     "@vue/test-utils": "2.4.11",
