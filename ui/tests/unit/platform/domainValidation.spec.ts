@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { validateAllowedDomain, validateAllowedDomains } from '../../../app/components/platform/domainValidation'
+import { validateAllowedDomain, validateAllowedDomains } from '../../../app/utils/domainValidation'
 
 describe('validateAllowedDomain', () => {
   it('accepts a plain hostname', () => {

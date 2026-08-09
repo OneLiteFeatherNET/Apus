@@ -4,7 +4,7 @@ import {
   formatBytes,
   parseQuotaBytes,
   storageUsageColor
-} from '../../../app/components/platform/storageUsage'
+} from '../../../app/utils/storageUsage'
 
 describe('parseQuotaBytes', () => {
   it('parses binary (IEC) suffixes', () => {

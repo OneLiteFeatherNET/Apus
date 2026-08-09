@@ -50,6 +50,18 @@ export interface CreateTenantRequest {
   allowedHostingDomains?: string[] | null
 }
 
+/**
+ * api/src/main/java/net/onelitefeather/apus/api/rest/tenant/UpdateTenantRequest.java --
+ * `PATCH /api/tenants/{name}`. Partial-update semantics: an omitted/`null` field leaves the
+ * current value untouched. Unlike `CreateTenantRequest`, there is no `displayName` here -- the
+ * endpoint only ever changes quota/domains (see that record's own Javadoc).
+ */
+export interface UpdateTenantRequest {
+  storageQuota?: string | null
+  maxObjects?: number | null
+  allowedHostingDomains?: string[] | null
+}
+
 // ---------------------------------------------------------------------------------------------
 // World sources -- GET/POST /api/sources, caller's own tenant (design spec §10.3, §11.1)
 // ---------------------------------------------------------------------------------------------
@@ -196,6 +208,17 @@ export interface RenderProgressEvent {
   currentMap: string | null
   etaSeconds: number
   degraded: boolean
+}
+
+/**
+ * api/src/main/java/net/onelitefeather/apus/api/rest/render/ClusterRenderResponse.java --
+ * `GET /api/renders/cluster`, `platform-admin` only. Wraps the ordinary render response with
+ * which tenant it belongs to, since the platform dashboard's cluster-wide view has no tenant of
+ * its own to scope by.
+ */
+export interface ClusterRenderResponse {
+  tenant: string
+  render: BlueMapRenderResponse
 }
 
 // ---------------------------------------------------------------------------------------------

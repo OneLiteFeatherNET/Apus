@@ -5,12 +5,25 @@
 // not Apus. Domains are shown with an explanation of what they gate, so nobody mistakes the
 // list for a harmless label -- see domainValidation.ts's module Javadoc.
 import type { TenantResponse } from '~/utils/apiTypes'
-import { describeStorageUsage, storageUsageColor, type StorageUsageSummary } from './storageUsage'
+import { describeStorageUsage, storageUsageColor, type StorageUsageSummary } from '~/utils/storageUsage'
 
 const props = defineProps<{
   tenants: TenantResponse[]
   loading: boolean
 }>()
+
+const emit = defineEmits<{
+  updated: []
+}>()
+
+/** Name of the tenant currently showing its edit form, or `null` if none is open. Only one at a
+ * time -- keeps the list from turning into a wall of open forms. */
+const editingTenant = ref<string | null>(null)
+
+function onUpdated(): void {
+  editingTenant.value = null
+  emit('updated')
+}
 
 interface TenantRow {
   tenant: TenantResponse
@@ -61,7 +74,18 @@ const usageLevelText: Record<StorageUsageSummary['level'], string> = {
               <h3 class="font-medium">
                 {{ row.tenant.displayName || row.tenant.name }}
               </h3>
-              <span class="text-muted text-xs font-mono">{{ row.tenant.name }}</span>
+              <div class="flex items-center gap-2">
+                <span class="text-muted text-xs font-mono">{{ row.tenant.name }}</span>
+                <UButton
+                  size="xs"
+                  variant="ghost"
+                  color="neutral"
+                  :icon="editingTenant === row.tenant.name ? 'i-lucide-x' : 'i-lucide-pencil'"
+                  @click="editingTenant = editingTenant === row.tenant.name ? null : row.tenant.name"
+                >
+                  {{ editingTenant === row.tenant.name ? 'Close' : 'Edit quota / domains' }}
+                </UButton>
+              </div>
             </div>
           </template>
 
@@ -102,6 +126,14 @@ const usageLevelText: Record<StorageUsageSummary['level'], string> = {
                 None yet -- this tenant cannot host any map until at least one domain is allowed.
               </p>
             </div>
+
+            <PlatformEditTenantForm
+              v-if="editingTenant === row.tenant.name"
+              :tenant="row.tenant"
+              class="border-default border-t pt-4"
+              @updated="onUpdated"
+              @cancel="editingTenant = null"
+            />
           </div>
         </UCard>
       </li>

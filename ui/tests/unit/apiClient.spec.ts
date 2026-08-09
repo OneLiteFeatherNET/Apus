@@ -119,6 +119,37 @@ describe('createApusApiClient / request handling', () => {
     expect(new Headers(init?.headers).has('Content-Type')).toBe(false)
   })
 
+  it('PATCHes a JSON body against the tenant path for updateTenant', async () => {
+    const fetchImpl = vi.fn<FetchLike>().mockResolvedValue(jsonResponse(200, { name: 'acme' }))
+    const client = createApusApiClient({ baseUrl: BASE_URL, getAccessToken: () => null, fetchImpl })
+
+    await client.updateTenant('acme', { storageQuota: '500Gi' })
+
+    const [url, init] = fetchImpl.mock.calls[0]
+    expect(url).toBe(`${BASE_URL}/api/tenants/acme`)
+    expect(init?.method).toBe('PATCH')
+    expect(init?.body).toBe(JSON.stringify({ storageQuota: '500Gi' }))
+    expect(new Headers(init?.headers).get('Content-Type')).toBe('application/json')
+  })
+
+  it('URL-encodes the tenant name for updateTenant', async () => {
+    const fetchImpl = vi.fn<FetchLike>().mockResolvedValue(jsonResponse(200, {}))
+    const client = createApusApiClient({ baseUrl: BASE_URL, getAccessToken: () => null, fetchImpl })
+
+    await client.updateTenant('needs encoding/slash', {})
+
+    expect(fetchImpl.mock.calls[0][0]).toBe(`${BASE_URL}/api/tenants/needs%20encoding%2Fslash`)
+  })
+
+  it('fetches the cluster-wide render view from /api/renders/cluster', async () => {
+    const fetchImpl = vi.fn<FetchLike>().mockResolvedValue(jsonResponse(200, []))
+    const client = createApusApiClient({ baseUrl: BASE_URL, getAccessToken: () => null, fetchImpl })
+
+    await client.listClusterRenders()
+
+    expect(fetchImpl.mock.calls[0][0]).toBe(`${BASE_URL}/api/renders/cluster`)
+  })
+
   it('URL-encodes path parameters', async () => {
     const fetchImpl = vi.fn<FetchLike>().mockResolvedValue(jsonResponse(200, {}))
     const client = createApusApiClient({ baseUrl: BASE_URL, getAccessToken: () => null, fetchImpl })

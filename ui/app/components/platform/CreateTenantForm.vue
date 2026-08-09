@@ -1,19 +1,14 @@
 <script setup lang="ts">
 // Create-tenant form for the platform dashboard (design spec §11.2, and the explicit
 // requirement behind this whole task: "Wir wollen für uns als Betreiber ein Management-
-// Dashboard, wo wir pro Kunde ein maximales Speicherlimit setzen können").
-//
-// The quota and allowed-domains fields are only settable here, at creation time -- the `api`
-// module (api/src/main/java/net/onelitefeather/apus/api/rest/tenant/TenantController.java) only
-// implements `GET`/`POST /api/tenants`, no update endpoint, so an existing tenant's quota or
-// domain list cannot be changed from this dashboard yet. That gap is called out to the operator
-// right here (see the notice below) rather than hidden, and is reported upstream as a missing
-// shared dependency rather than worked around in this component.
+// Dashboard, wo wir pro Kunde ein maximales Speicherlimit setzen können"). Quota and allowed
+// domains set here can be changed later too, via each tenant's "Edit quota / domains" control in
+// PlatformTenantList.vue (backed by `PATCH /api/tenants/{name}`).
 import type { FormError, FormSubmitEvent } from '@nuxt/ui'
 import type { CreateTenantRequest } from '~/utils/apiTypes'
 import { ApusApiError } from '~/utils/apiErrors'
-import { validateAllowedDomains } from './domainValidation'
-import { parseQuotaBytes } from './storageUsage'
+import { validateAllowedDomains } from '~/utils/domainValidation'
+import { parseQuotaBytes } from '~/utils/storageUsage'
 
 const emit = defineEmits<{
   created: []
@@ -103,14 +98,6 @@ async function onSubmit(event: FormSubmitEvent<FormState>) {
     <h2 id="create-tenant-heading" class="text-lg font-medium">
       Create a tenant
     </h2>
-
-    <UAlert
-      color="neutral"
-      variant="subtle"
-      icon="i-lucide-info"
-      title="Quota and allowed domains can currently only be set here, at creation"
-      description="Changing them for an existing tenant needs an update endpoint the api module does not expose yet."
-    />
 
     <UForm :state="state" :validate="validate" class="space-y-4" @submit="onSubmit">
       <UFormField label="Name" name="name" required help="Lowercase letters, digits, and hyphens -- this becomes the tenant's Kubernetes namespace.">

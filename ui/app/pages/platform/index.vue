@@ -57,10 +57,10 @@ onMounted(refresh)
 
     <UAlert v-if="loadError" color="error" variant="subtle" :title="loadError" />
 
-    <PlatformTenantList :tenants="tenants" :loading="loading" />
+    <PlatformTenantList :tenants="tenants" :loading="loading" @updated="refresh" />
 
     <PlatformCreateTenantForm @created="refresh" />
 
-    <PlatformClusterJobsNotice />
+    <PlatformClusterRenderTable />
   </div>
 </template>

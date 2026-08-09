@@ -4,11 +4,13 @@ import type {
   BlueMapHostingResponse,
   BlueMapMapResponse,
   BlueMapRenderResponse,
+  ClusterRenderResponse,
   CreateTenantRequest,
   CreateWorldSourceRequest,
   RenderProgressEvent,
   TenantResponse,
   TriggerRenderRequest,
+  UpdateTenantRequest,
   WorldSourceResponse
 } from './apiTypes'
 
@@ -144,6 +146,13 @@ export function createApusApiClient(options: ApusApiClientOptions) {
     listTenants: () => request<TenantResponse[]>('/api/tenants'),
     createTenant: (body: CreateTenantRequest) =>
       request<TenantResponse>('/api/tenants', { method: 'POST', body: JSON.stringify(body) }),
+    /** Changes an existing tenant's quota and/or allowed hosting domains -- `displayName` is
+     * not settable here, see `UpdateTenantRequest`'s own comment. */
+    updateTenant: (name: string, body: UpdateTenantRequest) =>
+      request<TenantResponse>(`/api/tenants/${encodeURIComponent(name)}`, {
+        method: 'PATCH',
+        body: JSON.stringify(body)
+      }),
 
     // -- World sources: caller's own tenant -----------------------------------------------------
     listSources: () => request<WorldSourceResponse[]>('/api/sources'),
@@ -162,6 +171,10 @@ export function createApusApiClient(options: ApusApiClientOptions) {
     // -- Renders: caller's own tenant, read-only --------------------------------------------------
     listRenders: () => request<BlueMapRenderResponse[]>('/api/renders'),
     getRender: (id: string) => request<BlueMapRenderResponse>(`/api/renders/${encodeURIComponent(id)}`),
+
+    /** Cluster-wide render view -- `GET /api/renders/cluster`, `platform-admin` only (design
+     * spec §10.3, §11.2: "laufende Jobs clusterweit"). */
+    listClusterRenders: () => request<ClusterRenderResponse[]>('/api/renders/cluster'),
 
     /**
      * Live progress for one render -- `GET /api/renders/{id}/events`. Ends when the render
