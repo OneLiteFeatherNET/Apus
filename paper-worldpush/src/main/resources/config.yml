@@ -1,0 +1,54 @@
+# Apus World Push -- configuration
+#
+# Copied out to plugins/ApusWorldPush/config.yml on first start. Fill in the values below
+# before enabling push cycles; the plugin fails fast at startup (nothing is scheduled) if a
+# required value is left blank.
+#
+# Credentials in this file (push-token, s3.access-key, s3.secret-key) are never written to
+# the server log or console. Keep this file's permissions restricted the same way you would
+# for server.properties.
+
+# The Bukkit world (folder name) to push, e.g. "world". Its Bukkit-layout siblings
+# ("<world>_nether", "<world>_the_end") are picked up automatically if present -- the same
+# layout world-ingest already recognises server-side (see docs/superpowers/specs, §6.2).
+world-name: world
+
+# The Apus tenant this server belongs to. Used only for the staging key prefix; does not
+# grant access by itself -- push-token below does that.
+tenant: ''
+
+# A tenant-bound, narrowly-scoped ("world:push") service token -- see §10.3 of the Apus
+# design spec. Deliberately not a user login: a person leaving the team must never be able
+# to take this server's uploads down with them. Ask a tenant-owner in the Apus UI/API to
+# mint one. Sent as a bearer token when reporting a completed push to the Apus API; never
+# logged.
+push-token: ''
+
+# Where the staged copy is written before/while it is uploaded, on this server's own disk.
+# Must have room for roughly one incremental push's worth of region files, not the whole
+# world -- see IncrementalWorldCopier.
+staging-directory: apus-worldpush-staging
+
+s3:
+  endpoint: ''
+  bucket: ''
+  region: us-east-1
+  # Direct, tenant-scoped bucket credentials (the same kind of per-tenant CephObjectStoreUser
+  # credentials the rest of Apus already uses, see §10.1/§10.2 of the design spec) -- distinct
+  # from push-token above, which authenticates the completion report to the Apus API, not the
+  # S3 write itself.
+  access-key: ''
+  secret-key: ''
+  # Region files are written under this prefix, never directly into the tenant's normal
+  # bundle path -- see §6.4 of the design spec ("Push-Quellen ... Staging-Prefix").
+  staging-prefix: staging/
+
+apus:
+  # Base URL of the Apus API, e.g. https://apus.example.org. POST {api-base-url}/api/push/{push-token}
+  # is called once a push cycle's uploads have all succeeded.
+  api-base-url: ''
+
+schedule:
+  # How often a push cycle runs, in minutes. A cycle that is still running when the next one
+  # would start is skipped, not queued -- see WorldPushPlugin.
+  interval-minutes: 30

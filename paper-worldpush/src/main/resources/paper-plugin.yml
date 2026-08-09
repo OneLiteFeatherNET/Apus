@@ -1,0 +1,13 @@
+name: ApusWorldPush
+version: '${version}'
+main: net.onelitefeather.apus.paper.WorldPushPlugin
+description: Pushes an incremental, consistent copy of this server's world to Apus.
+author: OneLiteFeather
+website: https://github.com/OneLiteFeatherNET/Apus
+api-version: '26.2'
+# This plugin schedules its own work through Paper's AsyncScheduler/GlobalRegionScheduler
+# instead of BukkitScheduler, and touches exactly one World per configured push job -- see
+# WorldPushPlugin's class Javadoc. It has not been exercised against a live Folia server
+# (see the phase 6 task report), so this is left unset (defaults to false/unsupported)
+# rather than claimed without verification.
+# folia-supported: false
