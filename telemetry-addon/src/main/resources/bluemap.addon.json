@@ -1,0 +1,4 @@
+{
+  "id": "apus-telemetry",
+  "entrypoint": "net.onelitefeather.apus.telemetry.ApusTelemetryAddon"
+}

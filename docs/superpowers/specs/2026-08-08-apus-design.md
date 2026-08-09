@@ -254,22 +254,69 @@ Das `telemetry-addon` startet einen HTTP-Server (Default `:8099`):
   "currentMap": "overworld",
   "progress": 0.674,
   "etaSeconds": 1830,
-  "queuedTasks": 2,
-  "renderThreads": 8,
-  "degraded": false                 // true, wenn Progress nicht ermittelbar
+  "queuedTasks": -1,                // im CLI-Betrieb strukturell nicht ermittelbar, siehe unten
+  "renderThreads": -1,              // dito
+  "degraded": false,                // true, wenn Progress nicht ermittelbar
+  "description": "updating map 'overworld'"
 }
 ```
+
+`queuedTasks` und `renderThreads` zeigen hier `-1` statt Beispielwerten: Im CLI-Betrieb liest
+Apus den Fortschritt über Log-Tailing (siehe unten), und BlueMaps eigene Fortschrittszeile
+enthält weder Warteschlangentiefe noch Thread-Anzahl — diese Felder sind unter dieser Route
+strukturell unerreichbar, kein Erhebungsfehler.
 
 `/metrics` liefert dieselben Werte als Prometheus-Metriken; ein `PodMonitor` sammelt sie
 für Grafana und Historie.
 
-**Bekannte Kopplung:** `estimateProgress()` ist über `BlueMapAPI` nicht erreichbar, das
-Addon kommt nur per Reflection auf `RenderManagerImpl` daran. Absicherungen:
+**Bekannte Kopplung:** `estimateProgress()` ist über die öffentliche `BlueMapAPI` nicht
+erreichbar. Zwei Implementierungen von `RenderManagerAccess` existieren, `ApusTelemetryAddon`
+wählt zwischen ihnen — keine Reflection in beiden Fällen:
 
-- Die Reflection ist in **einer** Klasse gekapselt (`RenderProgressProbe`) hinter einem Interface. Ein späterer Wechsel auf eine offizielle API oder auf den eigenen Runner ersetzt nur diese Klasse.
-- Schlägt sie fehl, liefert `/progress` `state: "unknown"` und `degraded: true`, **ohne** den Render zu beeinträchtigen. Fortschritt ist Komfort, kein kritischer Pfad.
-- Ein Contract-Test pro unterstützter BlueMap-Version läuft in der CI-Matrix (§13).
-- Mittelfristig: Upstream-PR, der Task-Fortschritt in `BlueMapAPI` freigibt. Wird er angenommen, entfällt die Reflection ersatzlos.
+1. **`BlueMapRenderManagerAccess`** — der von BlueMap für Addons dokumentierte Weg,
+   `((BlueMapAPIImpl) api).plugin().getRenderManager()`. Liefert bei Erfolg zusätzlich
+   Warteschlangentiefe und Thread-Anzahl.
+2. **`LogTailRenderManagerAccess`** — registriert sich auf BlueMaps eigenem
+   `Logger.global` (`de.bluecolored.bluemap.core.logger.Logger`/`MultiLogger`, derselbe
+   Mechanismus, den die CLI-Flags `-l`/`-b` selbst nutzen) und parst die Fortschrittszeile,
+   die BlueMap ohnehin selbst loggt (`updating map 'overworld': 35.208% (ETA: 38 seconds)`).
+   Liefert keine Warteschlangentiefe/Thread-Anzahl (nicht in der Logzeile enthalten, dort
+   `-1`).
+
+**Verifiziert gegen BlueMap 5.23, Task 8:** Im CLI-Betrieb — dem Modus, in dem
+`apus/runner` BlueMap ausschließlich nutzt — ist Weg 1 (`plugin()`) **strukturell immer**
+`null`. `BlueMapCLI.renderMaps()` konstruiert `BlueMapAPIImpl` unbedingt mit
+`Plugin = null` (per Dekompilierung verifiziert); BlueMap selbst überspringt dann auch den
+Bau der internen `RenderManagerImpl`, sodass auch ein Reflection-Fallback darauf ins Leere
+liefe — es gibt in diesem Modus kein über `BlueMapAPI` erreichbares Objekt, das den echten
+`RenderManager` hält. Der ursprünglich hier skizzierte Reflection-Fallback auf
+`RenderManagerImpl` ist für den CLI-Betrieb daher **kein** gangbarer Weg — er setzt eine
+Instanz voraus, die im CLI-Modus nie entsteht. Weg 2 (Log-Tailing) funktioniert im
+CLI-Betrieb dagegen zuverlässig, da BlueMaps eigene CLI die Fortschrittszeile unabhängig
+vom `Plugin`-Objekt über den globalen Logger ausgibt. `apus/runner` läuft daher
+ausschließlich auf Weg 2; Weg 1 bleibt für einen künftigen Server-Plugin-Betrieb
+(dort existiert eine echte `Plugin`-Instanz) als bevorzugter, reichhaltigerer Pfad
+erhalten. Details, beobachtete `/progress`-Antworten und die verworfene Alternative
+(Reflection in `java.util.Timer`-Internals) stehen in `runner/README.md#telemetry`.
+
+Absicherungen:
+
+- Beide Zugriffswege sind hinter dem `RenderManagerAccess`-Interface gekapselt
+  (`telemetry-addon/.../probe/`), `ApusTelemetryAddon` wählt nur zwischen ihnen. Ein
+  späterer dritter Weg (offizielle API-Erweiterung, eigener Runner) ersetzt nur die
+  Verdrahtung dort.
+- Schlägt jeder Zugriff fehl (auch die Log-Tail-Registrierung selbst), liefert
+  `/progress` `degraded: true`, **ohne** den Render zu beeinträchtigen. Fortschritt ist
+  Komfort, kein kritischer Pfad.
+- Ein Contract-Test (`runner/src/test/java/.../TelemetryContractTest.java`) läuft gegen
+  einen echten Render und muss vor jedem BlueMap-Upgrade ausgeführt werden. **Ehrlich
+  bilanziert deckt er nur Weg 2 ab** (Log-Tailing, der einzige Weg, der im CLI-Betrieb
+  überhaupt greift). Weg 1 (`BlueMapRenderManagerAccess`) und `ApusTelemetryAddon.run()`
+  selbst haben in Phase 1 **keine** Testabdeckung — Weg 1 wird erst relevant, sobald Apus
+  auf einer Server-Plattform mit echter `Plugin`-Instanz läuft, was Phase 1 nicht abdeckt.
+- Mittelfristig: Upstream-PR, die den CLI-eigenen `RenderManager` unabhängig von `Plugin`
+  über `BlueMapAPI` erreichbar macht (siehe `runner/README.md#telemetry`), würde Weg 1
+  auch im CLI-Betrieb tragfähig machen und die Log-Tail-Notlösung überflüssig machen.
 
 Der Operator pollt `/progress` im Sekundentakt über den Pod und schreibt die Werte nach
 `BlueMapRender.status.progress`. Damit zeigt auch `kubectl get bluemaprender` den Stand.
@@ -288,6 +335,35 @@ CR-Status als Lock durchgesetzt: Der Operator legt keinen neuen Job an, solange 
 
 Der Hosting-Pod liest, während gerendert wird. Das ist unkritisch — BlueMap ist auf
 laufende Aktualisierung ausgelegt; Nutzer sehen kurzzeitig gemischte Stände.
+
+### 7.4 Umgebungsvariablen-Vertrag (Phase 1)
+
+`apus/runner` (§7.1, Container `bluemap`) wird ausschließlich über Umgebungsvariablen
+konfiguriert. Das ist die Schnittstelle, die der Operator in Phase 2 bedienen wird — der
+`Job` erzeugt genau diese Variablen aus `BlueMapRender`/`BlueMapMap` und den Rook-Werten
+aus §9.1. Verifiziert und ausgeliefert in Phase 1 (`runner/entrypoint.sh`,
+`runner/bin/render-config.sh`):
+
+| Variable | Pflicht | Bedeutung |
+|---|---|---|
+| `APUS_MAP_ID` | ja | Map-Id, z.B. `overworld`. Wird als Pfadsegment verwendet — nur Kleinbuchstaben, Ziffern, `-`, `_` |
+| `APUS_DIMENSION` | ja | `minecraft:overworld`, `minecraft:the_nether`, `minecraft:the_end` |
+| `APUS_MC_VERSION` | ja | z.B. `1.21.10` |
+| `APUS_WORLD_S3_URL` | ja | Quelle der Welt, z.B. `s3://bundles/worlds/t/survival/v1/overworld` |
+| `APUS_MAP_BUCKET` | ja | Ziel-Bucket für die gerenderte Map |
+| `APUS_MAP_PREFIX` | nein | Präfix im Ziel-Bucket, Default `.` |
+| `APUS_S3_ENDPOINT` | ja | z.B. `http://minio:9000` |
+| `APUS_S3_ACCESS_KEY` | ja | Zugangsschlüssel |
+| `APUS_S3_SECRET_KEY` | ja | Geheimer Schlüssel |
+| `APUS_S3_REGION` | nein | Default `us-east-1` |
+| `APUS_RENDER_THREADS` | nein | Default `2` |
+| `APUS_FORCE_RENDER` | nein | `true` fügt `-f` hinzu |
+| `APUS_TELEMETRY_PORT` | nein | Default `8099` |
+| `APUS_TELEMETRY_BIND` | nein | Lausch-Adresse des Telemetrieservers, Default `0.0.0.0` |
+| `APUS_TELEMETRY_ENABLED` | nein | `false` schaltet den Telemetrieserver ab; jeder andere Wert lässt ihn laufen |
+
+Die vollständige, laufend aktuelle Referenz mit Beispielwerten steht in
+`runner/README.md`.
 
 ---
 
@@ -467,13 +543,29 @@ als ConfigMap (plus Secret für Zugangsdaten):
 
 | Datei | Inhalt |
 |---|---|
-| `core.conf` | Datenverzeichnis, `render-threads`, Metrics deaktiviert |
+| `core.conf` | Datenverzeichnis, `render-threads`, Metrics deaktiviert, `accept-download: true` (**erforderlich** — ohne diesen Schlüssel lädt BlueMap die Minecraft-Ressourcen nicht und jeder Render schlägt mit Exit-Code 2 fehl), `scan-for-mod-resources: false` |
 | `storages/s3.conf` | Endpoint, Bucket, Path-Style-Zugriff, Credentials — für `BlueMapS3Storage` |
 | `maps/<id>.conf` | Weltpfad aus dem Bundle-Manifest, Dimension, Render-Einstellungen |
 | `webserver.conf` | nur im Hosting-Pod |
 
 Nutzer schreiben kein HOCON. Wer Sonderfälle braucht, setzt gezielt
 `bluemap.config.overrides` oder referenziert eine eigene ConfigMap.
+
+**Verifiziertes Format von `storages/s3.conf`** (Phase 1, Task 7 — per Integrationstest
+gegen einen echten BlueMap-CLI-Lauf und Quellcode-Review von `S3StorageConfiguration`
+bestätigt; der Operator muss in Phase 2 exakt diese Schlüssel erzeugen):
+
+```hocon
+storage-type: "themeinerlp:s3"
+bucket-name: "..."
+region: "..."
+access-key-id: "..."
+secret-access-key: "..."
+endpoint-url: "..."
+compression: "gzip"
+root-path: "..."
+force-path-style: true
+```
 
 ### 9.3 Asset-Cache
 
@@ -593,7 +685,7 @@ Karte später eingebettet und gesteuert werden, statt nur verlinkt zu sein. Nich
 | Ingest bricht ab | Kein Manifest → Bundle gilt als nicht existent. Kein halber Zustand im Render-Pfad |
 | Unbekanntes Welt-Layout | Condition `LayoutDetectionFailed` mit gefundenen Pfaden. Kein Raten, kein Retry |
 | Speicherlimit erreicht | RGW-Fehler → Condition `StorageQuotaExceeded`, **kein** Retry. Sonst läuft der Job endlos gegen eine Wand |
-| Telemetry-Reflection bricht nach BlueMap-Update | `/progress` liefert `degraded: true`, Render läuft normal weiter |
+| Telemetry-Zugriffsweg bricht nach BlueMap-Update | `/progress` degradiert (siehe §7.2), Render läuft normal weiter |
 | Rook liefert Bucket nicht | `BlueMapMap` bleibt in `Pending` mit Condition `BucketProvisioning`, kein Job wird gestartet |
 | Bundle-Version wurde gelöscht | Render schlägt mit `BundleNotFound` fehl; Retention löscht nur unreferenzierte Bundles |
 
@@ -614,7 +706,7 @@ Credentials erscheinen nie in CR-Status, Events oder Logs.
 | Baustein | Vorgehen |
 |---|---|
 | `world-ingest` | Fixture-Archive je Layout (Pterodactyl-`tar.gz`, Bukkit-Split, Vanilla, ZIP mit Unterordner, defektes Archiv) gegen den Layout-Detektor. Reine Unit-Tests |
-| `telemetry-addon` | Contract-Test pro BlueMap-Version: Mini-Welt rendern, `/progress` auf plausible Werte prüfen. CI-Matrix über unterstützte Versionen — das Frühwarnsystem für Upstream-Änderungen |
+| `telemetry-addon` | Contract-Test pro BlueMap-Version: Mini-Welt rendern, `/progress` auf plausible Werte prüfen (deckt den Log-Tail-Weg ab, siehe §7.2). **Offen:** Eine CI-Matrix über unterstützte BlueMap-Versionen als Frühwarnsystem existiert nicht — Phase 1 hat im Repository keinerlei CI-Konfiguration angelegt. Bis dahin muss der Contract-Test vor jedem BlueMap-Upgrade manuell laufen |
 | `runner-image` | Integrationstest gegen S3-Testcontainer mit kleiner Welt |
 | `operator` | JOSDK `LocallyRunOperatorExtension` gegen k3s via Testcontainers |
 | `api` | Micronaut-Tests gegen einen Fake-Kubernetes-Client, Auth-Fälle je Rolle |
@@ -694,7 +786,7 @@ Ebenen.
 3. **Produktwahl Identity-Broker.** Zu Beginn von Phase 5, abgestimmt auf den bestehenden OIDC-Betrieb.
 4. **CRD-Generierung unter Gradle.** Vorgehen beim Aufsetzen von Phase 2 verifizieren (§13.2).
 5. **`render-mask` und Kanten.** Nur relevant, falls in Phase 4 der Maskenweg statt des eigenen Runners gewählt wird: Ob sich das Auffüllen mit Luft außerhalb der Maske abschalten lässt, ist dann zu prüfen.
-6. **Volume-Typ für große Welten.** `emptyDir` genügt bis zu einer Größe, die von der Node-Ausstattung abhängt; darüber ist ein PVC nötig. Die Grenze wird in Phase 1 gemessen und als Default in der CR hinterlegt.
+6. **Volume-Typ für große Welten.** `emptyDir` genügt bis zu einer Größe, die von der Node-Ausstattung abhängt; darüber ist ein PVC nötig. **Offen:** Diese Grenze wurde in Phase 1 entgegen der ursprünglichen Zusage **nicht** gemessen — es ist eigener Scope, keine bloße Verifikation eines bestehenden Plans. Muss vor Phase 2 nachgeholt werden, bevor der Operator einen Default für die CR festlegt.
 
 ---
 
@@ -703,7 +795,7 @@ Ebenen.
 | Entscheidung | Begründung |
 |---|---|
 | BlueMap-CLI unverändert statt eigenem Renderer | Geringste Kopplung an BlueMap-Interna; Upgrades sind ein Image-Tag |
-| Addon statt Log-Parsing für Fortschritt | Typisierte Werte, kein Locale-/Formatrisiko, mehr Kontext; Log-Format ist kein Vertrag |
+| Addon-API bevorzugt, Log-Tailing als tragender Weg in Phase 1 | Ursprünglich war Log-Parsing verworfen worden (kein Vertrag, Locale-/Formatrisiko). Verifiziert in Task 8 (§7.2): Der CLI konstruiert `BlueMapAPIImpl` unbedingt mit `Plugin = null`, wodurch der dokumentierte Addon-Weg (`plugin().getRenderManager()`) im CLI-Betrieb strukturell nie greift — es gibt dort kein über `BlueMapAPI` erreichbares `RenderManager`-Objekt. Log-Tailing auf `Logger.global` ist im CLI-Betrieb der einzige funktionierende Weg und bleibt hinter derselben `RenderManagerAccess`-Schnittstelle gekapselt; der Addon-Weg bleibt für einen künftigen Server-Plugin-Betrieb der bevorzugte, reichhaltigere Pfad |
 | Ein Addon, keine Aufteilung in Telemetry und Control | Der Operator löst Renders über CRs aus; ein Control-Endpunkt wäre ein zweiter Weg zum selben Ziel |
 | World Bundle als Vertrag | Entkoppelt Quellen von BlueMap; neue Quelle kostet nur einen Connector |
 | Manifest zuletzt schreiben | Macht den Bundle-Abschluss atomar, ohne Transaktionen über S3 |
