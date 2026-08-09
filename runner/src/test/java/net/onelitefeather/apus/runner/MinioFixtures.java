@@ -18,6 +18,7 @@
 package net.onelitefeather.apus.runner;
 
 import java.nio.file.Path;
+import java.security.SecureRandom;
 import java.time.Duration;
 import org.testcontainers.containers.BindMode;
 import org.testcontainers.containers.GenericContainer;
@@ -37,8 +38,13 @@ import org.testcontainers.utility.DockerImageName;
  */
 final class MinioFixtures {
 
-    static final String ACCESS_KEY = "apustest";
-    static final String SECRET_KEY = "apustestsecret";
+    // Generated fresh per test run rather than pinned to a fixed literal, so nothing checked
+    // into source ever looks like a real credential and no two runs share one. Lengths follow
+    // MinIO's own accessKeyMinLen/secretKeyMinLen (3 / 8 characters, see
+    // https://github.com/minio/minio/blob/master/internal/auth/credentials.go) with generous
+    // headroom so the container always accepts them.
+    static final String ACCESS_KEY = randomAlphanumeric(20);
+    static final String SECRET_KEY = randomAlphanumeric(40);
     static final String WORLD_BUCKET = "bundles";
     static final String MAP_BUCKET = "maps";
     static final String WORLD_PATH = "worlds/demo/v1";
@@ -49,6 +55,17 @@ final class MinioFixtures {
     private static final DockerImageName MC_IMAGE = DockerImageName.parse("minio/mc:RELEASE.2025-08-13T08-35-41Z");
 
     private MinioFixtures() {}
+
+    /** Generates a random alphanumeric string of {@code length} characters. */
+    private static String randomAlphanumeric(int length) {
+        String alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+        SecureRandom random = new SecureRandom();
+        StringBuilder value = new StringBuilder(length);
+        for (int i = 0; i < length; i++) {
+            value.append(alphabet.charAt(random.nextInt(alphabet.length())));
+        }
+        return value.toString();
+    }
 
     static Path fixture() {
         return Path.of(System.getProperty("user.dir")).getParent().resolve("testdata/mini-world");
