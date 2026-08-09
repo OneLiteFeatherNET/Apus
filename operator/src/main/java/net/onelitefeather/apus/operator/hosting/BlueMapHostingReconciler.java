@@ -269,7 +269,8 @@ public class BlueMapHostingReconciler implements Reconciler<BlueMapHosting> {
                 .createOr(NonDeletingOperation::update);
 
         String bucketSecretName = maps.get(0).getStatus().getBucket().getSecretName();
-        Deployment deployment = HostingResourceBuilder.deployment(hosting, configMapName, bucketSecretName, config);
+        Deployment deployment = HostingResourceBuilder.deployment(
+                hosting, configMapName, files.keySet(), bucketSecretName, config);
         stampConfigChecksum(deployment, checksum);
         Deployment existingDeployment =
                 client.apps().deployments().inNamespace(namespace).withName(name).get();
@@ -429,7 +430,19 @@ public class BlueMapHostingReconciler implements Reconciler<BlueMapHosting> {
                         && Objects.equals(hostingUid, ref.getUid()));
     }
 
+    /**
+     * Builds the hosting {@code ConfigMap} from {@code files}' <em>logical</em> paths (e.g.
+     * {@code maps/survival-overworld.conf}, as returned by {@code
+     * BlueMapConfigBuilder#buildForHosting}), sanitising each into a valid {@code ConfigMap} data
+     * key via {@link HostingResourceBuilder#configMapKey} -- real Kubernetes rejects a data key
+     * containing {@code /} outright, unlike the fabric8 mock server this module's other tests run
+     * against. {@link HostingResourceBuilder#deployment} is handed {@code files.keySet()}
+     * (the un-sanitised logical paths) separately so its ConfigMap volume {@code items} can map
+     * each sanitised key back to the original nested path the container needs.
+     */
     private static ConfigMap buildConfigMap(BlueMapHosting hosting, String configMapName, Map<String, String> files) {
+        Map<String, String> data = new LinkedHashMap<>();
+        files.forEach((logicalPath, content) -> data.put(HostingResourceBuilder.configMapKey(logicalPath), content));
         return new ConfigMapBuilder()
                 .withNewMetadata()
                 .withName(configMapName)
@@ -437,7 +450,7 @@ public class BlueMapHostingReconciler implements Reconciler<BlueMapHosting> {
                 .withLabels(Labels.standard("bluemap-hosting-config", hosting.getMetadata().getName()))
                 .withOwnerReferences(ownerReference(hosting))
                 .endMetadata()
-                .withData(files)
+                .withData(data)
                 .build();
     }
 

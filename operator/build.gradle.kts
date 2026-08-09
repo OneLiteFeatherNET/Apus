@@ -91,25 +91,28 @@ tasks.named("build") {
 tasks.test {
     dependsOn(generateCrds)
     systemProperty("apus.crd.dir", crdOutputDir.get().asFile.absolutePath)
-    // OperatorIntegrationTest starts a k3s container and is not part of the routine
-    // build/check run -- see the integrationTest task below for why.
-    exclude("**/OperatorIntegrationTest.class")
+    // OperatorIntegrationTest and BlueMapHostingIntegrationTest each start a k3s container and
+    // are not part of the routine build/check run -- see the integrationTest task below for why.
+    // Matched by naming convention (every real-cluster test class ends in "IntegrationTest")
+    // rather than by an ever-growing explicit list.
+    exclude("**/*IntegrationTest.class")
 }
 
-// OperatorIntegrationTest starts a k3s container (via Testcontainers) to apply the generated
-// CRDs against a real API server and reconcile a Tenant end to end. That is minutes of work
-// and requires Docker, so -- exactly like runner/build.gradle.kts does for its own
-// container-based tests -- it must not run as part of the routine `./gradlew build`/`check`.
-// It is disabled in the default `test` task above and exposed only via this explicit task.
+// OperatorIntegrationTest and BlueMapHostingIntegrationTest each start a k3s container (via
+// Testcontainers) to apply the generated CRDs against a real API server and reconcile real
+// resources end to end. That is minutes of work and requires Docker, so -- exactly like
+// runner/build.gradle.kts does for its own container-based tests -- neither runs as part of the
+// routine `./gradlew build`/`check`. Both are disabled in the default `test` task above and
+// exposed only via this explicit task.
 val integrationTest by tasks.registering(Test::class) {
     group = "verification"
-    description = "Runs OperatorIntegrationTest against a real k3s cluster started via Testcontainers. " +
+    description = "Runs the *IntegrationTest classes against a real k3s cluster started via Testcontainers. " +
         "Requires Docker. Not part of build/check."
     testClassesDirs = sourceSets.test.get().output.classesDirs
     classpath = sourceSets.test.get().runtimeClasspath
     dependsOn(generateCrds)
     systemProperty("apus.crd.dir", crdOutputDir.get().asFile.absolutePath)
-    include("**/OperatorIntegrationTest.class")
+    include("**/*IntegrationTest.class")
     // Pulling the k3s image and letting the API server come up takes real time on a cold
     // Docker cache; generous but finite so a hung container fails the build instead of the
     // run hanging forever.

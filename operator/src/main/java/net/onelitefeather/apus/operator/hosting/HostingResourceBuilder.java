@@ -24,6 +24,8 @@ import io.fabric8.kubernetes.api.model.ContainerPort;
 import io.fabric8.kubernetes.api.model.ContainerPortBuilder;
 import io.fabric8.kubernetes.api.model.EnvVar;
 import io.fabric8.kubernetes.api.model.EnvVarBuilder;
+import io.fabric8.kubernetes.api.model.KeyToPath;
+import io.fabric8.kubernetes.api.model.KeyToPathBuilder;
 import io.fabric8.kubernetes.api.model.ObjectMetaBuilder;
 import io.fabric8.kubernetes.api.model.OwnerReference;
 import io.fabric8.kubernetes.api.model.OwnerReferenceBuilder;
@@ -50,6 +52,7 @@ import io.fabric8.kubernetes.api.model.networking.v1.IngressRuleBuilder;
 import io.fabric8.kubernetes.api.model.networking.v1.IngressServiceBackendBuilder;
 import io.fabric8.kubernetes.api.model.networking.v1.IngressTLS;
 import io.fabric8.kubernetes.api.model.networking.v1.IngressTLSBuilder;
+import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -92,6 +95,27 @@ public final class HostingResourceBuilder {
     static final String CONFIG_MOUNT_PATH = "/config-src";
 
     /**
+     * Separator {@link #configMapKey} substitutes for {@code /} in a {@code
+     * BlueMapConfigBuilder#buildForHosting} logical file path (e.g. {@code
+     * maps/survival-overworld.conf}) to turn it into a valid {@code ConfigMap} data key.
+     *
+     * <p>Kubernetes rejects a {@code ConfigMap} data key containing {@code /} outright (the API
+     * server enforces {@code [-._a-zA-Z0-9]+}) -- the fabric8 mock server used by every test in
+     * this module below the real-cluster integration test does not enforce that, so this was only
+     * ever caught once {@code BlueMapHostingReconciler} tried to actually create a {@code
+     * ConfigMap} against a real k3s API server. {@code .} is itself a valid key character and
+     * never appears in a logical path except as the file extension, so the substitution is
+     * unambiguous without needing a matching "unflatten" step: {@link
+     * #deployment(BlueMapHosting, String, Collection, String, OperatorConfig)} instead carries the
+     * original, un-substituted logical path forward as the {@link KeyToPath#getPath()} of a
+     * ConfigMap volume {@code item}, which -- unlike a data key -- Kubernetes does allow to
+     * contain {@code /}, and is exactly how the file ends up back at its original nested location
+     * ({@code maps/survival-overworld.conf}) inside the container, matching what {@code
+     * hosting/bin/config-sync.sh} has always expected to find under {@link #CONFIG_MOUNT_PATH}.
+     */
+    private static final char CONFIG_MAP_KEY_SEPARATOR = '.';
+
+    /**
      * Port the BlueMap webserver listens on inside the container, and the port the {@link
      * Service} and readiness/liveness probes target. Matches {@code
      * BlueMapConfigBuilder#buildForHosting}'s {@code webserverPort} parameter and the Task 2
@@ -122,6 +146,13 @@ public final class HostingResourceBuilder {
      * @param configMapName name of the {@code ConfigMap}, in the same namespace as {@code
      *     hosting}, holding the map/storage/webserver configuration built by {@code
      *     BlueMapConfigBuilder#buildForHosting}; mounted read-only
+     * @param configFileNames the logical file paths that map/storage/webserver configuration was
+     *     built under (i.e. {@code BlueMapConfigBuilder.buildForHosting(...)}'s returned map's
+     *     {@code keySet()}, e.g. {@code maps/survival-overworld.conf}) -- used to map each
+     *     sanitised {@link #configMapKey} back to its original nested path inside the container,
+     *     via the {@code ConfigMap} volume's {@code items}; must be the exact same set the
+     *     {@code ConfigMap} passed as {@code configMapName} was built from, or the volume mount
+     *     will be missing files (or 404 on ones that were renamed away)
      * @param bucketSecretName name of the Kubernetes {@code Secret}, in the same namespace as
      *     {@code hosting}, carrying the S3 credentials the webserver needs to read the already-
      *     rendered maps; referenced via {@code secretKeyRef}, never inlined
@@ -130,7 +161,11 @@ public final class HostingResourceBuilder {
      * @return the {@link Deployment} manifest, not yet submitted to the API server
      */
     public static Deployment deployment(
-            BlueMapHosting hosting, String configMapName, String bucketSecretName, OperatorConfig config) {
+            BlueMapHosting hosting,
+            String configMapName,
+            Collection<String> configFileNames,
+            String bucketSecretName,
+            OperatorConfig config) {
         String namespace = hosting.getMetadata().getNamespace();
         Map<String, String> labels = labels(hosting);
 
@@ -149,6 +184,7 @@ public final class HostingResourceBuilder {
                 .withName(CONFIG_VOLUME_NAME)
                 .withConfigMap(new ConfigMapVolumeSourceBuilder()
                         .withName(configMapName)
+                        .withItems(configVolumeItems(configFileNames))
                         .build())
                 .build();
 
@@ -355,6 +391,33 @@ public final class HostingResourceBuilder {
                 .endSecretKeyRef()
                 .endValueFrom()
                 .build();
+    }
+
+    /**
+     * Builds the {@code ConfigMap} volume's {@code items} list: one entry per logical config
+     * file, mapping its sanitised {@link #configMapKey} back to the original nested {@code path}
+     * (e.g. {@code maps/survival-overworld.conf}) the file must land at inside the container --
+     * see {@link #CONFIG_MAP_KEY_SEPARATOR}'s Javadoc for why the data key itself cannot carry
+     * that path directly. Sorted for a deterministic manifest.
+     */
+    private static List<KeyToPath> configVolumeItems(Collection<String> configFileNames) {
+        return configFileNames.stream()
+                .sorted()
+                .map(path -> new KeyToPathBuilder()
+                        .withKey(configMapKey(path))
+                        .withPath(path)
+                        .build())
+                .toList();
+    }
+
+    /**
+     * Sanitises a {@code BlueMapConfigBuilder#buildForHosting} logical file path into a valid
+     * {@code ConfigMap} data key -- see {@link #CONFIG_MAP_KEY_SEPARATOR}'s Javadoc. Package-
+     * private so {@code BlueMapHostingReconciler} can build the {@code ConfigMap}'s {@code data}
+     * map with the exact same keys {@link #configVolumeItems} expects to find.
+     */
+    static String configMapKey(String logicalPath) {
+        return logicalPath.replace('/', CONFIG_MAP_KEY_SEPARATOR);
     }
 
     private static VolumeMount configVolumeMount() {

@@ -36,6 +36,7 @@ import io.fabric8.kubernetes.api.model.networking.v1.IngressTLS;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import net.onelitefeather.apus.operator.OperatorConfig;
@@ -87,7 +88,8 @@ class HostingResourceBuilderTest {
     @Test
     void deploymentIsOwnedByTheHostingResourceSoItIsGarbageCollected() {
         Deployment deployment =
-                HostingResourceBuilder.deployment(hosting(), "friends-maps-config", "bucket-secret", OperatorConfig.defaults());
+                HostingResourceBuilder.deployment(
+                        hosting(), "friends-maps-config", Set.of("maps/survival-overworld.conf", "webserver.conf"), "bucket-secret", OperatorConfig.defaults());
 
         assertOwnedByHosting(deployment.getMetadata().getOwnerReferences());
     }
@@ -124,7 +126,8 @@ class HostingResourceBuilderTest {
         hosting.getSpec().getTls().getIssuerRef().setName("letsencrypt-prod");
 
         Deployment deployment =
-                HostingResourceBuilder.deployment(hosting, "friends-maps-config", "bucket-secret", OperatorConfig.defaults());
+                HostingResourceBuilder.deployment(
+                        hosting, "friends-maps-config", Set.of("maps/survival-overworld.conf", "webserver.conf"), "bucket-secret", OperatorConfig.defaults());
         io.fabric8.kubernetes.api.model.Service service = HostingResourceBuilder.service(hosting);
         Ingress ingress = HostingResourceBuilder.ingress(hosting);
         Certificate certificate = HostingResourceBuilder.certificate(hosting).orElseThrow();
@@ -138,7 +141,8 @@ class HostingResourceBuilderTest {
     @Test
     void takesS3CredentialsFromTheSecretRatherThanInliningThem() {
         Deployment deployment =
-                HostingResourceBuilder.deployment(hosting(), "friends-maps-config", "bucket-secret", OperatorConfig.defaults());
+                HostingResourceBuilder.deployment(
+                        hosting(), "friends-maps-config", Set.of("maps/survival-overworld.conf", "webserver.conf"), "bucket-secret", OperatorConfig.defaults());
 
         Map<String, EnvVar> env = envOf(deployment);
 
@@ -154,7 +158,8 @@ class HostingResourceBuilderTest {
     @Test
     void deploymentMountsTheHostingConfigMap() {
         Deployment deployment =
-                HostingResourceBuilder.deployment(hosting(), "friends-maps-config", "bucket-secret", OperatorConfig.defaults());
+                HostingResourceBuilder.deployment(
+                        hosting(), "friends-maps-config", Set.of("maps/survival-overworld.conf", "webserver.conf"), "bucket-secret", OperatorConfig.defaults());
 
         List<Volume> volumes =
                 deployment.getSpec().getTemplate().getSpec().getVolumes();
@@ -171,10 +176,50 @@ class HostingResourceBuilderTest {
         assertFalse(mounts.isEmpty(), "container must mount the config volume");
     }
 
+    /**
+     * A real Kubernetes API server rejects a {@code ConfigMap} data key containing {@code /}
+     * outright -- the fabric8 mock server every other test in this class runs against does not
+     * enforce that, which is exactly how this went unnoticed until a real-cluster reconcile tried
+     * it (see {@code BlueMapHostingIntegrationTest} and the phase 3 task-5 report). The volume's
+     * {@code items} must therefore map a sanitised, slash-free key back to the original nested
+     * {@code path} so the file still lands where {@code hosting/bin/config-sync.sh} expects it.
+     */
+    @Test
+    void configVolumeItemsMapSanitisedKeysBackToTheirNestedPaths() {
+        Deployment deployment = HostingResourceBuilder.deployment(
+                hosting(),
+                "friends-maps-config",
+                Set.of("maps/survival-overworld.conf", "webserver.conf"),
+                "bucket-secret",
+                OperatorConfig.defaults());
+
+        Volume configVolume = deployment.getSpec().getTemplate().getSpec().getVolumes().stream()
+                .filter(volume -> volume.getConfigMap() != null)
+                .findFirst()
+                .orElseThrow();
+        List<io.fabric8.kubernetes.api.model.KeyToPath> items =
+                configVolume.getConfigMap().getItems();
+        assertNotNull(items, "the config volume must map its keys back to their original paths");
+
+        Map<String, String> keyToPath = items.stream()
+                .collect(Collectors.toMap(
+                        io.fabric8.kubernetes.api.model.KeyToPath::getKey,
+                        io.fabric8.kubernetes.api.model.KeyToPath::getPath));
+        assertEquals(
+                "maps/survival-overworld.conf",
+                keyToPath.get("maps.survival-overworld.conf"),
+                "no '/' may appear in the data key itself, but the item's path must restore it: " + keyToPath);
+        assertEquals("webserver.conf", keyToPath.get("webserver.conf"), keyToPath.toString());
+        for (String key : keyToPath.keySet()) {
+            assertFalse(key.contains("/"), "ConfigMap data keys must never contain '/': " + key);
+        }
+    }
+
     @Test
     void deploymentHasReadinessAndLivenessProbes() {
         Deployment deployment =
-                HostingResourceBuilder.deployment(hosting(), "friends-maps-config", "bucket-secret", OperatorConfig.defaults());
+                HostingResourceBuilder.deployment(
+                        hosting(), "friends-maps-config", Set.of("maps/survival-overworld.conf", "webserver.conf"), "bucket-secret", OperatorConfig.defaults());
 
         Container container =
                 deployment.getSpec().getTemplate().getSpec().getContainers().get(0);
@@ -191,7 +236,8 @@ class HostingResourceBuilderTest {
         hosting.getSpec().setReplicas(3);
 
         Deployment deployment =
-                HostingResourceBuilder.deployment(hosting, "friends-maps-config", "bucket-secret", OperatorConfig.defaults());
+                HostingResourceBuilder.deployment(
+                        hosting, "friends-maps-config", Set.of("maps/survival-overworld.conf", "webserver.conf"), "bucket-secret", OperatorConfig.defaults());
 
         assertEquals(3, deployment.getSpec().getReplicas());
     }
@@ -199,7 +245,8 @@ class HostingResourceBuilderTest {
     @Test
     void deploymentIsNamespacedLikeTheHostingItBelongsTo() {
         Deployment deployment =
-                HostingResourceBuilder.deployment(hosting(), "friends-maps-config", "bucket-secret", OperatorConfig.defaults());
+                HostingResourceBuilder.deployment(
+                        hosting(), "friends-maps-config", Set.of("maps/survival-overworld.conf", "webserver.conf"), "bucket-secret", OperatorConfig.defaults());
 
         assertEquals("bluemap-friends", deployment.getMetadata().getNamespace());
     }
@@ -244,7 +291,8 @@ class HostingResourceBuilderTest {
     @Test
     void serviceSelectsThePodsTheDeploymentCreates() {
         Deployment deployment =
-                HostingResourceBuilder.deployment(hosting(), "friends-maps-config", "bucket-secret", OperatorConfig.defaults());
+                HostingResourceBuilder.deployment(
+                        hosting(), "friends-maps-config", Set.of("maps/survival-overworld.conf", "webserver.conf"), "bucket-secret", OperatorConfig.defaults());
         io.fabric8.kubernetes.api.model.Service service = HostingResourceBuilder.service(hosting());
 
         Map<String, String> podLabels =

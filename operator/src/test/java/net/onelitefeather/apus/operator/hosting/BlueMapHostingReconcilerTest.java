@@ -270,8 +270,12 @@ class BlueMapHostingReconcilerTest {
         ConfigMap configMap =
                 client.configMaps().inNamespace(NAMESPACE).withName("friends-maps-config").get();
         assertNotNull(configMap);
-        assertTrue(configMap.getData().containsKey("maps/survival-overworld.conf"));
-        assertTrue(configMap.getData().containsKey("maps/creative-overworld.conf"));
+        // ConfigMap data keys are sanitised (no '/' -- a real API server rejects that, see
+        // HostingResourceBuilder#configMapKey); the original nested path survives as the
+        // corresponding config volume item's `path`, checked separately in
+        // HostingResourceBuilderTest#configVolumeItemsMapSanitisedKeysBackToTheirNestedPaths.
+        assertTrue(configMap.getData().containsKey("maps.survival-overworld.conf"));
+        assertTrue(configMap.getData().containsKey("maps.creative-overworld.conf"));
         assertTrue(configMap.getData().containsKey("webserver.conf"));
     }
 
