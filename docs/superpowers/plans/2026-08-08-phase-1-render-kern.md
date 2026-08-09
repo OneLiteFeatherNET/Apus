@@ -105,7 +105,7 @@ root-path: "survival"
 force-path-style: true
 ```
 
-> **Zu verifizieren in Task 7:** Sowohl die kebab-case-Abbildung als auch der Wert von `storage-type` (`themeinerlp:s3` folgt aus `new Key("themeinerlp", "s3")` in `S3StorageAddon`) sind aus dem Quellcode abgeleitet, nicht aus einer Dokumentation. Task 7 prüft beides gegen einen echten Lauf und korrigiert dieses Dokument bei Abweichung.
+> **Verifiziert in Task 7:** Der Integrationstest `runner/src/test/java/net/onelitefeather/apus/runner/RenderEndToEndTest.java` rendert die Fixture-Welt aus MinIO gegen einen echten BlueMap-CLI-Lauf mit `themeinerlp:s3` als Storage-Typ und den kebab-case-Feldnamen oben — **unverändert, wie ursprünglich angenommen**. Die BlueMap-Logausgabe bestätigt `Initializing Storage: 's3' (Type: 'themeinerlp:s3')`, und der Render endet mit Exit-Code 0. Zusätzlich bestätigt durch Quellcode-Review: `StorageConfig.storageType` in `bluemap-common` wird über `@Setting`-freies Configurate-Object-Mapping auf `storage-type` abgebildet (siehe `de.bluecolored.bluemap.common.config.storage.StorageConfig`), und `Key.parse(key, Key.BLUEMAP_NAMESPACE)` erwartet exakt das `namespace:value`-Format `themeinerlp:s3` aus `new Key("themeinerlp", "s3")` in `S3StorageAddon`. `render-config.sh` musste dafür nicht geändert werden.
 
 ---
 
@@ -134,7 +134,9 @@ Apus/
 │       │   └── probe/
 │       │       ├── RenderManagerAccess.java Schmale Schnittstelle auf BlueMap
 │       │       ├── RenderProgressProbe.java Erzeugt Snapshots, kapselt Fehlerfälle
-│       │       └── BlueMapRenderManagerAccess.java  Einzige Klasse mit BlueMap-Typen
+│       │       ├── BlueMapRenderManagerAccess.java  Weg über die BlueMap-API
+│       │       └── LogTailRenderManagerAccess.java  Weg über BlueMaps Logger (in Task 8
+│       │                                            ergänzt, siehe unten)
 │       ├── main/resources/bluemap.addon.json
 │       └── test/java/net/onelitefeather/apus/telemetry/
 │           ├── ProgressSnapshotTest.java
@@ -161,7 +163,9 @@ Apus/
     └── mini-world/                     Minimale Vanilla-Welt für Tests
 ```
 
-**Warum diese Aufteilung:** `BlueMapRenderManagerAccess` ist die **einzige** Klasse, die BlueMap-Typen importiert. Alles andere — Snapshot, Serialisierung, HTTP, Fehlerbehandlung — ist reines Java und ohne laufende BlueMap-Instanz testbar. Das macht Phase 1 fast vollständig unit-testbar und begrenzt die Auswirkung eines BlueMap-Upgrades auf eine Datei.
+**Warum diese Aufteilung:** BlueMap-Typen werden **ausschließlich** im Paket `probe` importiert, hinter der Schnittstelle `RenderManagerAccess`. Alles andere — Snapshot, Serialisierung, HTTP, Fehlerbehandlung — ist reines Java und ohne laufende BlueMap-Instanz testbar. Das macht Phase 1 fast vollständig unit-testbar und begrenzt die Auswirkung eines BlueMap-Upgrades auf dieses eine Paket.
+
+> **Nachgeführt auf den ausgelieferten Stand:** Ursprünglich war `BlueMapRenderManagerAccess` als *einzige* Klasse mit BlueMap-Bezug geplant. Task 8 hat ergeben, dass der API-Weg im CLI-Betrieb prinzipbedingt nicht trägt, und `LogTailRenderManagerAccess` als zweite Implementierung derselben Schnittstelle ergänzt. Genau dieser Zuschnitt hat die Erweiterung billig gemacht: Es kam eine Klasse hinzu, keine bestehende musste geändert werden.
 
 ---
 
@@ -443,9 +447,11 @@ git commit -m "build: set up Apus gradle monorepo with telemetry-addon module"
 
 **Files:**
 - Create: `telemetry-addon/src/main/java/net/onelitefeather/apus/telemetry/ProgressSnapshot.java`
+- Create: `telemetry-addon/src/main/java/net/onelitefeather/apus/telemetry/Numbers.java`
 - Create: `telemetry-addon/src/main/java/net/onelitefeather/apus/telemetry/JsonWriter.java`
 - Create: `telemetry-addon/src/main/java/net/onelitefeather/apus/telemetry/PrometheusWriter.java`
 - Test: `telemetry-addon/src/test/java/net/onelitefeather/apus/telemetry/ProgressSnapshotTest.java`
+- Test: `telemetry-addon/src/test/java/net/onelitefeather/apus/telemetry/NumbersTest.java`
 - Test: `telemetry-addon/src/test/java/net/onelitefeather/apus/telemetry/JsonWriterTest.java`
 - Test: `telemetry-addon/src/test/java/net/onelitefeather/apus/telemetry/PrometheusWriterTest.java`
 
@@ -468,6 +474,11 @@ public record ProgressSnapshot(
     public static ProgressSnapshot idle(int queuedTasks, int renderThreads);
 }
 
+public final class Numbers {
+    /** Formats a double without trailing zeros, locale-independent. */
+    public static String compact(double value);
+}
+
 public final class JsonWriter {
     public static String toJson(ProgressSnapshot snapshot);
 }
@@ -476,6 +487,8 @@ public final class PrometheusWriter {
     public static String toPrometheus(ProgressSnapshot snapshot);
 }
 ```
+
+`Numbers.compact` wird von **beiden** Writern genutzt. Es ist die einzige Stelle mit Zahlenformatierung — dieselbe Logik zweimal zu schreiben wäre ein Duplikat.
 
 - [ ] **Step 1: Den fehlschlagenden Test für `ProgressSnapshot` schreiben**
 
@@ -571,7 +584,84 @@ public record ProgressSnapshot(
 Run: `./gradlew :telemetry-addon:test --tests '*ProgressSnapshotTest*'`
 Expected: PASS
 
-- [ ] **Step 5: Den fehlschlagenden Test für `JsonWriter` schreiben**
+- [ ] **Step 5: Den fehlschlagenden Test für `Numbers` schreiben**
+
+`NumbersTest.java`:
+
+```java
+package net.onelitefeather.apus.telemetry;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+import org.junit.jupiter.api.Test;
+
+class NumbersTest {
+
+    @Test
+    void dropsTrailingZeros() {
+        assertEquals("0.5", Numbers.compact(0.5));
+        assertEquals("0.674", Numbers.compact(0.674));
+    }
+
+    @Test
+    void dropsTheDecimalPointForWholeNumbers() {
+        assertEquals("1", Numbers.compact(1.0));
+        assertEquals("-1", Numbers.compact(-1.0));
+        assertEquals("0", Numbers.compact(0.0));
+    }
+
+    @Test
+    void usesADotRegardlessOfTheHostLocale() {
+        java.util.Locale previous = java.util.Locale.getDefault();
+        try {
+            // German locale would otherwise render 0.5 as "0,5", producing invalid JSON.
+            java.util.Locale.setDefault(java.util.Locale.GERMANY);
+            assertEquals("0.5", Numbers.compact(0.5));
+        } finally {
+            java.util.Locale.setDefault(previous);
+        }
+    }
+}
+```
+
+- [ ] **Step 6: Test ausführen, Fehlschlag prüfen, `Numbers` implementieren**
+
+Run: `./gradlew :telemetry-addon:test --tests '*NumbersTest*'`
+Expected: FAIL, „cannot find symbol: class Numbers"
+
+```java
+package net.onelitefeather.apus.telemetry;
+
+import java.util.Locale;
+
+/**
+ * Locale-independent number formatting shared by the JSON and Prometheus writers.
+ *
+ * <p>Both output formats require a dot as the decimal separator; the host locale must
+ * never leak into a payload.
+ */
+public final class Numbers {
+
+    private Numbers() {}
+
+    /** Formats {@code value} with up to six decimals, without trailing zeros. */
+    public static String compact(double value) {
+        String formatted = String.format(Locale.ROOT, "%.6f", value);
+        if (formatted.indexOf('.') >= 0) {
+            formatted = formatted.replaceAll("0+$", "");
+            if (formatted.endsWith(".")) {
+                formatted = formatted.substring(0, formatted.length() - 1);
+            }
+        }
+        return formatted;
+    }
+}
+```
+
+Run: `./gradlew :telemetry-addon:test --tests '*NumbersTest*'`
+Expected: PASS
+
+- [ ] **Step 7: Den fehlschlagenden Test für `JsonWriter` schreiben**
 
 `JsonWriterTest.java`:
 
@@ -619,12 +709,12 @@ class JsonWriterTest {
 }
 ```
 
-- [ ] **Step 6: Test ausführen und Fehlschlag prüfen**
+- [ ] **Step 8: Test ausführen und Fehlschlag prüfen**
 
 Run: `./gradlew :telemetry-addon:test --tests '*JsonWriterTest*'`
 Expected: FAIL, „cannot find symbol: class JsonWriter"
 
-- [ ] **Step 7: `JsonWriter` implementieren**
+- [ ] **Step 9: `JsonWriter` implementieren**
 
 ```java
 package net.onelitefeather.apus.telemetry;
@@ -676,18 +766,7 @@ public final class JsonWriter {
     }
 
     private static void appendNumber(StringBuilder out, String key, double value) {
-        out.append('"').append(key).append("\":");
-        // Locale.ROOT keeps the decimal separator a dot regardless of the host locale.
-        out.append(String.format(Locale.ROOT, "%s", trimTrailingZeros(value)));
-    }
-
-    private static String trimTrailingZeros(double value) {
-        String formatted = String.format(Locale.ROOT, "%.6f", value);
-        formatted = formatted.replaceAll("0+$", "");
-        if (formatted.endsWith(".")) {
-            formatted = formatted.substring(0, formatted.length() - 1);
-        }
-        return formatted;
+        out.append('"').append(key).append("\":").append(Numbers.compact(value));
     }
 
     private static void escape(StringBuilder out, String value) {
@@ -712,14 +791,14 @@ public final class JsonWriter {
 }
 ```
 
-- [ ] **Step 8: Test ausführen und Erfolg prüfen**
+- [ ] **Step 10: Test ausführen und Erfolg prüfen**
 
 Run: `./gradlew :telemetry-addon:test --tests '*JsonWriterTest*'`
 Expected: PASS
 
 Falls `progress` als `-1` statt `-1.0` erwartet wird: Der Test in Step 5 fordert `0.674` exakt; `trimTrailingZeros` liefert dafür `0.674`. Für `-1.0` liefert es `-1`. Beides ist gültiges JSON.
 
-- [ ] **Step 9: Den fehlschlagenden Test für `PrometheusWriter` schreiben**
+- [ ] **Step 11: Den fehlschlagenden Test für `PrometheusWriter` schreiben**
 
 `PrometheusWriterTest.java`:
 
@@ -760,12 +839,12 @@ class PrometheusWriterTest {
 }
 ```
 
-- [ ] **Step 10: Test ausführen und Fehlschlag prüfen**
+- [ ] **Step 12: Test ausführen und Fehlschlag prüfen**
 
 Run: `./gradlew :telemetry-addon:test --tests '*PrometheusWriterTest*'`
 Expected: FAIL, „cannot find symbol: class PrometheusWriter"
 
-- [ ] **Step 11: `PrometheusWriter` implementieren**
+- [ ] **Step 13: `PrometheusWriter` implementieren**
 
 ```java
 package net.onelitefeather.apus.telemetry;
@@ -790,7 +869,7 @@ public final class PrometheusWriter {
             out.append("# HELP apus_render_progress_ratio Progress of the current render task, 0 to 1.\n");
             out.append("# TYPE apus_render_progress_ratio gauge\n");
             out.append("apus_render_progress_ratio{map=\"").append(escapeLabel(map)).append("\"} ")
-                    .append(number(snapshot.progress())).append('\n');
+                    .append(Numbers.compact(snapshot.progress())).append('\n');
         }
 
         if (snapshot.etaSeconds() >= 0 && map != null) {
@@ -819,27 +898,18 @@ public final class PrometheusWriter {
         return out.toString();
     }
 
-    private static String number(double value) {
-        String formatted = String.format(Locale.ROOT, "%.6f", value);
-        formatted = formatted.replaceAll("0+$", "");
-        if (formatted.endsWith(".")) {
-            formatted = formatted.substring(0, formatted.length() - 1);
-        }
-        return formatted;
-    }
-
     private static String escapeLabel(String value) {
         return value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n");
     }
 }
 ```
 
-- [ ] **Step 12: Test ausführen und Erfolg prüfen**
+- [ ] **Step 14: Test ausführen und Erfolg prüfen**
 
 Run: `./gradlew :telemetry-addon:test --tests '*PrometheusWriterTest*'`
 Expected: PASS
 
-- [ ] **Step 13: Commit**
+- [ ] **Step 15: Commit**
 
 ```bash
 ./gradlew spotlessApply
@@ -1133,7 +1203,7 @@ Expected: PASS (6 Tests)
 
 - [ ] **Step 7: `BlueMapRenderManagerAccess` implementieren**
 
-Die einzige Klasse mit BlueMap-Importen.
+Die erste der beiden Klassen mit BlueMap-Importen — die zweite (`LogTailRenderManagerAccess`) kam in Task 8 hinzu, nachdem sich dieser Weg im CLI-Betrieb als nicht tragfähig erwiesen hatte.
 
 ```java
 package net.onelitefeather.apus.telemetry.probe;
@@ -1445,6 +1515,15 @@ Run: `./gradlew :telemetry-addon:test --tests '*TelemetryServerTest*'`
 Expected: FAIL, „cannot find symbol: class TelemetryServer"
 
 - [ ] **Step 7: `TelemetryServer` implementieren**
+
+**Nachgeführt auf den ausgelieferten Stand:** `HttpServer.createContext` matcht Pfade als
+Präfix, nicht exakt — ein Context für `/progress` würde ohne Weiteres auch
+`/progressX` oder `/progress/nested` bedienen. Das wurde während der Umsetzung entdeckt
+und behoben: Jeder Handler unten ist ausgeliefert in ein `exactPath(...)`-Wrapper gehüllt,
+das bei fehlendem exaktem Match 404 liefert, statt sich auf `createContext`s
+Präfix-Matching zu verlassen. Die Skizze unten zeigt bewusst noch die ursprüngliche,
+naive Fassung ohne `exactPath()` — den tatsächlich ausgelieferten Code siehe
+`telemetry-addon/src/main/java/net/onelitefeather/apus/telemetry/TelemetryServer.java`.
 
 ```java
 package net.onelitefeather.apus.telemetry;
@@ -1886,12 +1965,19 @@ echo "[apus] synced ${REGION_COUNT} region files"
 
 - [ ] **Step 4: `runner/entrypoint.sh` schreiben**
 
+**Nachgeführt auf den ausgelieferten Stand (Task 6/8):** `APUS_MC_VERSION` ist Pflicht,
+nicht optional — konsistent mit der Vertragstabelle oben, die es schon immer als `ja`
+führte. Der ursprünglich hier skizzierte `if [ -n ... ]`-Fallback ließ das BlueMap-CLI
+ohne `-v` starten, was BlueMap zwingt, die Minecraft-Version selbst zu raten; das wird
+nirgends unterstützt und wurde vor der Auslieferung korrigiert.
+
 ```bash
 #!/usr/bin/env bash
 set -euo pipefail
 
 : "${APUS_MAP_ID:?APUS_MAP_ID is required}"
 : "${APUS_DIMENSION:?APUS_DIMENSION is required}"
+: "${APUS_MC_VERSION:?APUS_MC_VERSION is required}"
 : "${APUS_WORLD_S3_URL:?APUS_WORLD_S3_URL is required}"
 : "${APUS_MAP_BUCKET:?APUS_MAP_BUCKET is required}"
 : "${APUS_S3_ENDPOINT:?APUS_S3_ENDPOINT is required}"
@@ -1904,14 +1990,10 @@ WORLD_DIR=/work/world
 /opt/apus/bin/bundle-sync.sh "${WORLD_DIR}"
 /opt/apus/bin/render-config.sh "${CONFIG_DIR}"
 
-ARGS=(-c "${CONFIG_DIR}" -r -m "${APUS_MAP_ID}")
+ARGS=(-c "${CONFIG_DIR}" -r -m "${APUS_MAP_ID}" -v "${APUS_MC_VERSION}")
 
 if [ "${APUS_FORCE_RENDER:-false}" = "true" ]; then
   ARGS+=(-f)
-fi
-
-if [ -n "${APUS_MC_VERSION:-}" ]; then
-  ARGS+=(-v "${APUS_MC_VERSION}")
 fi
 
 echo "[apus] starting BlueMap: ${ARGS[*]}"
@@ -1921,6 +2003,11 @@ exec java -jar /opt/bluemap/cli.jar "${ARGS[@]}"
 `exec` ist wichtig: BlueMap wird damit PID 1 und empfängt `SIGTERM` direkt, wenn Kubernetes den Pod beendet.
 
 - [ ] **Step 5: `runner/README.md` schreiben**
+
+**Nachgeführt auf den ausgelieferten Stand:** `releases/latest/download/BlueMapS3Storage.jar`
+liefert 404 — das Release-Asset ist versioniert (z.B. `BlueMapS3Storage-1.5.1.jar`). Die
+untenstehende URL ist daher bereits auf die versionierte Form korrigiert; die
+authoritative, jeweils aktuelle Fassung steht in `runner/README.md` selbst.
 
 ````markdown
 # Apus Runner Image
@@ -1933,7 +2020,7 @@ Renders a Minecraft world from S3 with BlueMap and writes the result back to S3.
 ./gradlew :telemetry-addon:shadowJar
 mkdir -p runner/vendor
 curl -fsSL -o runner/vendor/BlueMapS3Storage.jar \
-  https://github.com/TheMeinerLP/BlueMapS3Storage/releases/latest/download/BlueMapS3Storage.jar
+  https://github.com/TheMeinerLP/BlueMapS3Storage/releases/download/v1.5.1/BlueMapS3Storage-1.5.1.jar
 docker build -f runner/Dockerfile -t apus/runner:dev .
 ```
 
@@ -1971,7 +2058,7 @@ cd /mnt/projects/oss/onelitefeather/Apus
 ./gradlew :telemetry-addon:shadowJar
 mkdir -p runner/vendor
 curl -fsSL -o runner/vendor/BlueMapS3Storage.jar \
-  https://github.com/TheMeinerLP/BlueMapS3Storage/releases/latest/download/BlueMapS3Storage.jar
+  https://github.com/TheMeinerLP/BlueMapS3Storage/releases/download/v1.5.1/BlueMapS3Storage-1.5.1.jar
 docker build -f runner/Dockerfile -t apus/runner:dev .
 ```
 
@@ -2428,6 +2515,21 @@ Ergibt sich daraus ein anderer Weg (etwa ein zugänglicher `BlueMapService` oder
 
 Führt kein Weg über die API zum internen RenderManager, ist Reflection auf das private Feld `renderManager` in `RenderManagerImpl` der dokumentierte Rückfallweg (Feldname aus der Recherche in den Global Constraints). Auch das gehört ausschließlich in `BlueMapRenderManagerAccess`.
 
+**Nachgeführt auf den ausgelieferten Stand:** Der oben skizzierte Reflection-Rückfallweg
+wurde **nicht** umgesetzt. Die Diagnose in Step 3 bestätigte, dass `impl.plugin()` im
+CLI-Betrieb strukturell immer `null` liefert und BlueMap dafür auch keine
+`RenderManagerImpl`-Instanz baut — es gibt in diesem Modus kein Feld, auf das Reflection
+zugreifen könnte; der Rückfallweg liefe ins Leere. Stattdessen wurde
+`LogTailRenderManagerAccess` eingeführt: Es registriert sich auf BlueMaps eigenem
+`Logger.global` und parst die Fortschrittszeile, die die CLI ohnehin selbst loggt — ein
+dokumentierter Erweiterungspunkt, keine Reflection. Damit besteht der BlueMap-Zugriff
+entgegen der ursprünglichen Annahme aus **zwei** Implementierungen derselben
+`RenderManagerAccess`-Schnittstelle (`BlueMapRenderManagerAccess` für den — im CLI-Betrieb
+toten — API-Weg, `LogTailRenderManagerAccess` für den tatsächlich tragenden Weg), zwischen
+denen `ApusTelemetryAddon` wählt. Details, der vollständige Dekompilierungsbefund und die
+verworfene `java.util.Timer`-Reflection-Alternative stehen in `runner/README.md#telemetry`
+und Spec §7.2.
+
 - [ ] **Step 4: Korrektur umsetzen, bis der Test besteht**
 
 ```bash
@@ -2467,7 +2569,7 @@ Nach Task 8 ist erreicht:
 
 - Ein Container-Image rendert eine Welt aus S3 nach S3, ohne Kubernetes.
 - Der Fortschritt ist während des Laufs als JSON und als Prometheus-Metriken abrufbar.
-- Der gesamte BlueMap-Zugriff liegt in einer Klasse, abgesichert durch einen Contract-Test.
+- Der gesamte BlueMap-Zugriff liegt hinter der `RenderManagerAccess`-Schnittstelle, umgesetzt in zwei Klassen (`BlueMapRenderManagerAccess` für den API-Weg, `LogTailRenderManagerAccess` für den im CLI-Betrieb tatsächlich tragenden Log-Tail-Weg) — abgesichert durch einen Contract-Test, der den Log-Tail-Weg abdeckt.
 - Serialisierung, Fehlerbehandlung und Konfiguration sind ohne laufende BlueMap-Instanz getestet.
 
 **Nicht Teil von Phase 1** (folgt in eigenen Plänen): Operator und CRDs, Ingest/ETL, Hosting, Asset-Cache für die Minecraft-Client-JAR, Region-Sharding.
