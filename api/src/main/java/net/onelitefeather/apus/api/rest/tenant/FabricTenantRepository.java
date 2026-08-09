@@ -47,4 +47,9 @@ public class FabricTenantRepository implements TenantRepository {
     public Tenant create(Tenant tenant) {
         return client.resource(tenant).create();
     }
+
+    @Override
+    public Tenant update(Tenant tenant) {
+        return client.resource(tenant).update();
+    }
 }

@@ -19,23 +19,27 @@ package net.onelitefeather.apus.api.rest.render;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.micronaut.security.authentication.Authentication;
 import java.util.List;
 import java.util.Map;
 import net.onelitefeather.apus.api.rest.support.NotFoundException;
+import net.onelitefeather.apus.api.rest.tenant.InMemoryTenantRepository;
 import net.onelitefeather.apus.api.security.ForbiddenException;
 import net.onelitefeather.apus.api.security.TenantResolver;
 import net.onelitefeather.apus.api.support.PrincipalResolver;
 import net.onelitefeather.apus.operator.api.BlueMapRender;
 import net.onelitefeather.apus.operator.api.Ref;
+import net.onelitefeather.apus.operator.api.Tenant;
 import org.junit.jupiter.api.Test;
 
 class BlueMapRenderControllerTest {
 
     private final InMemoryBlueMapRenderRepository repository = new InMemoryBlueMapRenderRepository();
-    private final BlueMapRenderController controller =
-            new BlueMapRenderController(repository, new PrincipalResolver(), new TenantResolver());
+    private final InMemoryTenantRepository tenantRepository = new InMemoryTenantRepository();
+    private final BlueMapRenderController controller = new BlueMapRenderController(
+            repository, new PrincipalResolver(), new TenantResolver(), tenantRepository);
 
     private static Authentication viewer(String tenant) {
         return Authentication.build("carol", List.of("tenant-viewer"), Map.of(PrincipalResolver.TENANT_CLAIM, tenant));
@@ -43,6 +47,25 @@ class BlueMapRenderControllerTest {
 
     private static Authentication noRoles(String tenant) {
         return Authentication.build("service-token", List.of(), Map.of(PrincipalResolver.TENANT_CLAIM, tenant));
+    }
+
+    private static Authentication platformAdmin() {
+        return Authentication.build("root", List.of("platform-admin"), Map.of());
+    }
+
+    private static Authentication owner(String tenant) {
+        return Authentication.build("alice", List.of("tenant-owner"), Map.of(PrincipalResolver.TENANT_CLAIM, tenant));
+    }
+
+    private static Authentication operator(String tenant) {
+        return Authentication.build("bob", List.of("tenant-operator"), Map.of(PrincipalResolver.TENANT_CLAIM, tenant));
+    }
+
+    private static Tenant tenant(String name, String namespace) {
+        Tenant tenant = new Tenant();
+        tenant.getMetadata().setName(name);
+        tenant.getStatus().setNamespace(namespace);
+        return tenant;
     }
 
     private static BlueMapRender render(String name, String mapName) {
@@ -92,5 +115,45 @@ class BlueMapRenderControllerTest {
     void getByIdRejectsACallerWithNoTenantRole() {
         repository.put("bluemap-acme", render("render-1", "survival-overworld"));
         assertThrows(ForbiddenException.class, () -> controller.getById(noRoles("acme"), "render-1"));
+    }
+
+    @Test
+    void listClusterReturnsRendersAcrossEveryTenantForAPlatformAdmin() {
+        tenantRepository.put(tenant("acme", "bluemap-acme"));
+        tenantRepository.put(tenant("globex", "bluemap-globex"));
+        repository.put("bluemap-acme", render("render-1", "survival-overworld"));
+        repository.put("bluemap-globex", render("render-2", "creative-overworld"));
+
+        var response = controller.listCluster(platformAdmin());
+
+        assertEquals(200, response.getStatus().getCode());
+        assertEquals(2, response.body().size());
+        assertTrue(response.body().stream()
+                .anyMatch(entry -> entry.tenant().equals("acme") && entry.render().name().equals("render-1")));
+        assertTrue(response.body().stream()
+                .anyMatch(entry -> entry.tenant().equals("globex") && entry.render().name().equals("render-2")));
+    }
+
+    @Test
+    void listClusterSkipsATenantWithNoNamespaceInStatusYet() {
+        tenantRepository.put(tenant("brandNew", null));
+
+        var response = controller.listCluster(platformAdmin());
+
+        assertEquals(0, response.body().size());
+    }
+
+    /**
+     * The security-critical case (task brief C2): every role other than {@code platform-admin}
+     * must be rejected, not just "a caller with no roles" -- including the tenant-level roles
+     * that *do* pass {@code /api/renders}' own gate, since this is the one endpoint on this
+     * controller that would otherwise leak every tenant's renders to any authenticated caller.
+     */
+    @Test
+    void listClusterRejectsEveryNonPlatformAdminRole() {
+        assertThrows(ForbiddenException.class, () -> controller.listCluster(owner("acme")));
+        assertThrows(ForbiddenException.class, () -> controller.listCluster(operator("acme")));
+        assertThrows(ForbiddenException.class, () -> controller.listCluster(viewer("acme")));
+        assertThrows(ForbiddenException.class, () -> controller.listCluster(noRoles("acme")));
     }
 }
