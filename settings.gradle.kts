@@ -133,6 +133,11 @@ dependencyResolutionManagement {
             library("fabric8.server.mock", "io.fabric8", "kubernetes-server-mock").versionRef("fabric8")
 
             library("aws.sdk.bom", "software.amazon.awssdk", "bom").versionRef("aws-sdk")
+            // software.amazon.awssdk.services.s3.presigner.S3Presigner (used by the `api` module's
+            // POST /api/uploads, design spec §11.1, to hand out presigned multipart-upload part
+            // URLs) ships inside this same artifact in this SDK major version -- verified directly
+            // against the resolved s3-2.46.7.jar on 2026-08-09; there is no separate
+            // `s3-presigner` artifact to depend on (an earlier SDK version did have one).
             library("aws.sdk.s3", "software.amazon.awssdk", "s3").withoutVersion()
 
             library("jackson.bom", "com.fasterxml.jackson", "jackson-bom").versionRef("jackson")
