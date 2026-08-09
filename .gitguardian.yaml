@@ -20,3 +20,20 @@ secret:
       match: bfd5d64da90af877034e91f582242391fea586e6d187a475a3407bf37bd6f422
     - name: "phase 1 MinIO test secret key (throwaway container, cause fixed)"
       match: 9c721c67b04a5ff4622f5796d44a042c328d5453795ac798e14c7a7a31125bdd
+    # The two environment-variable NAMES that carry S3 credentials into the render,
+    # ingest and hosting containers. GitGuardian's "Generic High Entropy Secret"
+    # detector reads the identifiers themselves as secrets wherever they appear as
+    # string literals -- in Kubernetes EnvVar names and in the Secret data keys the
+    # operator wires up. They are names, not values: no credential is stored here.
+    #
+    # They cannot be removed. An EnvVar name and a Secret key have to exist as literal
+    # strings somewhere for the contract between the operator and the container images
+    # to work; moving them into constants only relocates the literal.
+    #
+    # Confirmed as one finding each across three files (RenderJobBuilder, IngestConfig,
+    # HostingResourceBuilder), which is why the scanner reports the same two incident
+    # ids for all of them -- it deduplicates by value.
+    - name: "APUS_S3_ACCESS_KEY -- env var name, not a credential"
+      match: 512400f5e1ec04e47002a185359c58e8f9365f44ef761803e1ea8525ab67ea5e
+    - name: "APUS_S3_SECRET_KEY -- env var name, not a credential"
+      match: 8e868512d55e22f28dcca4dc2a72c37148cd1e9f3e37071f6418241a5c1cb0a7
