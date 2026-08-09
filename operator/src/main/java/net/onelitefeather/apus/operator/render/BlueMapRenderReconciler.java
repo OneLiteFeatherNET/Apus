@@ -443,12 +443,24 @@ public class BlueMapRenderReconciler implements Reconciler<BlueMapRender> {
         return (status.getSucceeded() != null && status.getSucceeded() > 0) || hasCondition(status, "Complete");
     }
 
+    /**
+     * A Job is terminally failed only once its {@code Failed} condition is set -- which the
+     * Kubernetes Job controller does exactly once, after {@code backoffLimit} retries are
+     * exhausted. {@code status.failed} (the count of failed pod attempts so far) is deliberately
+     * <b>not</b> consulted here: {@code backoffLimit} exists precisely so a single transient pod
+     * failure gets retried, not treated as the whole Job's outcome. Counting pod attempts would
+     * make this method return {@code true} after the very first failed attempt while the Job
+     * controller is still going to retry -- {@link #reconcileActiveJob} would mark the {@link
+     * BlueMapRender} terminally {@code Failed} immediately, even though the Job keeps running
+     * underneath it and may still succeed on a later attempt. See {@code WorldIngestReconciler}'s
+     * identical fix -- same underlying mistake, found in both reconcilers.
+     */
     private static boolean isJobFailed(Job job) {
         JobStatus status = job.getStatus();
         if (status == null) {
             return false;
         }
-        return (status.getFailed() != null && status.getFailed() > 0) || hasCondition(status, "Failed");
+        return hasCondition(status, "Failed");
     }
 
     private static boolean hasCondition(JobStatus status, String type) {

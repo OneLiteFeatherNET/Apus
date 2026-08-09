@@ -10,6 +10,13 @@ dependencies {
     testImplementation(libs.testcontainers.minio)
 
     testImplementation("org.slf4j:slf4j-simple:2.0.16")
+
+    // IngestRenderContractTest drives the real net.onelitefeather.apus.ingest.IngestMain entry
+    // point in-process (against the same MinIO Testcontainers instance the render half of that
+    // test already needs) to prove the phase 2b contract: a bundle the ingest module writes is
+    // exactly what this module's render image reads. Same "depend on the module rather than
+    // duplicating its logic" reasoning operator/build.gradle.kts already applies to :ingest.
+    testImplementation(project(":ingest"))
 }
 
 // Every test in this module is a container-based integration test: each starts MinIO plus
