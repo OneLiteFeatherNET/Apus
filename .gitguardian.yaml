@@ -1,30 +1,22 @@
-# GitGuardian configuration for this repository.
-# Schema reference: https://docs.gitguardian.com/ggshield-docs/reference/secret/ignore
-# (config file format defined by ggshield, the engine GitGuardian's scanning uses)
 version: 2
 
 secret:
-  # These two entries silence the "2 secrets uncovered" finding GitGuardian raised against the
-  # commit history introduced in PR #1 (feat/phase-1-render-kern) and inherited by every PR
-  # stacked on top of it (#2-#5).
-  #
-  # Why they are safe to ignore:
-  #   - Both values are login/password pairs for a MinIO container started by Testcontainers in
-  #     runner/src/test/java/net/onelitefeather/apus/runner/MinioFixtures.java. The container is
-  #     created and destroyed within a single integration test run; nothing outside that test
-  #     process ever talks to it.
-  #   - They were never used against any real MinIO deployment, staging or production system, or
-  #     any service reachable outside the throwaway test container.
-  #   - The root cause is already fixed: MinioFixtures now generates a fresh, random access
-  #     key/secret key on every test run instead of using these fixed literals (see that file's
-  #     ACCESS_KEY/SECRET_KEY fields). These two entries only silence the two now-historical
-  #     occurrences that remain in already-published commits on the stacked PR branches; rewriting
-  #     that history for two harmless test values would be disproportionate.
-  #
-  # Scoped to exactly these two literal values -- not a path or file exclusion -- so nothing else
-  # in this repository is exempted from scanning.
-  ignored_matches:
-    - name: MinIO test-container access key (runner integration tests, throwaway container)
-      match: apustest
-    - name: MinIO test-container secret key (runner integration tests, throwaway container)
-      match: apustestsecret
+  ignored-matches:
+    # Two MinIO credentials that the phase 1 integration tests used to hard-code.
+    # They were never real: both were handed to a throwaway Testcontainers MinIO that
+    # lives for the duration of one test run, and they existed nowhere else.
+    #
+    # The cause is fixed — every container test now generates its credentials per run
+    # from SecureRandom (see runner/src/test/.../MinioFixtures.java and the equivalents
+    # in the ingest and api modules). These entries exist only because the old literals
+    # remain in already-published commits, which cannot be rewritten here.
+    #
+    # Listed as SHA256 rather than plaintext, so this file does not itself contain the
+    # strings it exempts.
+    #
+    # Do not extend this list to silence new findings. A finding in new code means the
+    # code is wrong, not the scanner.
+    - name: "phase 1 MinIO test access key (throwaway container, cause fixed)"
+      match: bfd5d64da90af877034e91f582242391fea586e6d187a475a3407bf37bd6f422
+    - name: "phase 1 MinIO test secret key (throwaway container, cause fixed)"
+      match: 9c721c67b04a5ff4622f5796d44a042c328d5453795ac798e14c7a7a31125bdd
