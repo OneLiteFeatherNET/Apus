@@ -761,27 +761,39 @@ Oberfläche und Identity-Broker dazu kommen erst in Phase 5.
 `BlueMapHosting`: Webserver-Deployment, Service, Ingress, Zertifikat, URL im Status.
 Ergebnis: Karten sind unter eigener Adresse erreichbar. **Ende des MVP.**
 
-### Phase 4 — Region-Sharding *(nach Spike)*
+### Phase 4 — Region-Sharding *(Spike durchgeführt, Ergebnis: kein Sharding)*
 
-Vorgeschalteter **Spike**: Zwei Prozesse rendern gleichzeitig benachbarte, disjunkte
-Regionsmengen in denselben Map-Storage; anschließend werden alle Zoomstufen auf Löcher und
-veraltete Bereiche geprüft. Hintergrund: Lowres-Tiles mitteln über Regionsgrenzen hinweg,
-weshalb konkurrierende Shards einander überschreiben könnten. Granulare Speicherung
-verhindert Korruption, aber nicht notwendigerweise gegenseitiges Überschreiben aggregierter
-Werte.
+**Der Spike ist gelaufen und negativ ausgefallen.** Bericht:
+`docs/superpowers/spikes/2026-08-09-lowres-sharding-spike.md`.
 
-Fällt der Spike positiv aus: `shards: N` über `Job` mit `completionMode: Indexed`, jeder
-Pod verarbeitet seinen Anteil der Regionsliste aus dem Manifest. Umsetzung über einen
-eigenen Runner, der `scheduleMapUpdateTask(map, regions)` aufruft — öffentliche API, keine
-Reflection. Nebeneffekte: Der Welt-Download parallelisiert mit, und der Fortschritt wird
-genauer als BlueMaps eigene Schätzung, weil über bekannte Regionsanzahlen aggregiert wird.
+Gemessen wurde ein Referenzlauf (ganze Welt in einem Durchgang) gegen zwei gleichzeitig
+laufende Container mit disjunkten, aneinandergrenzenden Regionsmengen im selben
+Map-Storage. Ergebnis: **7 von 24 Lowres-Kacheln weichen ab**, dreimal reproduziert; eine
+Kachel fällt von 99 % gerendertem Terrain auf 91 % leer. Ein sequenzieller Kontrolllauf
+beschädigt sogar 10 von 24 Kacheln — die Reihenfolgeabhängigkeit bestätigt den Mechanismus
+unabhängig vom Wettlauf.
 
-Fällt der Spike negativ aus: Alternative ist ein zweistufiges Verfahren (Shards rendern
-Hires-Tiles, ein abschließender Lauf baut die Lowres-Ebenen auf) oder der Verzicht auf
-Sharding zugunsten vertikaler Skalierung.
+Damit ist die frühere Annahme widerlegt, granulare Speicherung schütze ausreichend. Sie
+verhindert Korruption einzelner Kacheln, aber nicht, dass zwei Shards dasselbe aggregierte
+Lowres-Tile überschreiben.
 
-Die Architektur ist bereits sharding-fähig ausgelegt: Regionsliste im Manifest,
-`shards`-Feld in der CR, Fortschrittsaggregation im Operator.
+**Entscheidung: kein Sharding.** Von den beiden in dieser Spec vorgesehenen Alternativen
+wird die zweite gewählt — Verzicht zugunsten vertikaler Skalierung über `render-threads`.
+Begründung:
+
+- Das zweistufige Verfahren (Shards rendern nur Hires, ein finaler Lauf baut die
+  Lowres-Ebenen) setzt einen eigenen Runner mit Anbindung an BlueMap-Core voraus. Genau
+  den schließt §1.4 für den MVP aus, und §2.1 nennt den Grund: BlueMap-Core ist keine
+  stabile öffentliche API.
+- Vertikale Skalierung ist bereits vorhanden und kostet nichts.
+- Es gibt bislang keine Welt, deren Renderzeit das Problem rechtfertigt. Ohne diesen
+  Bedarf wäre Sharding Aufwand gegen ein hypothetisches Problem.
+
+**Was von Phase 4 bleibt:** Die Architektur ist sharding-fähig ausgelegt — die Regionsliste
+steht im Bundle-Manifest, `BlueMapMap.spec.shards` existiert. Sollte künftig eine Welt
+tatsächlich zu lange brauchen, ist der zweistufige Weg der dann zu prüfende Ansatz, und
+der Spike-Bericht ist die Grundlage dafür. `shards` bleibt bis dahin auf `1` beschränkt;
+ein höherer Wert wird nicht umgesetzt und sollte vom Operator abgelehnt werden.
 
 ### Phase 5 — API, UI und Mandanten
 
