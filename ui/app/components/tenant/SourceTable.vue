@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { WorldSourceResponse } from '~/utils/apiTypes'
-import { formatTimestamp } from './formatTimestamp'
+import { formatTimestamp } from '~/utils/formatTimestamp'
 
 // Design spec §11.2: "Quellen: Liste der WorldSource, ihr Zustand, wann zuletzt geprüft wurde,
 // welches Bundle zuletzt entstand."

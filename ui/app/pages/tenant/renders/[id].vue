@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import type { BlueMapRenderResponse } from '~/utils/apiTypes'
 import { ApusApiError } from '~/utils/apiErrors'
-import { isRenderTerminal, type RenderProgressSnapshot } from '~/components/tenant/renderProgress'
-import { formatTimestamp } from '~/components/tenant/formatTimestamp'
+import { isRenderTerminal, type RenderProgressSnapshot } from '~/utils/renderProgress'
+import { formatTimestamp } from '~/utils/formatTimestamp'
 
 const { principal } = useAuth()
 const hasAccess = computed(() => canReadTenant(principal.value))

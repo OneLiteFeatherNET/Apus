@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { openSseController, type SseController } from './sseController'
+import { openSseController, type SseController } from '~/utils/sseController'
 
 /**
  * Live log tail for one render (design spec §11.2: "Log-Ansicht für einen Render, ebenfalls

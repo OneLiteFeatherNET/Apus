@@ -2,8 +2,8 @@
  * Pure formatting/decision logic for render progress display (design spec §11.2: "Renders...
  * für den laufenden Render Fortschritt in Prozent mit geschätzter Restzeit, live").
  *
- * Kept framework-free and outside `app/utils/` (tenant-agent file-scope restriction) so it stays
- * unit-testable without mounting a component -- see tests/unit/tenant/renderProgress.spec.ts.
+ * Framework-free so it stays unit-testable without mounting a component -- see
+ * tests/unit/tenant/renderProgress.spec.ts.
  *
  * The api module sends `-1` for `percent`/`etaSeconds` together with `degraded: true` when its
  * progress *measurement* has degraded (design spec: this can happen without the render itself
@@ -11,7 +11,7 @@
  * app/utils/apiTypes.ts. The one binding rule here: never turn an unknown value into a fabricated
  * number (a bar frozen at 0%, an invented ETA) -- report it as unknown instead.
  */
-import type { RenderProgressEvent } from '~/utils/apiTypes'
+import type { RenderProgressEvent } from './apiTypes'
 
 /** Mirrors `RenderPhases.TERMINAL` (api module, api/src/main/java/.../events/RenderPhases.java)
  * exactly -- the only two phases after which a render's progress stream will not change again. */

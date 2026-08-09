@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { BlueMapRenderResponse } from '~/utils/apiTypes'
-import { isRenderTerminal, type RenderProgressSnapshot } from './renderProgress'
-import { formatTimestamp } from './formatTimestamp'
+import { isRenderTerminal, type RenderProgressSnapshot } from '~/utils/renderProgress'
+import { formatTimestamp } from '~/utils/formatTimestamp'
 
 // Design spec §11.2: "Renders: Verlauf mit Zustand, und für den laufenden Render Fortschritt in
 // Prozent mit geschätzter Restzeit, live." The history itself comes from one GET (a snapshot);

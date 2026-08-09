@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { RenderProgressEvent } from '~/utils/apiTypes'
-import { describeRenderProgress, isRenderTerminal, type RenderProgressSnapshot } from './renderProgress'
-import { openSseController, withAutoStopOnTerminal, type SseController } from './sseController'
+import { describeRenderProgress, isRenderTerminal, type RenderProgressSnapshot } from '~/utils/renderProgress'
+import { openSseController, withAutoStopOnTerminal, type SseController } from '~/utils/sseController'
 
 /**
  * Live percent/ETA for one render (design spec §11.2). Subscribes to

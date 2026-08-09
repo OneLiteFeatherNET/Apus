@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { describeRenderProgress, formatDuration, isRenderTerminal } from '../../../app/components/tenant/renderProgress'
+import { describeRenderProgress, formatDuration, isRenderTerminal } from '../../../app/utils/renderProgress'
 
 describe('isRenderTerminal', () => {
   it('is true for Succeeded and Failed', () => {

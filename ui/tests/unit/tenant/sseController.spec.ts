@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { openSseController, withAutoStopOnTerminal } from '../../../app/components/tenant/sseController'
+import { openSseController, withAutoStopOnTerminal } from '../../../app/utils/sseController'
 import type { SseHandlers } from '../../../app/utils/apiClient'
 
 describe('openSseController', () => {
