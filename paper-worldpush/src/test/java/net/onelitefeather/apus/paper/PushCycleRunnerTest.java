@@ -25,6 +25,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -78,7 +81,9 @@ class PushCycleRunnerTest {
         assertEquals(1, uploader.uploaded.size());
         assertEquals("staging/world/region/r.0.0.mca", uploader.uploaded.get(0).s3Key());
         assertEquals(1, notifier.summaries.size());
-        assertEquals(new PushSummary("acme", "world", 1, 5), notifier.summaries.get(0));
+        assertEquals(
+                new PushSummary("survival-source", "2026-08-09T12-00-00Z", "world", 1, 5),
+                notifier.summaries.get(0));
         assertTrue(Files.isRegularFile(stateFile), "state must be persisted after a successful cycle");
     }
 
@@ -136,16 +141,20 @@ class PushCycleRunnerTest {
         assertEquals(1, uploader.uploaded.size());
     }
 
+    private static final Clock FIXED_CLOCK =
+            Clock.fixed(Instant.parse("2026-08-09T12:00:00Z"), ZoneOffset.UTC);
+
     private PushCycleRunner newRunner() {
         return new PushCycleRunner(
                 new IncrementalWorldCopier(), saveCoordinator, uploader, notifier, serverRoot, stagingRoot, stateFile,
-                config);
+                config, FIXED_CLOCK);
     }
 
     private static ConfigSource configSource() {
         Map<String, String> values = new HashMap<>();
         values.put("world-name", "world");
         values.put("tenant", "acme");
+        values.put("world-source-name", "survival-source");
         values.put("push-token", "secret-token");
         values.put("s3.endpoint", "https://s3.example.org");
         values.put("s3.bucket", "apus-worlds");

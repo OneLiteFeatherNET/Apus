@@ -42,6 +42,7 @@ public final class WorldPushConfig {
 
     private final String worldName;
     private final String tenant;
+    private final String sourceName;
     private final String pushToken;
     private final String stagingDirectory;
     private final String s3Endpoint;
@@ -56,6 +57,7 @@ public final class WorldPushConfig {
     private WorldPushConfig(
             String worldName,
             String tenant,
+            String sourceName,
             String pushToken,
             String stagingDirectory,
             String s3Endpoint,
@@ -68,6 +70,7 @@ public final class WorldPushConfig {
             long intervalMinutes) {
         this.worldName = worldName;
         this.tenant = tenant;
+        this.sourceName = sourceName;
         this.pushToken = pushToken;
         this.stagingDirectory = stagingDirectory;
         this.s3Endpoint = s3Endpoint;
@@ -89,6 +92,7 @@ public final class WorldPushConfig {
     public static WorldPushConfig from(ConfigSource source) {
         String worldName = requireNonBlank(source, "world-name");
         String tenant = requireNonBlank(source, "tenant");
+        String sourceName = requireNonBlank(source, "world-source-name");
         String pushToken = requireNonBlank(source, "push-token");
         String stagingDirectory = orDefault(source.getString("staging-directory"), "apus-worldpush-staging");
 
@@ -119,6 +123,7 @@ public final class WorldPushConfig {
         return new WorldPushConfig(
                 worldName,
                 tenant,
+                sourceName,
                 pushToken,
                 stagingDirectory,
                 s3Endpoint,
@@ -154,6 +159,18 @@ public final class WorldPushConfig {
 
     public String tenant() {
         return tenant;
+    }
+
+    /**
+     * The target {@code push}-type {@code WorldSource}'s name, within {@link #tenant()}'s
+     * namespace -- becomes {@code PushReportRequest.sourceName()} in every completion report (see
+     * {@link PushSummary}). Distinct from {@link #tenant()}: the namespace a push token
+     * authorizes is resolved from the token alone (design spec §10.3), but a tenant may run more
+     * than one push-type source, so the token by itself is not enough to pick which one this
+     * server's uploads belong to.
+     */
+    public String sourceName() {
+        return sourceName;
     }
 
     /** The narrowly-scoped {@code world:push} service token -- never log this value. */

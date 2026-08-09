@@ -73,9 +73,11 @@ public final class HttpPushNotifier implements PushNotifier {
 
     private HttpRequest buildRequest(PushSummary summary) {
         URI target = apiBaseUrl.resolve("/api/push/" + pushToken);
-        String body = "{\"tenant\":\"" + jsonEscape(summary.tenant()) + "\",\"worldName\":\""
-                + jsonEscape(summary.worldName()) + "\",\"fileCount\":" + summary.fileCount() + ",\"bytesUploaded\":"
-                + summary.bytesUploaded() + "}";
+        // Exactly the two fields PushReportRequest (module api, package
+        // net.onelitefeather.apus.api.rest.push) deserializes -- see PushSummary's Javadoc for
+        // why the rest of the summary never goes on the wire.
+        String body = "{\"sourceName\":\"" + jsonEscape(summary.sourceName()) + "\",\"version\":\""
+                + jsonEscape(summary.version()) + "\"}";
         return HttpRequest.newBuilder(target)
                 .timeout(REQUEST_TIMEOUT)
                 .header("Content-Type", "application/json")

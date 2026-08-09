@@ -19,6 +19,10 @@ package net.onelitefeather.apus.paper;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.logging.Logger;
 
@@ -46,6 +50,15 @@ public final class PushCycleRunner {
 
     private static final Logger LOGGER = Logger.getLogger(PushCycleRunner.class.getName());
 
+    /**
+     * Formats each push cycle's {@code version} identifier -- mirrors the timestamp-style version
+     * ids the rest of Apus already uses for source versions (e.g. {@code
+     * S3SourceConnector}'s {@code 2026-08-01T00-00-00Z.zip} object keys), minus a file extension
+     * since a push cycle uploads many individual region files rather than one archive.
+     */
+    private static final DateTimeFormatter VERSION_FORMAT =
+            DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH-mm-ss'Z'").withZone(ZoneOffset.UTC);
+
     private final IncrementalWorldCopier copier;
     private final SaveCoordinator saveCoordinator;
     private final WorldUploader uploader;
@@ -54,6 +67,7 @@ public final class PushCycleRunner {
     private final Path stagingRoot;
     private final Path stateFile;
     private final WorldPushConfig config;
+    private final Clock clock;
 
     public PushCycleRunner(
             IncrementalWorldCopier copier,
@@ -64,6 +78,20 @@ public final class PushCycleRunner {
             Path stagingRoot,
             Path stateFile,
             WorldPushConfig config) {
+        this(copier, saveCoordinator, uploader, notifier, serverRoot, stagingRoot, stateFile, config, Clock.systemUTC());
+    }
+
+    /** Same as the public constructor, but with an injectable {@link Clock} -- for deterministic version-id tests. */
+    PushCycleRunner(
+            IncrementalWorldCopier copier,
+            SaveCoordinator saveCoordinator,
+            WorldUploader uploader,
+            PushNotifier notifier,
+            Path serverRoot,
+            Path stagingRoot,
+            Path stateFile,
+            WorldPushConfig config,
+            Clock clock) {
         this.copier = copier;
         this.saveCoordinator = saveCoordinator;
         this.uploader = uploader;
@@ -72,6 +100,7 @@ public final class PushCycleRunner {
         this.stagingRoot = stagingRoot;
         this.stateFile = stateFile;
         this.config = config;
+        this.clock = clock;
     }
 
     /**
@@ -111,8 +140,13 @@ public final class PushCycleRunner {
             uploader.upload(stagingRoot.resolve(relativePath), config.s3StagingPrefix() + relativePath);
         }
 
+        String version = VERSION_FORMAT.format(Instant.now(clock));
         notifier.notifyPushComplete(new PushSummary(
-                config.tenant(), config.worldName(), result.copiedRelativePaths().size(), result.copiedBytes()));
+                config.sourceName(),
+                version,
+                config.worldName(),
+                result.copiedRelativePaths().size(),
+                result.copiedBytes()));
 
         state.save(stateFile);
         LOGGER.info("Push cycle: uploaded " + result.copiedRelativePaths().size() + " region file(s), "

@@ -80,9 +80,10 @@ public final class WorldPushPlugin extends JavaPlugin {
 
         getSLF4JLogger()
                 .info(
-                        "Apus world push enabled for world '{}', tenant '{}', every {} minute(s).",
+                        "Apus world push enabled for world '{}', tenant '{}', source '{}', every {} minute(s).",
                         config.worldName(),
                         config.tenant(),
+                        config.sourceName(),
                         config.intervalMinutes());
     }
 

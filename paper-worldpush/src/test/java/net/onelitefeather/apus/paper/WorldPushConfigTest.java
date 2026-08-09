@@ -32,6 +32,7 @@ class WorldPushConfigTest {
 
         assertEquals("world", config.worldName());
         assertEquals("acme", config.tenant());
+        assertEquals("survival-source", config.sourceName());
         assertEquals("secret-token", config.pushToken());
         assertEquals("apus-worldpush-staging", config.stagingDirectory());
         assertEquals("https://s3.example.org", config.s3Endpoint());
@@ -70,6 +71,16 @@ class WorldPushConfigTest {
         values.remove("push-token");
 
         assertThrows(WorldPushConfig.ConfigurationException.class, () -> WorldPushConfig.from(source(values)));
+    }
+
+    @Test
+    void missingSourceNameFailsFast() {
+        Map<String, String> values = fullConfig();
+        values.remove("world-source-name");
+
+        WorldPushConfig.ConfigurationException e =
+                assertThrows(WorldPushConfig.ConfigurationException.class, () -> WorldPushConfig.from(source(values)));
+        org.junit.jupiter.api.Assertions.assertTrue(e.getMessage().contains("world-source-name"));
     }
 
     @Test
@@ -133,6 +144,7 @@ class WorldPushConfigTest {
         Map<String, String> values = new HashMap<>();
         values.put("world-name", "world");
         values.put("tenant", "acme");
+        values.put("world-source-name", "survival-source");
         values.put("push-token", "secret-token");
         values.put("staging-directory", "apus-worldpush-staging");
         values.put("s3.endpoint", "https://s3.example.org");
