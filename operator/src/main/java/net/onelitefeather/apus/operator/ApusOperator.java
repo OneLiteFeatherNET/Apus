@@ -20,6 +20,7 @@ package net.onelitefeather.apus.operator;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.KubernetesClientBuilder;
 import io.javaoperatorsdk.operator.Operator;
+import net.onelitefeather.apus.operator.hosting.BlueMapHostingReconciler;
 import net.onelitefeather.apus.operator.ingest.WorldIngestReconciler;
 import net.onelitefeather.apus.operator.ingest.WorldSourceReconciler;
 import net.onelitefeather.apus.operator.map.BlueMapMapReconciler;
@@ -28,7 +29,7 @@ import net.onelitefeather.apus.operator.tenant.TenantReconciler;
 
 /**
  * The operator's process entry point: builds a Kubernetes client and {@link OperatorConfig} from
- * the environment, registers the five reconcilers against a single {@link Operator} instance,
+ * the environment, registers the six reconcilers against a single {@link Operator} instance,
  * and starts it.
  *
  * <p>There is no Micronaut (or any other framework) integration here on purpose -- the Java
@@ -73,12 +74,12 @@ public final class ApusOperator {
             return;
         }
 
-        System.out.println(
-                "[apus-operator] started, watching Tenant/BlueMapMap/BlueMapRender/WorldSource/WorldIngest resources");
+        System.out.println("[apus-operator] started, watching Tenant/BlueMapMap/BlueMapRender/WorldSource/"
+                + "WorldIngest/BlueMapHosting resources");
     }
 
     /**
-     * Registers all five reconcilers on {@code operator}. Extracted from {@link #main} so a
+     * Registers all six reconcilers on {@code operator}. Extracted from {@link #main} so a
      * test can exercise the wiring itself -- that every reconciler this operator ships is
      * actually registered -- against a mock {@link KubernetesClient} instead of a real cluster.
      */
@@ -88,6 +89,7 @@ public final class ApusOperator {
         operator.register(new BlueMapRenderReconciler(client, config));
         operator.register(new WorldSourceReconciler(client));
         operator.register(new WorldIngestReconciler(client, config));
+        operator.register(new BlueMapHostingReconciler(client, config));
     }
 
     /**

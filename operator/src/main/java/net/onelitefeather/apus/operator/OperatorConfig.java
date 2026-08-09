@@ -30,6 +30,9 @@ import java.util.function.Function;
  * @param bucketStorageClass the StorageClass used for {@code ObjectBucketClaim}s
  * @param runnerImage the container image running BlueMap renders
  * @param ingestImage the container image running world ingest jobs (see {@code ingest/README.md})
+ * @param hostingImage the container image running the long-lived {@code BlueMapHosting}
+ *     webserver (see {@code hosting/README.md}); wired into {@code
+ *     net.onelitefeather.apus.operator.hosting.HostingResourceBuilder#deployment}
  * @param bundleBucket the S3-compatible bucket every ingested world bundle is written to.
  *     Deliberately operator-wide rather than a {@code WorldSource}/{@code WorldIngest} spec
  *     field: neither phase 2b CRD carries a bundle-destination field of its own (only
@@ -50,6 +53,7 @@ public record OperatorConfig(
         String bucketStorageClass,
         String runnerImage,
         String ingestImage,
+        String hostingImage,
         String bundleBucket,
         String bundleS3Endpoint,
         String bundleS3Region,
@@ -60,6 +64,7 @@ public record OperatorConfig(
     private static final String DEFAULT_BUCKET_STORAGE_CLASS = "ceph-bucket-fr01";
     private static final String DEFAULT_RUNNER_IMAGE = "apus/runner:dev";
     private static final String DEFAULT_INGEST_IMAGE = "apus/ingest:dev";
+    private static final String DEFAULT_HOSTING_IMAGE = "apus/hosting:dev";
     private static final String DEFAULT_BUNDLE_BUCKET = "apus-bundles";
     private static final String DEFAULT_BUNDLE_S3_ENDPOINT = "http://rgw.rook-ceph-fr01.svc:80";
     private static final String DEFAULT_BUNDLE_S3_REGION = "us-east-1";
@@ -73,6 +78,7 @@ public record OperatorConfig(
                 DEFAULT_BUCKET_STORAGE_CLASS,
                 DEFAULT_RUNNER_IMAGE,
                 DEFAULT_INGEST_IMAGE,
+                DEFAULT_HOSTING_IMAGE,
                 DEFAULT_BUNDLE_BUCKET,
                 DEFAULT_BUNDLE_S3_ENDPOINT,
                 DEFAULT_BUNDLE_S3_REGION,
@@ -88,8 +94,8 @@ public record OperatorConfig(
      *
      * <p>Recognised variables: {@code APUS_ROOK_NAMESPACE}, {@code APUS_CEPH_OBJECT_STORE},
      * {@code APUS_BUCKET_STORAGE_CLASS}, {@code APUS_RUNNER_IMAGE}, {@code APUS_INGEST_IMAGE},
-     * {@code APUS_BUNDLE_BUCKET}, {@code APUS_BUNDLE_S3_ENDPOINT}, {@code
-     * APUS_BUNDLE_S3_REGION}, {@code APUS_BUNDLE_CREDENTIALS_SECRET}.
+     * {@code APUS_HOSTING_IMAGE}, {@code APUS_BUNDLE_BUCKET}, {@code APUS_BUNDLE_S3_ENDPOINT},
+     * {@code APUS_BUNDLE_S3_REGION}, {@code APUS_BUNDLE_CREDENTIALS_SECRET}.
      */
     public static OperatorConfig fromEnvironment(Function<String, String> env) {
         return new OperatorConfig(
@@ -98,6 +104,7 @@ public record OperatorConfig(
                 valueOrDefault(env.apply("APUS_BUCKET_STORAGE_CLASS"), DEFAULT_BUCKET_STORAGE_CLASS),
                 valueOrDefault(env.apply("APUS_RUNNER_IMAGE"), DEFAULT_RUNNER_IMAGE),
                 valueOrDefault(env.apply("APUS_INGEST_IMAGE"), DEFAULT_INGEST_IMAGE),
+                valueOrDefault(env.apply("APUS_HOSTING_IMAGE"), DEFAULT_HOSTING_IMAGE),
                 valueOrDefault(env.apply("APUS_BUNDLE_BUCKET"), DEFAULT_BUNDLE_BUCKET),
                 valueOrDefault(env.apply("APUS_BUNDLE_S3_ENDPOINT"), DEFAULT_BUNDLE_S3_ENDPOINT),
                 valueOrDefault(env.apply("APUS_BUNDLE_S3_REGION"), DEFAULT_BUNDLE_S3_REGION),

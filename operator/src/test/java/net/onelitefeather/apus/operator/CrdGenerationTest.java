@@ -202,4 +202,22 @@ class CrdGenerationTest {
 
         assertEquals("Namespaced", crd.getSpec().getScope(), "WorldIngest must be namespace-scoped");
     }
+
+    @Test
+    void generatesTheBlueMapHostingCrdWithExpectedIdentity() {
+        CustomResourceDefinition crd = loadCrd("bluemaphostings.bluemap.onelitefeather.net-v1.yml");
+
+        assertEquals("bluemap.onelitefeather.net", crd.getSpec().getGroup());
+        assertEquals("BlueMapHosting", crd.getSpec().getNames().getKind());
+        assertEquals("bluemaphostings", crd.getSpec().getNames().getPlural());
+    }
+
+    @Test
+    void blueMapHostingIsNamespaceScoped() {
+        CustomResourceDefinition crd = loadCrd("bluemaphostings.bluemap.onelitefeather.net-v1.yml");
+
+        // A hosting webserver belongs to exactly one tenant's namespace, exactly like
+        // BlueMapMap and WorldSource.
+        assertEquals("Namespaced", crd.getSpec().getScope(), "BlueMapHosting must be namespace-scoped");
+    }
 }
