@@ -28,7 +28,15 @@ import java.util.function.Function;
  */
 public record TelemetryConfig(String bindAddress, int port, boolean enabled) {
 
+    /**
+     * Mirrored as a private constant in {@code
+     * net.onelitefeather.apus.operator.render.BlueMapRenderReconciler} ({@code
+     * HttpProgressFetcher.TELEMETRY_PORT}): the {@code operator} module has no compile
+     * dependency on this one, so it cannot reference this constant directly and duplicates the
+     * value instead. If this default ever changes, that constant must change with it.
+     */
     public static final int DEFAULT_PORT = 8099;
+
     public static final String DEFAULT_BIND = "0.0.0.0";
 
     public static TelemetryConfig fromEnvironment(Function<String, String> env) {

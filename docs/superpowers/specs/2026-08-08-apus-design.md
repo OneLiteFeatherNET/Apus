@@ -237,7 +237,7 @@ Ein `BlueMapRender` erzeugt einen Kubernetes-`Job` mit:
 
 1. **Init: `bundle-sync`** — lädt die im Manifest gelisteten Dimensionen des Bundles auf ein `emptyDir` (oder PVC bei großen Welten).
 2. **Init: `assets-sync`** — holt die Minecraft-Client-JAR der benötigten Version aus dem Asset-Cache-Bucket. Verhindert, dass jeder Render-Pod erneut bei Mojang lädt.
-3. **Main: `bluemap`** — BlueMap-CLI mit `-r`, dazu im `packs/`-Ordner `BlueMapS3Storage` (Map-Output) und `telemetry-addon` (Fortschritt). Konfiguration kommt aus gemounteter ConfigMap plus Secret.
+3. **Main: `bluemap`** — BlueMap-CLI mit `-r`, dazu im `packs/`-Ordner `BlueMapS3Storage` (Map-Output) und `telemetry-addon` (Fortschritt). Die Konfiguration erzeugt der Container beim Start selbst aus Umgebungsvariablen (§7.4); Zugangsdaten kommen dabei aus dem von Rook erzeugten Secret. Es wird **keine** ConfigMap gemountet — siehe die Anmerkung in §9.2.
 
 Der Map-Output geht direkt über den S3-Storage in den Ziel-Bucket. Es gibt keinen
 separaten Upload-Schritt — und damit auch keinen Zustand, der zwischen „gerendert" und
@@ -536,10 +536,25 @@ Render-Job und Hosting-Pod sie brauchen, ohne Secrets über Namespace-Grenzen zu
 Weil alle Buckets eines Mandanten seinem `CephObjectStoreUser` gehören, zählt ihr
 gesamter Verbrauch gegen dessen Quota (§10.2).
 
-### 9.2 BlueMap-Konfiguration wird generiert
+### 9.2 BlueMap-Konfiguration wird generiert (Phase 3, Hosting)
 
-Aus der CR und den Rook-Werten erzeugt der Operator die vollständige BlueMap-Konfiguration
-als ConfigMap (plus Secret für Zugangsdaten):
+**Klarstellung (2026-08-08, Review Phase 2a):** Diese Sektion beschrieb ursprünglich, dass der
+Operator die Render-Konfiguration als ConfigMap ausliefert. Das widersprach §7.4: Der Phase-1-
+Runner wird für den Render **ausschließlich über Umgebungsvariablen** konfiguriert und liest nie
+etwas aus einem gemounteten Pfad — das ist gegen einen echten Render verifiziert
+(`runner/entrypoint.sh`, `runner/bin/render-config.sh`). Der `RenderJobBuilder` aus Phase 2a
+mountet deshalb bewusst **keine** ConfigMap; §7.4 ist für den Render-Pfad maßgeblich, nicht diese
+Sektion.
+
+Die hier beschriebene Konfigurationserzeugung bleibt gültig, aber erst für **Phase 3**
+(`BlueMapHosting`) relevant: Der langlebige Webserver-Pod, der bereits gerenderte Karten
+ausliefert, braucht ein vollständiges `webserver.conf` und dieselbe Speicher-Anbindung — eine
+Oberfläche, die der Render-Umgebungsvariablen-Vertrag aus §7.4 nicht abdeckt. `BlueMapConfigBuilder`
+existiert bereits (Phase 2a) und generiert diese Dateien, wird aber erst mit dem Hosting-Pod in
+Phase 3 tatsächlich verdrahtet.
+
+Aus der CR und den Rook-Werten erzeugt der Operator für den Hosting-Pod die vollständige
+BlueMap-Konfiguration als ConfigMap (plus Secret für Zugangsdaten):
 
 | Datei | Inhalt |
 |---|---|
@@ -553,7 +568,7 @@ Nutzer schreiben kein HOCON. Wer Sonderfälle braucht, setzt gezielt
 
 **Verifiziertes Format von `storages/s3.conf`** (Phase 1, Task 7 — per Integrationstest
 gegen einen echten BlueMap-CLI-Lauf und Quellcode-Review von `S3StorageConfiguration`
-bestätigt; der Operator muss in Phase 2 exakt diese Schlüssel erzeugen):
+bestätigt; der Operator muss beim Verdrahten in Phase 3 exakt diese Schlüssel erzeugen):
 
 ```hocon
 storage-type: "themeinerlp:s3"
@@ -787,6 +802,7 @@ Ebenen.
 4. **CRD-Generierung unter Gradle.** Vorgehen beim Aufsetzen von Phase 2 verifizieren (§13.2).
 5. **`render-mask` und Kanten.** Nur relevant, falls in Phase 4 der Maskenweg statt des eigenen Runners gewählt wird: Ob sich das Auffüllen mit Luft außerhalb der Maske abschalten lässt, ist dann zu prüfen.
 6. **Volume-Typ für große Welten.** `emptyDir` genügt bis zu einer Größe, die von der Node-Ausstattung abhängt; darüber ist ein PVC nötig. **Offen:** Diese Grenze wurde in Phase 1 entgegen der ursprünglichen Zusage **nicht** gemessen — es ist eigener Scope, keine bloße Verifikation eines bestehenden Plans. Muss vor Phase 2 nachgeholt werden, bevor der Operator einen Default für die CR festlegt.
+7. **Kein belastbares Quota-Signal aus dem Runner-Image.** `BlueMapRenderReconciler` erkennt ein Speicherlimit derzeit heuristisch aus dem Grund/der Meldung des terminierten Render-Pods (Muster wie `QuotaExceeded` oder "quota" kombiniert mit einem S3-Bezug wie `bucket`/`rgw`/`ceph`), gestützt auf `terminationMessagePolicy: FallbackToLogsOnError`, damit überhaupt eine Meldung ankommt. Das bleibt Best-Effort: das Kubelet-Vokabular für den Terminierungsgrund enthält "quota" nie, und die Meldung ist nur ein Log-Ausschnitt ohne Vertrag. Ein belastbares Signal (z. B. ein eigener Exit-Code des Runners für "Quota erschöpft") muss vor einem produktiven Einsatz nachgezogen werden, bevor mehr Verhalten (etwa automatische Benachrichtigungen) darauf aufbaut.
 
 ---
 
