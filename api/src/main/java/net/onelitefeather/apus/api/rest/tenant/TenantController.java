@@ -21,12 +21,15 @@ import io.micronaut.http.HttpResponse;
 import io.micronaut.http.annotation.Body;
 import io.micronaut.http.annotation.Controller;
 import io.micronaut.http.annotation.Get;
+import io.micronaut.http.annotation.Patch;
+import io.micronaut.http.annotation.PathVariable;
 import io.micronaut.http.annotation.Post;
 import io.micronaut.security.annotation.Secured;
 import io.micronaut.security.authentication.Authentication;
 import io.micronaut.security.rules.SecurityRule;
 import java.util.List;
 import net.onelitefeather.apus.api.rest.support.BadRequestException;
+import net.onelitefeather.apus.api.rest.support.NotFoundException;
 import net.onelitefeather.apus.api.security.ApusPrincipal;
 import net.onelitefeather.apus.api.security.ForbiddenException;
 import net.onelitefeather.apus.api.support.PrincipalResolver;
@@ -34,9 +37,10 @@ import net.onelitefeather.apus.operator.api.Tenant;
 import net.onelitefeather.apus.operator.api.TenantSpec;
 
 /**
- * {@code GET /api/tenants} and {@code POST /api/tenants} -- platform-level, {@code
- * platform-admin} only (design spec §10.3, §11.1). Unlike every other controller in {@code
- * rest/}, this one never calls {@code TenantResolver}: {@code Tenant} is cluster-scoped, and a
+ * {@code GET /api/tenants}, {@code POST /api/tenants}, and {@code PATCH /api/tenants/{name}} --
+ * platform-level, {@code platform-admin} only (design spec §10.3, §11.1). Unlike every other
+ * controller in {@code rest/}, this one never calls {@code TenantResolver}: {@code Tenant} is
+ * cluster-scoped, and a
  * platform-admin's reach here is deliberately cluster-wide, not confined to a single namespace
  * -- see {@code TenantResolverTest#namespaceForRejectsAPlatformAdminWithoutATenantToo}'s Javadoc
  * from task 1, which is exactly the boundary this controller sits on the other side of.
@@ -94,6 +98,34 @@ public class TenantController {
 
         Tenant created = repository.create(tenant);
         return HttpResponse.created(TenantResponse.from(created));
+    }
+
+    /**
+     * Changes an existing tenant's storage quota and/or allowed hosting domains (design spec
+     * §10.3: {@code platform-admin} may "Tenants anlegen/ändern/löschen, Quotas"). {@code name}
+     * comes from the path, exactly like every other tenant-identifying value in this module --
+     * never re-derived from the body. Closes the gap the platform dashboard flagged: before this,
+     * a quota was only settable at {@link #create}-time.
+     */
+    @Patch("/{name}")
+    public HttpResponse<TenantResponse> update(
+            Authentication authentication, @PathVariable String name, @Body UpdateTenantRequest request) {
+        requirePlatformAdmin(authentication);
+        Tenant tenant = repository.findByName(name).orElseThrow(() -> new NotFoundException("no tenant '" + name + "'"));
+
+        TenantSpec spec = tenant.getSpec();
+        if (request.storageQuota() != null) {
+            spec.getStorage().setQuota(request.storageQuota());
+        }
+        if (request.maxObjects() != null) {
+            spec.getStorage().setMaxObjects(request.maxObjects());
+        }
+        if (request.allowedHostingDomains() != null) {
+            spec.getHosting().setAllowedDomains(request.allowedHostingDomains());
+        }
+
+        Tenant updated = repository.update(tenant);
+        return HttpResponse.ok(TenantResponse.from(updated));
     }
 
     private ApusPrincipal requirePlatformAdmin(Authentication authentication) {

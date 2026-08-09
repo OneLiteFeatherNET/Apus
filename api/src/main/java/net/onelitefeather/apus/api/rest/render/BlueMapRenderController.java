@@ -25,8 +25,10 @@ import io.micronaut.security.annotation.Secured;
 import io.micronaut.security.authentication.Authentication;
 import io.micronaut.security.rules.SecurityRule;
 import java.util.List;
+import java.util.stream.Stream;
 import net.onelitefeather.apus.api.rest.support.NotFoundException;
 import net.onelitefeather.apus.api.rest.support.TenantAccess;
+import net.onelitefeather.apus.api.rest.tenant.TenantRepository;
 import net.onelitefeather.apus.api.security.ApusPrincipal;
 import net.onelitefeather.apus.api.security.ForbiddenException;
 import net.onelitefeather.apus.api.security.TenantResolver;
@@ -37,6 +39,16 @@ import net.onelitefeather.apus.api.support.PrincipalResolver;
  * tenant only. A render belonging to a different tenant looks up empty in this tenant's
  * namespace and, per task-2-brief.md's central rule, produces the exact same 404 as a render
  * that does not exist anywhere -- see {@link NotFoundException}'s Javadoc.
+ *
+ * <p>{@code GET /api/renders/cluster} is the one deliberate exception to "the caller's own
+ * tenant only": {@code platform-admin}'s cluster-wide view (design spec §10.3). It is a
+ * literal route, checked before the {@code /{id}} route can match it, and its own method
+ * ({@link #listCluster}) does not go through {@link TenantResolver} at all -- same reasoning as
+ * {@code TenantController} not going through it (see that class's Javadoc): a platform-admin is
+ * not necessarily a member of any tenant, so resolving *a* namespace for it would be wrong even
+ * if one happened to exist. This is the only method on this controller allowed to see more than
+ * one tenant's resources; everything else keeps the invariant that the tenant comes from the
+ * token and the token alone.
  */
 @Controller("/api/renders")
 @Secured(SecurityRule.IS_AUTHENTICATED)
@@ -45,12 +57,17 @@ public class BlueMapRenderController {
     private final BlueMapRenderRepository repository;
     private final PrincipalResolver principalResolver;
     private final TenantResolver tenantResolver;
+    private final TenantRepository tenantRepository;
 
     public BlueMapRenderController(
-            BlueMapRenderRepository repository, PrincipalResolver principalResolver, TenantResolver tenantResolver) {
+            BlueMapRenderRepository repository,
+            PrincipalResolver principalResolver,
+            TenantResolver tenantResolver,
+            TenantRepository tenantRepository) {
         this.repository = repository;
         this.principalResolver = principalResolver;
         this.tenantResolver = tenantResolver;
+        this.tenantRepository = tenantRepository;
     }
 
     @Get
@@ -61,6 +78,37 @@ public class BlueMapRenderController {
 
         List<BlueMapRenderResponse> renders = repository.list(namespace).stream()
                 .map(BlueMapRenderResponse::from)
+                .toList();
+        return HttpResponse.ok(renders);
+    }
+
+    /**
+     * The cluster-wide view (design spec §10.3, §11.2: "laufende Jobs clusterweit"),
+     * {@code platform-admin} only. Walks every {@code Tenant} the platform-admin has cluster-wide
+     * reach to (via {@link TenantRepository}, exactly like {@code TenantController} does), and
+     * for each one lists renders in that tenant's own namespace -- the same {@link
+     * BlueMapRenderRepository#list(String)} every tenant-scoped call already uses, just invoked
+     * once per tenant instead of once for the caller's own. A tenant with no namespace recorded
+     * yet in its status (freshly created, not yet reconciled) is skipped rather than failing the
+     * whole call.
+     */
+    @Get("/cluster")
+    public HttpResponse<List<ClusterRenderResponse>> listCluster(Authentication authentication) {
+        ApusPrincipal principal = principalResolver.resolve(authentication);
+        if (!principal.isPlatformAdmin()) {
+            throw new ForbiddenException("principal '" + principal.subject() + "' is not a platform-admin");
+        }
+
+        List<ClusterRenderResponse> renders = tenantRepository.list().stream()
+                .flatMap(tenant -> {
+                    String namespace = tenant.getStatus().getNamespace();
+                    if (namespace == null || namespace.isBlank()) {
+                        return Stream.<ClusterRenderResponse>empty();
+                    }
+                    String tenantName = tenant.getMetadata().getName();
+                    return repository.list(namespace).stream()
+                            .map(render -> ClusterRenderResponse.from(tenantName, render));
+                })
                 .toList();
         return HttpResponse.ok(renders);
     }
