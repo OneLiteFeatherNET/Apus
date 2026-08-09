@@ -1,6 +1,6 @@
 rootProject.name = "Apus"
 
-include("telemetry-addon", "runner", "operator", "ingest")
+include("telemetry-addon", "runner", "operator", "ingest", "api")
 
 dependencyResolutionManagement {
     repositories {
@@ -50,6 +50,53 @@ dependencyResolutionManagement {
             // CronParser/ExecutionTime do not do), so this stays the "slim library" the
             // brief asks for rather than a heavyweight addition.
             version("cron-utils", "9.2.1")
+
+            // Micronaut, for the `api` module (phase 5a, task 1) -- REST + SSE over the CRs,
+            // with Micronaut Security validating JWTs against a configurable issuer (the
+            // identity broker in front of Apus is intentionally undecided, see design spec
+            // §15). No Micronaut Gradle plugin is used, in keeping with this project's own
+            // convention of a hand-written inline catalog rather than a generated one (see
+            // minestom-knowledge:gradle) -- these three artifact families are added directly,
+            // the same way josdk/fabric8/aws-sdk are above. Versions verified against Maven
+            // Central on 2026-08-09 via each artifact's maven-metadata.xml (<release>) and
+            // cross-checked against io.micronaut.platform:micronaut-platform:5.1.0's own POM,
+            // which pins exactly this combination (micronaut.core.version=5.1.10,
+            // micronaut.security.version=5.3.1, micronaut.serialization.version=3.1.0) --
+            // Micronaut 5 is the current major; there is no newer 4.x release to prefer over it.
+            version("micronaut", "5.1.10")
+            version("micronaut-security", "5.3.1")
+            version("micronaut-serde", "3.1.0")
+
+            library("micronaut.core.bom", "io.micronaut", "micronaut-core-bom").versionRef("micronaut")
+            library("micronaut.inject.java", "io.micronaut", "micronaut-inject-java").withoutVersion()
+            library("micronaut.http.server.netty", "io.micronaut", "micronaut-http-server-netty").withoutVersion()
+            library("micronaut.runtime", "io.micronaut", "micronaut-runtime").withoutVersion()
+
+            library("micronaut.security.bom", "io.micronaut.security", "micronaut-security-bom")
+                .versionRef("micronaut-security")
+            library("micronaut.security.jwt", "io.micronaut.security", "micronaut-security-jwt").withoutVersion()
+            library("micronaut.security.annotations", "io.micronaut.security", "micronaut-security-annotations")
+                .withoutVersion()
+
+            library("micronaut.serde.bom", "io.micronaut.serde", "micronaut-serde-bom").versionRef("micronaut-serde")
+            library("micronaut.serde.jackson", "io.micronaut.serde", "micronaut-serde-jackson").withoutVersion()
+            library("micronaut.serde.processor", "io.micronaut.serde", "micronaut-serde-processor").withoutVersion()
+
+            library("micronaut.test.junit5", "io.micronaut.test", "micronaut-test-junit5").withoutVersion()
+
+            // The full fabric8 client (not just kubernetes-client-api): the `api` module reads
+            // Tenant/BlueMapMap/BlueMapRender/... CRs directly (see operator dependency below),
+            // and unlike :operator it does not get these transitively, because :operator itself
+            // depends on JOSDK/fabric8 via `implementation`, which -- correctly -- does not leak
+            // onto a downstream project's compile classpath (verified directly: referencing
+            // Tenant from a first draft of this module failed to compile with "Klassendatei für
+            // io.fabric8.kubernetes.client.CustomResource nicht gefunden" until this was added).
+            // kubernetes-httpclient-jdk is picked as the HTTP engine over the vertx/okhttp
+            // options fabric8 7.x supports: it needs no extra dependency of its own, and -- more
+            // importantly -- avoids pulling a second, differently-versioned Netty into a module
+            // whose own HTTP server (micronaut-http-server-netty, above) already brings one.
+            library("fabric8.kubernetes.client", "io.fabric8", "kubernetes-client").versionRef("fabric8")
+            library("fabric8.httpclient.jdk", "io.fabric8", "kubernetes-httpclient-jdk").versionRef("fabric8")
 
             library("bluemap.api", "de.bluecolored", "bluemap-api").versionRef("bluemap-api")
             library("bluemap.core", "de.bluecolored", "bluemap-core").versionRef("bluemap")
