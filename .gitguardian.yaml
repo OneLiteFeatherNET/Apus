@@ -1,0 +1,22 @@
+version: 2
+
+secret:
+  ignored-matches:
+    # Two MinIO credentials that the phase 1 integration tests used to hard-code.
+    # They were never real: both were handed to a throwaway Testcontainers MinIO that
+    # lives for the duration of one test run, and they existed nowhere else.
+    #
+    # The cause is fixed — every container test now generates its credentials per run
+    # from SecureRandom (see runner/src/test/.../MinioFixtures.java and the equivalents
+    # in the ingest and api modules). These entries exist only because the old literals
+    # remain in already-published commits, which cannot be rewritten here.
+    #
+    # Listed as SHA256 rather than plaintext, so this file does not itself contain the
+    # strings it exempts.
+    #
+    # Do not extend this list to silence new findings. A finding in new code means the
+    # code is wrong, not the scanner.
+    - name: "phase 1 MinIO test access key (throwaway container, cause fixed)"
+      match: bfd5d64da90af877034e91f582242391fea586e6d187a475a3407bf37bd6f422
+    - name: "phase 1 MinIO test secret key (throwaway container, cause fixed)"
+      match: 9c721c67b04a5ff4622f5796d44a042c328d5453795ac798e14c7a7a31125bdd

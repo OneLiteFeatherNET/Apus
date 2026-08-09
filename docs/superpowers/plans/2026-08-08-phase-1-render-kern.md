@@ -2131,8 +2131,8 @@ import org.testcontainers.utility.DockerImageName;
  */
 class RenderEndToEndTest {
 
-    private static final String ACCESS_KEY = "apustest";
-    private static final String SECRET_KEY = "apustestsecret";
+    private static final String ACCESS_KEY = "<generated-at-test-runtime>";
+    private static final String SECRET_KEY = "<generated-at-test-runtime>";
     private static final String WORLD_BUCKET = "bundles";
     private static final String MAP_BUCKET = "maps";
 
@@ -2312,8 +2312,8 @@ import org.testcontainers.utility.DockerImageName;
  */
 class TelemetryContractTest {
 
-    private static final String ACCESS_KEY = "apustest";
-    private static final String SECRET_KEY = "apustestsecret";
+    private static final String ACCESS_KEY = "<generated-at-test-runtime>";
+    private static final String SECRET_KEY = "<generated-at-test-runtime>";
 
     private static Path fixture() {
         return Path.of(System.getProperty("user.dir")).getParent().resolve("testdata/mini-world");
