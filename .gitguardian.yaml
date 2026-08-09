@@ -1,0 +1,30 @@
+# GitGuardian configuration for this repository.
+# Schema reference: https://docs.gitguardian.com/ggshield-docs/reference/secret/ignore
+# (config file format defined by ggshield, the engine GitGuardian's scanning uses)
+version: 2
+
+secret:
+  # These two entries silence the "2 secrets uncovered" finding GitGuardian raised against the
+  # commit history introduced in PR #1 (feat/phase-1-render-kern) and inherited by every PR
+  # stacked on top of it (#2-#5).
+  #
+  # Why they are safe to ignore:
+  #   - Both values are login/password pairs for a MinIO container started by Testcontainers in
+  #     runner/src/test/java/net/onelitefeather/apus/runner/MinioFixtures.java. The container is
+  #     created and destroyed within a single integration test run; nothing outside that test
+  #     process ever talks to it.
+  #   - They were never used against any real MinIO deployment, staging or production system, or
+  #     any service reachable outside the throwaway test container.
+  #   - The root cause is already fixed: MinioFixtures now generates a fresh, random access
+  #     key/secret key on every test run instead of using these fixed literals (see that file's
+  #     ACCESS_KEY/SECRET_KEY fields). These two entries only silence the two now-historical
+  #     occurrences that remain in already-published commits on the stacked PR branches; rewriting
+  #     that history for two harmless test values would be disproportionate.
+  #
+  # Scoped to exactly these two literal values -- not a path or file exclusion -- so nothing else
+  # in this repository is exempted from scanning.
+  ignored_matches:
+    - name: MinIO test-container access key (runner integration tests, throwaway container)
+      match: apustest
+    - name: MinIO test-container secret key (runner integration tests, throwaway container)
+      match: apustestsecret
