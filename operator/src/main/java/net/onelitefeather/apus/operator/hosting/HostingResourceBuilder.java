@@ -104,26 +104,13 @@ public final class HostingResourceBuilder {
     /**
      * HTTP path used for both the readiness and liveness probe.
      *
-     * <p><b>Must be verified against Task 2's result and corrected here if it differs.</b> Task 2
-     * is responsible for determining which path BlueMap's webserver actually serves (design plan
-     * §Task 2, "Betriebsrelevant"); until that is confirmed this uses the webserver's root path,
-     * which BlueMap's default {@code webserver.conf} (see {@code BlueMapConfigBuilder}'s Javadoc)
-     * always serves regardless of which maps are configured.
+     * <p>Verified against Task 2's actual image (see {@code
+     * hosting/entrypoint.sh}/{@code hosting/README.md} and the phase 3 SDD ledger): {@code
+     * GET /settings.json} only returns 200 once the BlueMap webserver has actually generated its
+     * web-app shell and is serving it -- unlike {@code /}, which 404s during that same window.
+     * A pod must not receive traffic (readiness) or be considered alive (liveness) before that.
      */
-    static final String PROBE_PATH = "/";
-
-    /**
-     * Placeholder container image for the hosting webserver.
-     *
-     * <p>{@link OperatorConfig} currently has no {@code hostingImage} field -- only {@code
-     * runnerImage} (render jobs) and {@code ingestImage} (world ingest jobs). Adding one is out
-     * of scope for this class: task 3 of the phase 3 plan is restricted to this file, its test,
-     * and the {@link Certificate} model, and must not touch {@code OperatorConfig}. Task 4 (the
-     * reconciler, unrestricted) is expected to add {@code OperatorConfig.hostingImage()} and wire
-     * it through {@link #deployment}'s {@code config} parameter, which is accepted already so
-     * that call site will not need a signature change when that happens.
-     */
-    private static final String DEFAULT_HOSTING_IMAGE = "apus/hosting:dev";
+    static final String PROBE_PATH = "/settings.json";
 
     private HostingResourceBuilder() {}
 
@@ -138,8 +125,8 @@ public final class HostingResourceBuilder {
      * @param bucketSecretName name of the Kubernetes {@code Secret}, in the same namespace as
      *     {@code hosting}, carrying the S3 credentials the webserver needs to read the already-
      *     rendered maps; referenced via {@code secretKeyRef}, never inlined
-     * @param config operator-wide settings; see {@link #DEFAULT_HOSTING_IMAGE} for why this is
-     *     accepted but not yet consulted for the container image
+     * @param config operator-wide settings; supplies the hosting webserver's container image via
+     *     {@link OperatorConfig#hostingImage()}
      * @return the {@link Deployment} manifest, not yet submitted to the API server
      */
     public static Deployment deployment(
@@ -149,7 +136,7 @@ public final class HostingResourceBuilder {
 
         Container container = new ContainerBuilder()
                 .withName(CONTAINER_NAME)
-                .withImage(DEFAULT_HOSTING_IMAGE)
+                .withImage(config.hostingImage())
                 .withPorts(containerPort())
                 .withEnv(env(bucketSecretName))
                 .withResources(resources(hosting))

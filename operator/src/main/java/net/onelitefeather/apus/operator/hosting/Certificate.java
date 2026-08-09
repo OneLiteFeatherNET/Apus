@@ -17,6 +17,8 @@
  */
 package net.onelitefeather.apus.operator.hosting;
 
+import com.fasterxml.jackson.annotation.JsonAnyGetter;
+import com.fasterxml.jackson.annotation.JsonAnySetter;
 import io.fabric8.kubernetes.api.model.Namespaced;
 import io.fabric8.kubernetes.client.CustomResource;
 import io.fabric8.kubernetes.model.annotation.Group;
@@ -24,7 +26,9 @@ import io.fabric8.kubernetes.model.annotation.Kind;
 import io.fabric8.kubernetes.model.annotation.Plural;
 import io.fabric8.kubernetes.model.annotation.Version;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * cert-manager's {@code Certificate}, modelled with only the fields {@link HostingResourceBuilder}
@@ -126,10 +130,31 @@ public class Certificate extends CustomResource<Certificate.CertificateSpec, Cer
     }
 
     /**
-     * Observed state of a cert-manager {@code Certificate}. Apus never reads this back (Task 4's
-     * reconciler determines TLS readiness from the ingress, per the phase 3 plan) -- kept empty
-     * rather than omitted so the type still matches cert-manager's actual shape and {@link
-     * CustomResource} has a status to initialise.
+     * Observed state of a cert-manager {@code Certificate}. Apus never reads this back (the
+     * {@code BlueMapHostingReconciler} determines TLS readiness from the ingress, per the phase 3
+     * plan) -- kept present rather than omitted so the type still matches cert-manager's actual
+     * shape and {@link CustomResource} has a status to initialise.
+     *
+     * <p>Modelled as an open bag of properties ({@code additionalProperties}, the same {@code
+     * @JsonAnyGetter}/{@code @JsonAnySetter} pattern every fabric8-generated model class uses for
+     * "no fields Apus cares about yet") rather than a genuinely empty class: with zero declared
+     * fields, fabric8's Jackson mapper (which runs with {@code FAIL_ON_EMPTY_BEANS} enabled)
+     * throws {@code InvalidDefinitionException} the moment a {@link Certificate} is actually sent
+     * to an API server -- only caught once {@code BlueMapHostingReconciler} started doing that for
+     * real; {@link HostingResourceBuilder#certificate} alone never serialises anything.
      */
-    public static class CertificateStatus {}
+    public static class CertificateStatus {
+
+        private Map<String, Object> additionalProperties = new LinkedHashMap<>();
+
+        @JsonAnyGetter
+        public Map<String, Object> getAdditionalProperties() {
+            return additionalProperties;
+        }
+
+        @JsonAnySetter
+        public void setAdditionalProperty(String name, Object value) {
+            additionalProperties.put(name, value);
+        }
+    }
 }

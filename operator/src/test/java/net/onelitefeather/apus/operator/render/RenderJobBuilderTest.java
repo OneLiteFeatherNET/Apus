@@ -155,6 +155,7 @@ class RenderJobBuilderTest {
                 "ceph-bucket-fr01",
                 "apus/runner:1.2.3",
                 "apus/ingest:dev",
+                "apus/hosting:dev",
                 "apus-bundles",
                 "http://rgw.rook-ceph-fr01.svc:80",
                 "us-east-1",
