@@ -66,11 +66,22 @@ dependencyResolutionManagement {
             version("micronaut", "5.1.10")
             version("micronaut-security", "5.3.1")
             version("micronaut-serde", "3.1.0")
+            // Test-only (phase 5a consolidation, part 2): micronaut-test-junit5 versions
+            // independently of micronaut-core -- verified against Maven Central on 2026-08-09,
+            // 5.1.0 is the newest io.micronaut.test:micronaut-test-bom release and is the one
+            // the io.micronaut.platform:micronaut-platform:5.1.0 BOM (already cross-checked
+            // above for the other Micronaut coordinates) pins for this major.
+            version("micronaut-test", "5.1.0")
 
             library("micronaut.core.bom", "io.micronaut", "micronaut-core-bom").versionRef("micronaut")
             library("micronaut.inject.java", "io.micronaut", "micronaut-inject-java").withoutVersion()
             library("micronaut.http.server.netty", "io.micronaut", "micronaut-http-server-netty").withoutVersion()
             library("micronaut.runtime", "io.micronaut", "micronaut-runtime").withoutVersion()
+            // Test-only: backs the `@Client("/") HttpClient` micronaut-test-junit5 injects into
+            // `@MicronautTest` classes, so the phase 5a consolidation's HTTP-level security tests
+            // (401/403/404) exercise the real embedded server and filter chain instead of calling
+            // controller methods directly.
+            library("micronaut.http.client", "io.micronaut", "micronaut-http-client").withoutVersion()
 
             library("micronaut.security.bom", "io.micronaut.security", "micronaut-security-bom")
                 .versionRef("micronaut-security")
@@ -82,6 +93,7 @@ dependencyResolutionManagement {
             library("micronaut.serde.jackson", "io.micronaut.serde", "micronaut-serde-jackson").withoutVersion()
             library("micronaut.serde.processor", "io.micronaut.serde", "micronaut-serde-processor").withoutVersion()
 
+            library("micronaut.test.bom", "io.micronaut.test", "micronaut-test-bom").versionRef("micronaut-test")
             library("micronaut.test.junit5", "io.micronaut.test", "micronaut-test-junit5").withoutVersion()
 
             // The full fabric8 client (not just kubernetes-client-api): the `api` module reads

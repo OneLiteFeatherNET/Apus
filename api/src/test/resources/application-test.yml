@@ -1,0 +1,22 @@
+# Loaded automatically by micronaut-test-junit5 for every @MicronautTest in this module (it
+# always activates the "test" environment). Overrides the two placeholders
+# src/main/resources/application.yml otherwise requires from the environment
+# (APUS_JWT_JWKS_URI/APUS_JWT_ISSUER) with fixed test values, and adds a symmetric HS256 secret
+# used both to mint tokens (via the injected TokenGenerator) and to validate them -- so these
+# tests exercise the real Micronaut Security JWT filter chain end to end without a reachable
+# identity broker. The JWKS URL is never actually dereferenced: every token these tests mint is
+# signed with the secret below, which micronaut-security-jwt tries as one of several configured
+# signature verifiers and succeeds against, so the (deliberately unreachable) JWKS URL is only
+# ever a fallback that is never exercised.
+APUS_JWT_JWKS_URI: "http://127.0.0.1:1/unused-jwks-endpoint"
+APUS_JWT_ISSUER: "https://apus-test-issuer.internal"
+
+micronaut:
+  security:
+    token:
+      jwt:
+        signatures:
+          secret:
+            generator:
+              secret: "phase-5a-test-only-signing-secret-never-used-outside-tests"
+              jws-algorithm: HS256
