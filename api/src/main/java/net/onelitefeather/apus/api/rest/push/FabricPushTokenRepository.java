@@ -26,17 +26,20 @@ import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import net.onelitefeather.apus.operator.tenant.PushTokenSecrets;
+import net.onelitefeather.apus.operator.tenant.TenantReconciler;
 
 /**
- * {@link PushTokenRepository} backed by Kubernetes {@link Secret}s. Deliberately not backed by
- * any {@code WorldSourceSpec}/{@code TenantSpec} CRD field -- neither carries a token field (this
- * task's scope is {@code ingest/.../connector/} and {@code api/}, not the CRD types under {@code
- * operator/}) -- so a token lives entirely as a plain, built-in Kubernetes resource instead,
- * exactly like the S3/Pterodactyl credentials {@code WorldSourceSpec.*.credentialsSecretRef}
- * already reference (design spec §10.1's "eigene S3-Credentials als Secret").
+ * {@link PushTokenRepository} backed by Kubernetes {@link Secret}s -- specifically, the ones
+ * {@link TenantReconciler} provisions (phase 6 task 2: one per tenant, on tenant creation). Not
+ * backed by any {@code WorldSourceSpec}/{@code TenantSpec} CRD field -- neither carries a token
+ * field -- so a token lives entirely as a plain, built-in Kubernetes resource instead, exactly
+ * like the S3/Pterodactyl credentials {@code WorldSourceSpec.*.credentialsSecretRef} already
+ * reference (design spec §10.1's "eigene S3-Credentials als Secret").
  *
- * <p><b>Expected shape</b> (contract for whatever creates these Secrets -- a platform-admin/
- * tenant-owner today, a future operator reconciler eventually):
+ * <p><b>Expected shape</b> -- the exact contract {@link PushTokenSecrets} defines and {@link
+ * TenantReconciler} fulfils, re-exposed here as {@code public static final} fields so existing
+ * callers/tests of this class do not need to reach into {@code operator.tenant} themselves:
  *
  * <ul>
  *   <li>lives in the tenant's own namespace ({@code bluemap-<tenant>}), like every other
@@ -48,17 +51,38 @@ import java.util.Optional;
  *       raw shared-secret value the Paper plugin also holds.
  * </ul>
  *
- * <p><b>Why a cluster-wide list.</b> {@code POST /api/push/{token}} carries nothing but the
- * token -- no tenant name, no namespace, no JWT to read a claim from (see {@link
- * PushTokenRepository}'s Javadoc for why this endpoint is unlike every other one in this module).
- * The token itself is the only input, so resolving it to a namespace necessarily means searching
- * across namespaces; this is exactly the kind of cluster-wide, cross-tenant read design spec
- * §10.3 reserves for the backend's own ServiceAccount ("Das Backend ist der Durchsetzungspunkt").
- * The label scopes that search to service-token Secrets specifically, not every Secret in the
- * cluster -- but it still requires the deployment to grant this ServiceAccount cluster-wide
- * {@code get}/{@code list} on Secrets carrying that label. That RBAC grant is a deployment
- * concern outside this class (and outside this task's {@code ingest/.../connector/}+{@code api/}
- * scope) -- documented here so whoever wires it up has an exact requirement to satisfy.
+ * <p><b>Why a cluster-wide list, and the RBAC trade-off this implies.</b> {@code POST
+ * /api/push/{token}} carries nothing but the token -- no tenant name, no namespace, no JWT to
+ * read a claim from (see {@link PushTokenRepository}'s Javadoc for why this endpoint is unlike
+ * every other one in this module). The token itself is the only input, so resolving it to a
+ * namespace necessarily means searching across namespaces; this is exactly the kind of
+ * cluster-wide, cross-tenant read design spec §10.3 reserves for the backend's own ServiceAccount
+ * ("Das Backend ist der Durchsetzungspunkt"). The label scopes that search to service-token
+ * Secrets specifically, not every Secret in the cluster -- but Kubernetes RBAC has no way to
+ * restrict a grant by a resource's label or content, only by resource type, verb and (for
+ * {@code get}/{@code update}/{@code patch}/{@code delete}, not {@code list}/{@code watch})
+ * {@code resourceNames}. Concretely, this means:
+ *
+ * <ul>
+ *   <li>the narrowest RBAC grant that actually makes {@code resolveNamespace} as implemented
+ *       here work is a {@code ClusterRole} scoped to exactly {@code resources: ["secrets"]},
+ *       {@code verbs: ["get", "list"]} -- nothing else (no {@code watch}, no other resource
+ *       types, no write verbs) -- bound to the api ServiceAccount via a {@code
+ *       ClusterRoleBinding}. This is still, unavoidably, read access to every Secret in the
+ *       cluster (RBAC cannot see the label filter passed in the list query), which is broader
+ *       than the task brief's "engster Weg, der funktioniert" ("narrowest path that works")
+ *       ideally allows -- flagged as a known trade-off, not silently accepted;
+ *   <li>a genuinely narrower alternative exists but was deliberately <b>not</b> implemented here,
+ *       to avoid an invasive rewrite of this already-tested class: since {@link
+ *       PushTokenSecrets#SECRET_NAME} is now a fixed name, {@code resolveNamespace} could instead
+ *       enumerate tenant namespaces (via the cluster-scoped {@code Tenant} CR, already listable
+ *       by {@code TenantRepository} for platform-admin features) and {@code get} -- never
+ *       {@code list} -- the fixed-name Secret in each one. That would let the RBAC grant become
+ *       {@code resources: ["secrets"]}, {@code resourceNames: ["apus-push-token"]}, {@code verbs:
+ *       ["get"]} -- truly scoped to only ever reading a Secret literally named {@code
+ *       apus-push-token}, in any namespace, and nothing else. Left as a follow-up so it can be
+ *       done with its own test coverage rather than as a side effect of wiring up token creation.
+ * </ul>
  *
  * <p><b>Constant-time, exhaustive comparison.</b> {@link #resolveNamespace} runs {@link
  * MessageDigest#isEqual(byte[], byte[])} -- the JDK's documented constant-time byte comparison,
@@ -73,12 +97,12 @@ import java.util.Optional;
 public class FabricPushTokenRepository implements PushTokenRepository {
 
     /** See the class Javadoc's "Expected shape" for the full Secret contract this key is part of. */
-    public static final String SERVICE_TOKEN_LABEL_KEY = "apus.onelitefeather.net/service-token";
+    public static final String SERVICE_TOKEN_LABEL_KEY = PushTokenSecrets.LABEL_KEY;
 
-    public static final String SERVICE_TOKEN_LABEL_VALUE = "world-push";
+    public static final String SERVICE_TOKEN_LABEL_VALUE = PushTokenSecrets.LABEL_VALUE;
 
     /** The key under {@code Secret.data} (base64-encoded, as all Secret data is) holding the raw token. */
-    public static final String TOKEN_DATA_KEY = "token";
+    public static final String TOKEN_DATA_KEY = PushTokenSecrets.TOKEN_KEY;
 
     private final KubernetesClient client;
 

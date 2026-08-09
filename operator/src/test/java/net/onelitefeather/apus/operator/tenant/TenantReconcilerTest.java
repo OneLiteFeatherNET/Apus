@@ -25,6 +25,8 @@ import io.fabric8.kubernetes.api.model.Namespace;
 import io.fabric8.kubernetes.api.model.NamespaceBuilder;
 import io.fabric8.kubernetes.api.model.ObjectMetaBuilder;
 import io.fabric8.kubernetes.api.model.ResourceQuota;
+import io.fabric8.kubernetes.api.model.Secret;
+import io.fabric8.kubernetes.api.model.SecretBuilder;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.server.mock.EnableKubernetesMockClient;
 import io.fabric8.kubernetes.client.server.mock.KubernetesMockServer;
@@ -56,6 +58,20 @@ class TenantReconcilerTest {
         tenant.getSpec().setDisplayName(name);
         tenant.getSpec().getStorage().setQuota(quota);
         return tenant;
+    }
+
+    /**
+     * The fabric8 CRUD mock server does not simulate the real API server's {@code stringData} ->
+     * base64 {@code data} merge on write, so a Secret created via {@code withStringData(...)}
+     * (as {@code TenantReconciler} does) is read back with the value still under {@code
+     * stringData}, not {@code data}, here -- unlike a real cluster. Reading either map keeps
+     * these tests meaningful under both.
+     */
+    private static String tokenValue(Secret secret) {
+        if (secret.getStringData() != null && secret.getStringData().get(PushTokenSecrets.TOKEN_KEY) != null) {
+            return secret.getStringData().get(PushTokenSecrets.TOKEN_KEY);
+        }
+        return secret.getData() == null ? null : secret.getData().get(PushTokenSecrets.TOKEN_KEY);
     }
 
     private String readyReason(Tenant tenant) {
@@ -321,5 +337,95 @@ class TenantReconcilerTest {
                 ns.getMetadata().getOwnerReferences().stream()
                         .anyMatch(ref -> "Tenant".equals(ref.getKind())),
                 "namespace must be owned by its Tenant so it is garbage-collected on deletion");
+    }
+
+    @Test
+    void createsAPushTokenSecretForANewTenant() {
+        TenantReconciler reconciler = new TenantReconciler(client, OperatorConfig.defaults());
+
+        reconciler.reconcile(tenant("friends", "500Gi"), null);
+
+        Secret secret = client.secrets()
+                .inNamespace("bluemap-friends")
+                .withName(PushTokenSecrets.SECRET_NAME)
+                .get();
+        assertNotNull(secret, "push-token secret must be created");
+        assertEquals(
+                PushTokenSecrets.LABEL_VALUE,
+                secret.getMetadata().getLabels().get(PushTokenSecrets.LABEL_KEY),
+                "must carry the label FabricPushTokenRepository queries by");
+        assertNotNull(tokenValue(secret), "token data must be present");
+    }
+
+    @Test
+    void reportsThePushTokenSecretNameInStatus() {
+        TenantReconciler reconciler = new TenantReconciler(client, OperatorConfig.defaults());
+        Tenant tenant = tenant("friends", "500Gi");
+
+        reconciler.reconcile(tenant, null);
+
+        assertEquals(PushTokenSecrets.SECRET_NAME, tenant.getStatus().getPushTokenSecret());
+    }
+
+    @Test
+    void neverRegeneratesAnExistingPushTokenOnLaterReconciles() {
+        TenantReconciler reconciler = new TenantReconciler(client, OperatorConfig.defaults());
+        Tenant tenant = tenant("friends", "500Gi");
+
+        reconciler.reconcile(tenant, null);
+        String firstToken = tokenValue(client.secrets()
+                .inNamespace("bluemap-friends")
+                .withName(PushTokenSecrets.SECRET_NAME)
+                .get());
+        assertNotNull(firstToken, "token data must be present after the first reconcile");
+
+        // A second reconcile (the operator's regular resync, or any spec change) must not
+        // invalidate a token paper-worldpush may already be configured with.
+        reconciler.reconcile(tenant, null);
+        String secondToken = tokenValue(client.secrets()
+                .inNamespace("bluemap-friends")
+                .withName(PushTokenSecrets.SECRET_NAME)
+                .get());
+
+        assertEquals(firstToken, secondToken, "an already-provisioned push token must never be regenerated");
+    }
+
+    @Test
+    void refusesToAdoptAPushTokenSecretOwnedByAnotherTenant() {
+        // The namespace itself must already be correctly owned by this exact tenant (same UID),
+        // so the earlier namespace-ownership check does not fire first -- this test is only
+        // about the push-token secret's own, independent ownership check.
+        Tenant tenant = tenant("friends", "500Gi");
+        client.namespaces()
+                .resource(new NamespaceBuilder()
+                        .withNewMetadata()
+                        .withName("bluemap-friends")
+                        .withLabels(Map.of(
+                                Labels.TENANT,
+                                tenant.getMetadata().getName(),
+                                Labels.TENANT_UID,
+                                tenant.getMetadata().getUid()))
+                        .endMetadata()
+                        .build())
+                .create();
+        client.secrets()
+                .inNamespace("bluemap-friends")
+                .resource(new SecretBuilder()
+                        .withNewMetadata()
+                        .withName(PushTokenSecrets.SECRET_NAME)
+                        .withNamespace("bluemap-friends")
+                        .withLabels(Map.of(
+                                Labels.TENANT, "friends",
+                                Labels.TENANT_UID, UUID.randomUUID().toString()))
+                        .endMetadata()
+                        .withStringData(Map.of(PushTokenSecrets.TOKEN_KEY, "someone-elses-token"))
+                        .build())
+                .create();
+        TenantReconciler reconciler = new TenantReconciler(client, OperatorConfig.defaults());
+
+        UpdateControl<Tenant> control = reconciler.reconcile(tenant, null);
+
+        assertTrue(control.isPatchStatus());
+        assertEquals(TenantReconciler.RESOURCE_CONFLICT_REASON, readyReason(tenant));
     }
 }
