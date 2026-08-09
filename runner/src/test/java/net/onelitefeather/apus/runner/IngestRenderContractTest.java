@@ -71,9 +71,15 @@ class IngestRenderContractTest {
     private static final String SOURCE_KEY = "v1.zip";
 
     private static final String BUNDLE_TENANT = "acme";
+    // The owning WorldSource's name -- required by IngestConfig.ENV_BUNDLE_SOURCE_NAME and, per
+    // BundlePath, the second path segment (tenant/sourceName/worldId/version). This constant and
+    // the env var below were missing from this test even after that requirement was introduced;
+    // fixed as a drive-by while touching IngestConfig for phase 6 (unrelated to push/upload).
+    private static final String BUNDLE_SOURCE_NAME = "demo-source";
     private static final String BUNDLE_WORLD_ID = "spawn";
     private static final String BUNDLE_VERSION = "v1";
-    private static final String BUNDLE_PATH = BUNDLE_TENANT + "/" + BUNDLE_WORLD_ID + "/" + BUNDLE_VERSION;
+    private static final String BUNDLE_PATH =
+            BUNDLE_TENANT + "/" + BUNDLE_SOURCE_NAME + "/" + BUNDLE_WORLD_ID + "/" + BUNDLE_VERSION;
 
     // What LayoutDetector.detect must normalise a Bukkit-layout source's sibling folders
     // (world, world_nether, world_the_end) to -- the "core of normalisation" the phase 2b plan
@@ -183,6 +189,7 @@ class IngestRenderContractTest {
         env.put(IngestConfig.ENV_SOURCE_VERSION, SOURCE_KEY);
         env.put(IngestConfig.ENV_BUNDLE_BUCKET, MinioFixtures.WORLD_BUCKET);
         env.put(IngestConfig.ENV_BUNDLE_TENANT, BUNDLE_TENANT);
+        env.put(IngestConfig.ENV_BUNDLE_SOURCE_NAME, BUNDLE_SOURCE_NAME);
         env.put(IngestConfig.ENV_BUNDLE_WORLD_ID, BUNDLE_WORLD_ID);
         env.put(IngestConfig.ENV_BUNDLE_VERSION, BUNDLE_VERSION);
         env.put(IngestConfig.ENV_S3_ENDPOINT, minio.getS3URL());
