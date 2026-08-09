@@ -43,30 +43,32 @@ tasks {
     }
 }
 
-// S3SourceConnectorTest, PushSourceConnectorTest and UploadSourceConnectorTest (phase 6: the
-// latter two share their MinIO-backed assertions via AbstractStagedSourceConnectorTest, see its
-// Javadoc) all start a real MinIO container via Testcontainers and therefore need Docker. Exactly
-// like runner/build.gradle.kts and operator/build.gradle.kts do for their own container-based
-// tests, that must not run as part of the routine `./gradlew build`/`check` -- it would make
-// every build slow and fail outright on a machine without Docker. Excluded from the default
-// `test` task and exposed only via the explicit `integrationTest` task below. See
-// ingest/README.md for how to run it.
+// S3SourceConnectorTest, PushSourceConnectorTest, UploadSourceConnectorTest and (phase 6 task 3)
+// PushIngestEndToEndTest -- the last one drives the whole IngestMain flow rather than one
+// connector method, proving push/upload ingest end to end -- all start a real MinIO container via
+// Testcontainers and therefore need Docker. Exactly like runner/build.gradle.kts and
+// operator/build.gradle.kts do for their own container-based tests, that must not run as part of
+// the routine `./gradlew build`/`check` -- it would make every build slow and fail outright on a
+// machine without Docker. Excluded from the default `test` task and exposed only via the explicit
+// `integrationTest` task below. See ingest/README.md for how to run it.
 tasks.test {
     exclude("**/S3SourceConnectorTest.class")
     exclude("**/PushSourceConnectorTest.class")
     exclude("**/UploadSourceConnectorTest.class")
+    exclude("**/PushIngestEndToEndTest.class")
 }
 
 val integrationTest by tasks.registering(Test::class) {
     group = "verification"
     description = "Runs the MinIO-backed connector tests (S3SourceConnectorTest, PushSourceConnectorTest, " +
-        "UploadSourceConnectorTest) against a real MinIO container via Testcontainers. Requires Docker. " +
-        "Not part of build/check."
+        "UploadSourceConnectorTest, PushIngestEndToEndTest) against a real MinIO container via Testcontainers. " +
+        "Requires Docker. Not part of build/check."
     testClassesDirs = sourceSets.test.get().output.classesDirs
     classpath = sourceSets.test.get().runtimeClasspath
     include("**/S3SourceConnectorTest.class")
     include("**/PushSourceConnectorTest.class")
     include("**/UploadSourceConnectorTest.class")
+    include("**/PushIngestEndToEndTest.class")
     timeout.set(Duration.ofMinutes(5))
     outputs.upToDateWhen { false }
 }
