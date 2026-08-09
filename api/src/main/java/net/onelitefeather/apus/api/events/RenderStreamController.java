@@ -32,6 +32,7 @@ import io.micronaut.security.rules.SecurityRule;
 import net.onelitefeather.apus.api.security.ApusPrincipal;
 import net.onelitefeather.apus.api.security.ForbiddenException;
 import net.onelitefeather.apus.api.security.TenantResolver;
+import net.onelitefeather.apus.api.support.PrincipalResolver;
 import net.onelitefeather.apus.operator.api.BlueMapRender;
 import org.reactivestreams.Publisher;
 
@@ -66,11 +67,17 @@ class RenderStreamController {
     private final RenderRepository renderRepository;
     private final TenantResolver tenantResolver;
     private final LogSource logSource;
+    private final PrincipalResolver principalResolver;
 
-    RenderStreamController(RenderRepository renderRepository, TenantResolver tenantResolver, LogSource logSource) {
+    RenderStreamController(
+            RenderRepository renderRepository,
+            TenantResolver tenantResolver,
+            LogSource logSource,
+            PrincipalResolver principalResolver) {
         this.renderRepository = renderRepository;
         this.tenantResolver = tenantResolver;
         this.logSource = logSource;
+        this.principalResolver = principalResolver;
     }
 
     @Get(value = "/{id}/events", produces = MediaType.TEXT_EVENT_STREAM)
@@ -129,7 +136,7 @@ class RenderStreamController {
      *     including when it names one in a different tenant's namespace
      */
     private BlueMapRender requireRender(Authentication authentication, String id) {
-        ApusPrincipal principal = PrincipalMapper.from(authentication);
+        ApusPrincipal principal = principalResolver.resolve(authentication);
         String namespace;
         try {
             namespace = tenantResolver.namespaceFor(principal);

@@ -21,7 +21,6 @@ import io.fabric8.kubernetes.client.KubernetesClient;
 import jakarta.inject.Singleton;
 import java.util.List;
 import java.util.Optional;
-import net.onelitefeather.apus.api.rest.support.RestKubernetesClient;
 import net.onelitefeather.apus.operator.api.Tenant;
 
 /** {@link TenantRepository} backed by a real {@link KubernetesClient}. */
@@ -30,8 +29,8 @@ public class FabricTenantRepository implements TenantRepository {
 
     private final KubernetesClient client;
 
-    public FabricTenantRepository(RestKubernetesClient restKubernetesClient) {
-        this.client = restKubernetesClient.get();
+    public FabricTenantRepository(KubernetesClient client) {
+        this.client = client;
     }
 
     @Override

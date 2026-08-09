@@ -15,7 +15,7 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
-package net.onelitefeather.apus.api.rest.support;
+package net.onelitefeather.apus.api.support;
 
 import io.micronaut.security.authentication.Authentication;
 import jakarta.inject.Singleton;
@@ -30,31 +30,32 @@ import net.onelitefeather.apus.api.security.Role;
  * ApusPrincipal}. Task 1 (see its report, "Concerns for Task 2 / Task 3") deliberately left this
  * bridge unbuilt: it depends on details -- which claim carries the tenant, whether roles arrive
  * as a flat list or something richer -- that are downstream of picking an identity broker
- * (design spec §15), which had not happened yet. This is the first controller-facing code to
- * need it, so it lands here.
+ * (design spec §15), which had not happened yet. That is also why this bridge is not part of
+ * the {@code security} package alongside {@link ApusPrincipal}/{@link
+ * net.onelitefeather.apus.api.security.TenantResolver}: task 1's scope there was deliberately
+ * only the pure security-invariant classes, not the Micronaut Security-specific translation.
  *
- * <p>Every controller in {@code rest/} goes through this class instead of reading {@link
- * Authentication} itself, so there is exactly one place to update once a broker is chosen and
- * the placeholder claim key below turns out to be wrong.
+ * <p><b>Phase 5a consolidation:</b> task 2 ({@code rest/}) and task 3 ({@code events/}) each
+ * built this exact bridge independently in their own parallel worktree -- {@code
+ * rest.support.PrincipalResolver} and {@code events.PrincipalMapper} -- and picked two
+ * <em>different</em> tenant claim names ({@code "org"} vs. {@code "organization"}). That
+ * divergence was the dangerous half of the duplication: every controller under {@code rest/}
+ * and the SSE endpoints under {@code events/} would have resolved the very same token's tenant
+ * differently depending on which package happened to handle the request. This class merges both
+ * into the one place every controller and SSE endpoint in this module now goes through.
+ *
+ * <p><b>Tenant claim key: {@code organization}.</b> Not fixed anywhere else yet at the time of
+ * writing (identity broker undecided, design spec §15) -- picked to match the vocabulary the
+ * design spec itself already uses for this exact concept: {@code Tenant.spec.auth.organization}
+ * (§8.1's example manifest) and "der Organisations-Claim im Token bestimmt den Mandanten"
+ * (§10.3). This is the single place that constant is declared; nowhere else in this module may
+ * duplicate the literal.
  */
 @Singleton
 public class PrincipalResolver {
 
-    /**
-     * The organisation/tenant claim key read from {@link Authentication#getAttributes()}.
-     *
-     * <p><b>This is a placeholder, not a confirmed contract.</b> Design spec §15 leaves the
-     * choice between Keycloak (26+, with Organizations) and Zitadel open, and with it the exact
-     * claim name each would put the caller's organisation under -- Keycloak's Organizations
-     * feature and Zitadel's org model do not share a claim name. "org" is short, broker-neutral,
-     * and easy to grep for; whoever wires the chosen broker's token mapping into this module
-     * should update this single constant rather than hunt for scattered literals.
-     *
-     * <p>Public (not package-private) so every controller test across {@code rest/}'s
-     * sub-packages can build a realistic {@link Authentication} against the same claim key
-     * this class actually reads, instead of duplicating the literal "org" in each test package.
-     */
-    public static final String TENANT_CLAIM = "org";
+    /** See the class Javadoc for why this specific claim name. */
+    public static final String TENANT_CLAIM = "organization";
 
     /**
      * @param authentication the token-derived authentication Micronaut Security already

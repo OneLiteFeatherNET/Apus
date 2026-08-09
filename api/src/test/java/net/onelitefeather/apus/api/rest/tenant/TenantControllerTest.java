@@ -24,8 +24,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import io.micronaut.security.authentication.Authentication;
 import java.util.List;
 import net.onelitefeather.apus.api.rest.support.BadRequestException;
-import net.onelitefeather.apus.api.rest.support.PrincipalResolver;
 import net.onelitefeather.apus.api.security.ForbiddenException;
+import net.onelitefeather.apus.api.support.PrincipalResolver;
 import net.onelitefeather.apus.operator.api.Tenant;
 import org.junit.jupiter.api.Test;
 

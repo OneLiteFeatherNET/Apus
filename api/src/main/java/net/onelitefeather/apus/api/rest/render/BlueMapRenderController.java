@@ -26,11 +26,11 @@ import io.micronaut.security.authentication.Authentication;
 import io.micronaut.security.rules.SecurityRule;
 import java.util.List;
 import net.onelitefeather.apus.api.rest.support.NotFoundException;
-import net.onelitefeather.apus.api.rest.support.PrincipalResolver;
 import net.onelitefeather.apus.api.rest.support.TenantAccess;
 import net.onelitefeather.apus.api.security.ApusPrincipal;
 import net.onelitefeather.apus.api.security.ForbiddenException;
 import net.onelitefeather.apus.api.security.TenantResolver;
+import net.onelitefeather.apus.api.support.PrincipalResolver;
 
 /**
  * {@code GET /api/renders} and {@code GET /api/renders/{id}} -- read-only, the caller's own

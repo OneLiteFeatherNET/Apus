@@ -27,9 +27,9 @@ import io.micronaut.security.authentication.Authentication;
 import io.micronaut.security.rules.SecurityRule;
 import java.util.List;
 import net.onelitefeather.apus.api.rest.support.BadRequestException;
-import net.onelitefeather.apus.api.rest.support.PrincipalResolver;
 import net.onelitefeather.apus.api.security.ApusPrincipal;
 import net.onelitefeather.apus.api.security.ForbiddenException;
+import net.onelitefeather.apus.api.support.PrincipalResolver;
 import net.onelitefeather.apus.operator.api.Tenant;
 import net.onelitefeather.apus.operator.api.TenantSpec;
 

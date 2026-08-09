@@ -21,7 +21,6 @@ import io.fabric8.kubernetes.client.KubernetesClient;
 import jakarta.inject.Singleton;
 import java.util.List;
 import java.util.Optional;
-import net.onelitefeather.apus.api.rest.support.RestKubernetesClient;
 import net.onelitefeather.apus.operator.api.BlueMapRender;
 
 /** {@link BlueMapRenderRepository} backed by a real {@link KubernetesClient}. */
@@ -30,8 +29,8 @@ public class FabricBlueMapRenderRepository implements BlueMapRenderRepository {
 
     private final KubernetesClient client;
 
-    public FabricBlueMapRenderRepository(RestKubernetesClient restKubernetesClient) {
-        this.client = restKubernetesClient.get();
+    public FabricBlueMapRenderRepository(KubernetesClient client) {
+        this.client = client;
     }
 
     @Override

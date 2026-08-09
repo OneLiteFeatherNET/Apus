@@ -25,9 +25,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import io.micronaut.security.authentication.Authentication;
 import java.util.List;
 import java.util.Map;
-import net.onelitefeather.apus.api.rest.support.PrincipalResolver;
 import net.onelitefeather.apus.api.security.ForbiddenException;
 import net.onelitefeather.apus.api.security.TenantResolver;
+import net.onelitefeather.apus.api.support.PrincipalResolver;
 import net.onelitefeather.apus.operator.api.WorldSource;
 import org.junit.jupiter.api.Test;
 
