@@ -18,6 +18,7 @@
 package net.onelitefeather.apus.operator.map;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import net.onelitefeather.apus.operator.api.BlueMapMap;
 
@@ -37,6 +38,15 @@ import net.onelitefeather.apus.operator.api.BlueMapMap;
  * pod that serves already-rendered maps needs a full {@code webserver.conf} and the storage
  * config this class builds, and that surface is not covered by the render env-var contract.
  * Do not delete this class as dead code — it is future-phase code, staged ahead of its wiring.
+ *
+ * <p><b>{@code webserver.conf} format, verified against the real file.</b> Running the BlueMap
+ * CLI ({@code apus/runner:dev}'s {@code /opt/bluemap/cli.jar}, BlueMap 5.23) with {@code -c} on
+ * an empty config folder and no action flag writes every default config file, including {@code
+ * webserver.conf}. That generated file has no bind-address/{@code ip} setting at all — only
+ * {@code enabled}, {@code webroot}, {@code port}, {@code sse-enabled}, and an optional {@code
+ * log} block. The webserver always listens on all interfaces; there is no key to restrict it to
+ * localhost, so {@link #buildForHosting} does not emit one either, and instead documents this in
+ * a comment in the generated file.
  */
 public final class BlueMapConfigBuilder {
 
@@ -101,6 +111,91 @@ public final class BlueMapConfigBuilder {
                                 map.getSpec().getStorage().getPrefix()));
 
         return files;
+    }
+
+    /**
+     * Builds every config file a hosting webserver needs to display several maps at once, keyed
+     * by the path it should occupy relative to the BlueMap working directory.
+     *
+     * <p>Unlike {@link #build}, which renders exactly one map from local world data, this method
+     * never emits a {@code world}/{@code dimension} key in a map's config: per BlueMap's own
+     * documentation for that setting, omitting it means "the map will be only registered to the
+     * webserver and the webapp but not rendered or loaded by BlueMap" -- used to display a map
+     * that has already been rendered somewhere else, exactly the hosting pod's job.
+     *
+     * <p>{@code maps} and {@code bindings} are matched positionally: {@code bindings.get(i)} is
+     * the bucket backing {@code maps.get(i)}. Each map gets its own {@code maps/<id>.conf} and
+     * its own {@code storages/<id>.conf} (not a single shared {@code storages/s3.conf} like
+     * {@link #build}), because different maps can live in different buckets.
+     *
+     * @return file name → file content, ready to become a ConfigMap
+     */
+    public static Map<String, String> buildForHosting(
+            List<BlueMapMap> maps, List<BucketBinding> bindings, int webserverPort) {
+        if (maps.size() != bindings.size()) {
+            throw new IllegalArgumentException("maps and bindings must be matched positionally, got %d maps and %d bindings"
+                    .formatted(maps.size(), bindings.size()));
+        }
+
+        Map<String, String> files = new LinkedHashMap<>();
+
+        files.put("webserver.conf", webserverConfig(webserverPort));
+
+        for (int i = 0; i < maps.size(); i++) {
+            BlueMapMap map = maps.get(i);
+            BucketBinding binding = bindings.get(i);
+            String mapId = map.getMetadata().getName();
+
+            files.put("maps/" + mapId + ".conf", hostingMapConfig(mapId));
+            files.put("storages/" + mapId + ".conf", hostingStorageConfig(map, binding));
+        }
+
+        return files;
+    }
+
+    private static String webserverConfig(int port) {
+        return """
+                enabled: true
+                webroot: "web"
+                port: %d
+                sse-enabled: true
+
+                # BlueMap 5.23's default webserver.conf has no bind-address/ip setting -- verified
+                # by running the CLI against an empty config folder (see this class's Javadoc).
+                # The webserver always listens on all interfaces (0.0.0.0), which a pod needs: it
+                # must accept connections from the Service, not just from localhost.
+                """
+                .formatted(port);
+    }
+
+    private static String hostingMapConfig(String mapId) {
+        // No world/dimension key: this pod only serves what was already rendered elsewhere.
+        return """
+                name: "%s"
+                sorting: 0
+                storage: "%s"
+                """
+                .formatted(mapId, mapId);
+    }
+
+    // No credentials here either: the hosting image's entrypoint fills access-key-id/
+    // secret-access-key in from the Rook-managed Secret's environment variables before
+    // starting BlueMap, exactly like the runner's entrypoint does for build().
+    private static String hostingStorageConfig(BlueMapMap map, BucketBinding binding) {
+        return """
+                storage-type: "themeinerlp:s3"
+                bucket-name: "%s"
+                region: "%s"
+                endpoint-url: "%s"
+                compression: "gzip"
+                root-path: "%s"
+                force-path-style: true
+                """
+                .formatted(
+                        binding.bucketName(),
+                        binding.region(),
+                        binding.endpoint(),
+                        map.getSpec().getStorage().getPrefix());
     }
 
     private static int renderThreads(BlueMapMap map) {

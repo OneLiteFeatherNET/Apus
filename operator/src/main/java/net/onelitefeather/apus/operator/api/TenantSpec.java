@@ -17,11 +17,15 @@
  */
 package net.onelitefeather.apus.operator.api;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /** Desired state of a tenant. Plain data, no Kubernetes access. */
 public class TenantSpec {
 
     private String displayName;
     private StorageQuota storage = new StorageQuota();
+    private Hosting hosting = new Hosting();
 
     public String getDisplayName() {
         return displayName;
@@ -37,6 +41,14 @@ public class TenantSpec {
 
     public void setStorage(StorageQuota storage) {
         this.storage = storage;
+    }
+
+    public Hosting getHosting() {
+        return hosting;
+    }
+
+    public void setHosting(Hosting hosting) {
+        this.hosting = hosting;
     }
 
     /** Hard storage limit, enforced by Ceph rather than by this operator. */
@@ -58,6 +70,36 @@ public class TenantSpec {
 
         public void setMaxObjects(Long maxObjects) {
             this.maxObjects = maxObjects;
+        }
+    }
+
+    /**
+     * Constrains which hostnames {@code BlueMapHosting} resources in this tenant's namespace may
+     * request (design spec §8.1). Enforced by {@code
+     * net.onelitefeather.apus.operator.hosting.BlueMapHostingReconciler}, not by this class or
+     * the CRD schema -- a {@code BlueMapHosting} carries no reference back to its tenant, so the
+     * check can only happen once the reconciler has resolved the tenant owning its namespace.
+     *
+     * <p>An empty {@link #allowedDomains} is deliberately treated as "no hosting permitted yet",
+     * not "anything goes": it far more often means a tenant simply has not been configured for
+     * hosting at all than that a platform administrator consciously decided to let it claim any
+     * hostname on the internet.
+     */
+    public static class Hosting {
+
+        /**
+         * Hostnames (or single-level wildcards, e.g. {@code *.friends.example.net}) a {@code
+         * BlueMapHosting} in this tenant may use. Empty by default -- see the class Javadoc for
+         * why that means "not allowed" rather than "unrestricted".
+         */
+        private List<String> allowedDomains = new ArrayList<>();
+
+        public List<String> getAllowedDomains() {
+            return allowedDomains;
+        }
+
+        public void setAllowedDomains(List<String> allowedDomains) {
+            this.allowedDomains = allowedDomains;
         }
     }
 }

@@ -33,6 +33,7 @@ class OperatorConfigTest {
         assertEquals("ceph-bucket-fr01", config.bucketStorageClass());
         assertEquals("apus/runner:dev", config.runnerImage());
         assertEquals("apus/ingest:dev", config.ingestImage());
+        assertEquals("apus/hosting:dev", config.hostingImage());
         assertEquals("apus-bundles", config.bundleBucket());
         assertEquals("us-east-1", config.bundleS3Region());
         assertEquals("apus-bundle-credentials", config.bundleCredentialsSecretName());
@@ -60,6 +61,7 @@ class OperatorConfigTest {
                 Map.entry("APUS_BUCKET_STORAGE_CLASS", "ceph-bucket-de01"),
                 Map.entry("APUS_RUNNER_IMAGE", "apus/runner:1.2.3"),
                 Map.entry("APUS_INGEST_IMAGE", "apus/ingest:1.2.3"),
+                Map.entry("APUS_HOSTING_IMAGE", "apus/hosting:1.2.3"),
                 Map.entry("APUS_BUNDLE_BUCKET", "bundles-de"),
                 Map.entry("APUS_BUNDLE_S3_ENDPOINT", "http://rgw.de.svc:80"),
                 Map.entry("APUS_BUNDLE_S3_REGION", "eu-central-1"),
@@ -72,6 +74,7 @@ class OperatorConfigTest {
         assertEquals("ceph-bucket-de01", config.bucketStorageClass());
         assertEquals("apus/runner:1.2.3", config.runnerImage());
         assertEquals("apus/ingest:1.2.3", config.ingestImage());
+        assertEquals("apus/hosting:1.2.3", config.hostingImage());
         assertEquals("bundles-de", config.bundleBucket());
         assertEquals("http://rgw.de.svc:80", config.bundleS3Endpoint());
         assertEquals("eu-central-1", config.bundleS3Region());
