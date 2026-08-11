@@ -149,7 +149,17 @@ class RenderJobBuilderTest {
 
     @Test
     void placesTheContainerImageFromTheOperatorConfig() {
-        OperatorConfig config = new OperatorConfig("rook-ceph-fr01", "feather-s3", "ceph-bucket-fr01", "apus/runner:1.2.3");
+        OperatorConfig config = new OperatorConfig(
+                "rook-ceph-fr01",
+                "feather-s3",
+                "ceph-bucket-fr01",
+                "apus/runner:1.2.3",
+                "apus/ingest:dev",
+                "apus/hosting:dev",
+                "apus-bundles",
+                "http://rgw.rook-ceph-fr01.svc:80",
+                "us-east-1",
+                "apus-bundle-credentials");
 
         Job job = RenderJobBuilder.build(render(), map(), "bucket-secret", config);
 

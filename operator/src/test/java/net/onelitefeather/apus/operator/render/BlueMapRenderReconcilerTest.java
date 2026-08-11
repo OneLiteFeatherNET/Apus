@@ -407,6 +407,28 @@ class BlueMapRenderReconcilerTest {
         assertEquals("JobFailed", readyReason(render));
     }
 
+    /**
+     * B2: {@code backoffLimit} exists precisely so a transient pod failure gets retried -- a
+     * single failed *pod attempt* ({@code status.failed > 0}, no {@code Failed} condition yet)
+     * must not end the render terminally while the Job controller is still going to retry it.
+     * Same underlying mistake as {@code WorldIngestReconciler}'s twin fix.
+     */
+    @Test
+    void aSingleFailedPodAttemptDoesNotEndTheRenderWhileTheJobStillHasRetriesLeft() {
+        client.resources(BlueMapMap.class).inNamespace("bluemap-friends").resource(boundMap()).create();
+        BlueMapRenderReconciler reconciler = new BlueMapRenderReconciler(client, OperatorConfig.defaults());
+        BlueMapRender render = renderWithUid("render-1");
+        reconciler.reconcile(render, null);
+
+        Job job = client.batch().v1().jobs().inNamespace("bluemap-friends").withName("render-1").get();
+        job.setStatus(new JobStatusBuilder().withFailed(1).build());
+        client.batch().v1().jobs().inNamespace("bluemap-friends").resource(job).updateStatus();
+
+        reconciler.reconcile(render, null);
+
+        assertEquals("Rendering", render.getStatus().getPhase(), "a single failed attempt must not be terminal");
+    }
+
     // --- Progress transfer from the pod ------------------------------------------------------
 
     @Test

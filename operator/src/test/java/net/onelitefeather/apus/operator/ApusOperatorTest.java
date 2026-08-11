@@ -25,6 +25,9 @@ import io.fabric8.kubernetes.client.server.mock.EnableKubernetesMockClient;
 import io.javaoperatorsdk.operator.Operator;
 import java.util.Set;
 import java.util.stream.Collectors;
+import net.onelitefeather.apus.operator.hosting.BlueMapHostingReconciler;
+import net.onelitefeather.apus.operator.ingest.WorldIngestReconciler;
+import net.onelitefeather.apus.operator.ingest.WorldSourceReconciler;
 import net.onelitefeather.apus.operator.map.BlueMapMapReconciler;
 import net.onelitefeather.apus.operator.render.BlueMapRenderReconciler;
 import net.onelitefeather.apus.operator.tenant.TenantReconciler;
@@ -33,7 +36,7 @@ import org.junit.jupiter.api.Test;
 /**
  * {@link OperatorConfig#fromEnvironment} itself is already covered by {@code
  * OperatorConfigTest}; this class instead proves that {@link ApusOperator}'s wiring is correct --
- * that all three reconcilers this operator ships actually end up registered.
+ * that all six reconcilers this operator ships actually end up registered.
  *
  * <p>{@link ApusOperator#main} is not exercised directly: it builds its own {@link
  * KubernetesClient} via {@code KubernetesClientBuilder} and calls {@link Operator#start()}, both
@@ -48,17 +51,20 @@ class ApusOperatorTest {
     KubernetesClient client;
 
     @Test
-    void registersAllThreeReconcilers() {
+    void registersAllSixReconcilers() {
         Operator operator = new Operator(o -> o.withKubernetesClient(client));
 
         ApusOperator.registerReconcilers(operator, client, OperatorConfig.defaults());
 
-        assertEquals(3, operator.getRegisteredControllersNumber());
+        assertEquals(6, operator.getRegisteredControllersNumber());
         Set<String> reconcilerClassNames = operator.getRegisteredControllers().stream()
                 .map(controller -> controller.getConfiguration().getAssociatedReconcilerClassName())
                 .collect(Collectors.toSet());
         assertTrue(reconcilerClassNames.contains(TenantReconciler.class.getName()));
         assertTrue(reconcilerClassNames.contains(BlueMapMapReconciler.class.getName()));
         assertTrue(reconcilerClassNames.contains(BlueMapRenderReconciler.class.getName()));
+        assertTrue(reconcilerClassNames.contains(WorldSourceReconciler.class.getName()));
+        assertTrue(reconcilerClassNames.contains(WorldIngestReconciler.class.getName()));
+        assertTrue(reconcilerClassNames.contains(BlueMapHostingReconciler.class.getName()));
     }
 }

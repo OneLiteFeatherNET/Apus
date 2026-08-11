@@ -31,15 +31,13 @@ import io.fabric8.kubernetes.client.Config;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.KubernetesClientBuilder;
 import io.javaoperatorsdk.operator.api.reconciler.UpdateControl;
-import java.io.InputStream;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.time.Duration;
 import net.onelitefeather.apus.operator.api.BlueMapMap;
 import net.onelitefeather.apus.operator.api.Conditions;
 import net.onelitefeather.apus.operator.api.Tenant;
 import net.onelitefeather.apus.operator.map.BlueMapMapReconciler;
 import net.onelitefeather.apus.operator.tenant.TenantReconciler;
+import net.onelitefeather.apus.operator.testsupport.K3sCrdSupport;
 import org.junit.jupiter.api.Test;
 import org.testcontainers.k3s.K3sContainer;
 import org.testcontainers.utility.DockerImageName;
@@ -82,10 +80,13 @@ class OperatorIntegrationTest {
             try (KubernetesClient client =
                     new KubernetesClientBuilder().withConfig(config).build()) {
 
-                applyGeneratedCrds(client);
-                awaitCrdRegistration(client, "tenants.bluemap.onelitefeather.net");
-                awaitCrdRegistration(client, "bluemapmaps.bluemap.onelitefeather.net");
-                awaitCrdRegistration(client, "bluemaprenders.bluemap.onelitefeather.net");
+                K3sCrdSupport.applyGeneratedCrds(client);
+                K3sCrdSupport.awaitCrdRegistration(
+                        client, "tenants.bluemap.onelitefeather.net", CRD_REGISTRATION_TIMEOUT);
+                K3sCrdSupport.awaitCrdRegistration(
+                        client, "bluemapmaps.bluemap.onelitefeather.net", CRD_REGISTRATION_TIMEOUT);
+                K3sCrdSupport.awaitCrdRegistration(
+                        client, "bluemaprenders.bluemap.onelitefeather.net", CRD_REGISTRATION_TIMEOUT);
 
                 Tenant tenant = new Tenant();
                 tenant.setMetadata(
@@ -155,8 +156,9 @@ class OperatorIntegrationTest {
             try (KubernetesClient client =
                     new KubernetesClientBuilder().withConfig(config).build()) {
 
-                applyGeneratedCrds(client);
-                awaitCrdRegistration(client, "bluemapmaps.bluemap.onelitefeather.net");
+                K3sCrdSupport.applyGeneratedCrds(client);
+                K3sCrdSupport.awaitCrdRegistration(
+                        client, "bluemapmaps.bluemap.onelitefeather.net", CRD_REGISTRATION_TIMEOUT);
 
                 BlueMapMap map = new BlueMapMap();
                 map.setMetadata(new ObjectMetaBuilder()
@@ -186,33 +188,5 @@ class OperatorIntegrationTest {
                 assertEquals(BlueMapMapReconciler.ROOK_UNAVAILABLE_REASON, ready.getReason());
             }
         }
-    }
-
-    private static void applyGeneratedCrds(KubernetesClient client) throws Exception {
-        Path crdDir = Path.of(System.getProperty("apus.crd.dir", "build/crds"));
-        try (var files = Files.list(crdDir)) {
-            files.filter(path -> path.toString().endsWith(".yml") || path.toString().endsWith(".yaml"))
-                    .forEach(path -> {
-                        try (InputStream in = Files.newInputStream(path)) {
-                            client.load(in).serverSideApply();
-                        } catch (Exception e) {
-                            throw new IllegalStateException("failed to apply CRD manifest " + path, e);
-                        }
-                    });
-        }
-    }
-
-    /** Polls until {@code crdName} shows up as a registered CustomResourceDefinition, or fails. */
-    private static void awaitCrdRegistration(KubernetesClient client, String crdName) throws InterruptedException {
-        long deadline = System.currentTimeMillis() + CRD_REGISTRATION_TIMEOUT.toMillis();
-        boolean known = false;
-        while (System.currentTimeMillis() < deadline && !known) {
-            known = client.apiextensions().v1().customResourceDefinitions().list().getItems().stream()
-                    .anyMatch(crd -> crdName.equals(crd.getMetadata().getName()));
-            if (!known) {
-                Thread.sleep(1000);
-            }
-        }
-        assertTrue(known, crdName + " CRD must be registered on the API server");
     }
 }
