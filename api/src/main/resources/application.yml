@@ -1,0 +1,18 @@
+# Which identity broker sits in front of Apus is intentionally undecided (design spec §15;
+# Keycloak 26+ and Zitadel are both under evaluation, both expose standard OIDC discovery). Only
+# the JWKS endpoint and the expected issuer are configured -- both from environment, with no
+# broker-specific default -- so picking one later is a config change, not a code change.
+micronaut:
+  application:
+    name: apus-api
+  security:
+    enabled: true
+    token:
+      jwt:
+        enabled: true
+        signatures:
+          jwks:
+            apus-issuer:
+              jwks-uri: ${APUS_JWT_JWKS_URI}
+        claims-validators:
+          issuer: ${APUS_JWT_ISSUER}
