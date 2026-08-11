@@ -1,0 +1,4 @@
+# Transient working state from run-spike.sh / compare_tiles.py -- never committed.
+mirrors/
+logs/
+__pycache__/
