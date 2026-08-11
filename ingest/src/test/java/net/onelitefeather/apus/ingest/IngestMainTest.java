@@ -54,7 +54,7 @@ class IngestMainTest {
     void unsupportedSourceTypeExitsNonZeroAndTouchesNothing(@TempDir Path tempDir) {
         Path workDir = tempDir.resolve("source");
         Map<String, String> env = new LinkedHashMap<>();
-        env.put(IngestConfig.ENV_SOURCE_TYPE, "upload");
+        env.put(IngestConfig.ENV_SOURCE_TYPE, "ftp");
         env.put(IngestConfig.ENV_WORLD_NAME, "world");
         env.put(IngestConfig.ENV_SOURCE_VERSION, "v1");
         env.put(IngestConfig.ENV_BUNDLE_BUCKET, "bundles");

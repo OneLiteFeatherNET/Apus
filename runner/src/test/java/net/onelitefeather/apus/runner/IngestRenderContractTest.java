@@ -71,9 +71,15 @@ class IngestRenderContractTest {
     private static final String SOURCE_KEY = "v1.zip";
 
     private static final String BUNDLE_TENANT = "acme";
+    // The owning WorldSource's name -- required by IngestConfig.ENV_BUNDLE_SOURCE_NAME and, per
+    // BundlePath, the second path segment (tenant/sourceName/worldId/version). This constant and
+    // the env var below were missing from this test even after that requirement was introduced;
+    // fixed as a drive-by while touching IngestConfig for phase 6 (unrelated to push/upload).
+    private static final String BUNDLE_SOURCE_NAME = "demo-source";
     private static final String BUNDLE_WORLD_ID = "spawn";
     private static final String BUNDLE_VERSION = "v1";
-    private static final String BUNDLE_PATH = BUNDLE_TENANT + "/" + BUNDLE_WORLD_ID + "/" + BUNDLE_VERSION;
+    private static final String BUNDLE_PATH =
+            BUNDLE_TENANT + "/" + BUNDLE_SOURCE_NAME + "/" + BUNDLE_WORLD_ID + "/" + BUNDLE_VERSION;
 
     // What LayoutDetector.detect must normalise a Bukkit-layout source's sibling folders
     // (world, world_nether, world_the_end) to -- the "core of normalisation" the phase 2b plan
@@ -183,6 +189,7 @@ class IngestRenderContractTest {
         env.put(IngestConfig.ENV_SOURCE_VERSION, SOURCE_KEY);
         env.put(IngestConfig.ENV_BUNDLE_BUCKET, MinioFixtures.WORLD_BUCKET);
         env.put(IngestConfig.ENV_BUNDLE_TENANT, BUNDLE_TENANT);
+        env.put(IngestConfig.ENV_BUNDLE_SOURCE_NAME, BUNDLE_SOURCE_NAME);
         env.put(IngestConfig.ENV_BUNDLE_WORLD_ID, BUNDLE_WORLD_ID);
         env.put(IngestConfig.ENV_BUNDLE_VERSION, BUNDLE_VERSION);
         env.put(IngestConfig.ENV_S3_ENDPOINT, minio.getS3URL());
@@ -259,19 +266,35 @@ class IngestRenderContractTest {
     }
 
     /**
-     * Independently cross-checks the manifest's claims against what MinIO actually holds: exactly
-     * the expected six region objects plus the manifest itself, no more, no less, and -- read
+     * Content {@link net.onelitefeather.apus.ingest.BundleWriter} writes alongside the mandatory
+     * region files, exactly as documented in the design spec's bundle layout (see {@code
+     * docs/superpowers/specs/2026-08-08-apus-design.md}, "worlds/&lt;tenant&gt;/&lt;world-id&gt;/
+     * &lt;version&gt;/" section): the world's {@code level.dat} at the bundle root, and, per
+     * dimension and only "falls vorhanden" (if present in the source), {@code entities/}/{@code
+     * poi/} region-shaped files. This fixture's source world never has entities/poi siblings, so
+     * only {@code level.dat} shows up in practice today, but the pattern is written to already
+     * cover entities/poi too, so a future fixture that exercises them does not have to touch this
+     * assertion again.
+     */
+    private static final Pattern DOCUMENTED_SIDECAR_KEY =
+            Pattern.compile("level\\.dat|dimensions/[^/]+/(entities|poi)/r\\.-?\\d+\\.-?\\d+\\.mca");
+
+    /**
+     * Independently cross-checks the manifest's claims against what MinIO actually holds: every
+     * mandatory object (the manifest itself, plus every region file the manifest lists) must be
+     * present, and anything beyond that must be bundle content the design spec documents ({@link
+     * #DOCUMENTED_SIDECAR_KEY}) -- never a stray or misplaced object. Also checked -- read
      * straight from real object timestamps, not from a fake client's call log the way {@code
      * BundleWriterTest} already proves this in isolation -- the manifest is the object with the
      * latest {@code lastModified} of the bundle, i.e. it really was written last against a real
      * S3-compatible store, not merely in a unit test double.
      */
     private static void assertRealBucketListingMatchesTheManifestWithManifestWrittenLast(Network network) {
-        Set<String> expectedKeys = new LinkedHashSet<>();
-        expectedKeys.add("manifest.json");
+        Set<String> requiredKeys = new LinkedHashSet<>();
+        requiredKeys.add("manifest.json");
         for (String dimension : LOGICAL_DIMENSIONS) {
             for (String regionFile : REGION_FILE_NAMES) {
-                expectedKeys.add("dimensions/" + dimension + "/region/" + regionFile);
+                requiredKeys.add("dimensions/" + dimension + "/region/" + regionFile);
             }
         }
 
@@ -301,7 +324,25 @@ class IngestRenderContractTest {
             lastModifiedByKey.put(keyMatcher.group(1), Instant.parse(lastModifiedMatcher.group(1)));
         }
 
-        assertEquals(expectedKeys, lastModifiedByKey.keySet(), "bucket must hold exactly the bundle's own objects:\n" + logs);
+        Set<String> actualKeys = lastModifiedByKey.keySet();
+        Set<String> missingKeys = new LinkedHashSet<>(requiredKeys);
+        missingKeys.removeAll(actualKeys);
+        assertTrue(
+                missingKeys.isEmpty(),
+                "bucket must hold every mandatory bundle object (manifest.json plus every region file the "
+                        + "manifest lists); missing: " + missingKeys + "\n" + logs);
+
+        Set<String> unexpectedKeys = new LinkedHashSet<>();
+        for (String key : actualKeys) {
+            if (!requiredKeys.contains(key) && !DOCUMENTED_SIDECAR_KEY.matcher(key).matches()) {
+                unexpectedKeys.add(key);
+            }
+        }
+        assertTrue(
+                unexpectedKeys.isEmpty(),
+                "bucket must hold only the bundle's own objects -- mandatory region files/manifest.json plus "
+                        + "sidecar content the design spec documents (level.dat, entities/, poi/); unexpected: "
+                        + unexpectedKeys + "\n" + logs);
 
         Instant manifestWrittenAt = lastModifiedByKey.get("manifest.json");
         for (Map.Entry<String, Instant> entry : lastModifiedByKey.entrySet()) {

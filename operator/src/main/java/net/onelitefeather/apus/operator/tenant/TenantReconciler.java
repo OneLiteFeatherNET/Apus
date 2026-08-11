@@ -24,12 +24,15 @@ import io.fabric8.kubernetes.api.model.OwnerReference;
 import io.fabric8.kubernetes.api.model.OwnerReferenceBuilder;
 import io.fabric8.kubernetes.api.model.Quantity;
 import io.fabric8.kubernetes.api.model.ResourceQuotaBuilder;
+import io.fabric8.kubernetes.api.model.Secret;
+import io.fabric8.kubernetes.api.model.SecretBuilder;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.dsl.NonDeletingOperation;
 import io.javaoperatorsdk.operator.api.reconciler.Context;
 import io.javaoperatorsdk.operator.api.reconciler.ControllerConfiguration;
 import io.javaoperatorsdk.operator.api.reconciler.Reconciler;
 import io.javaoperatorsdk.operator.api.reconciler.UpdateControl;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 import net.onelitefeather.apus.operator.OperatorConfig;
@@ -60,6 +63,16 @@ import net.onelitefeather.apus.operator.rook.CephObjectStoreUser;
  * currently being reconciled. A mismatch (or missing labels) aborts the reconciliation with a
  * {@code ResourceConflict} condition instead of silently adopting -- and thereby leaking the
  * contents of -- someone else's namespace or storage user.
+ *
+ * <p><b>Push-token Secret:</b> a tenant also gets exactly one {@code world:push} service-token
+ * Secret ({@link PushTokenSecrets#SECRET_NAME}), created once and never regenerated on later
+ * reconciles -- unlike every other resource here, it is not safe to rebuild fresh from the
+ * tenant spec each time, because a client ({@code paper-worldpush}) is configured with its value
+ * once and keeps using it. See {@link PushTokenSecrets} for why this lives at the tenant level
+ * rather than per-{@code WorldSource}, and {@code FabricPushTokenRepository} in the {@code api}
+ * module for how it is read back. The raw token is never logged and never written to {@code
+ * Tenant.status} -- only {@link net.onelitefeather.apus.operator.api.TenantStatus#getPushTokenSecret()},
+ * the Secret's (non-secret, fixed) name, is.
  *
  * <p><b>Rook not (yet) installed:</b> {@link #reconcile} checks {@link
  * io.fabric8.kubernetes.client.Client#supports(Class)} for {@link CephObjectStoreUser} before
@@ -120,6 +133,15 @@ public class TenantReconciler implements Reconciler<Tenant> {
             return conflict(tenant, "Namespace", namespace);
         }
 
+        Secret existingPushToken = client.secrets()
+                .inNamespace(namespace)
+                .withName(PushTokenSecrets.SECRET_NAME)
+                .get();
+        if (existingPushToken != null
+                && !ownedBySameTenant(existingPushToken.getMetadata().getLabels(), tenantName, tenantUid)) {
+            return conflict(tenant, "Secret", PushTokenSecrets.SECRET_NAME);
+        }
+
         // Rook may not be installed yet (e.g. a fresh cluster, or a plain k3s test cluster with
         // no storage operator at all). supports() asks the API server's discovery document
         // whether the CRD is registered, rather than probing with a get()/create() call and
@@ -150,6 +172,29 @@ public class TenantReconciler implements Reconciler<Tenant> {
                         .endMetadata()
                         .build())
                 .createOr(NonDeletingOperation::update);
+
+        // The push-token Secret is created exactly once and never touched again on subsequent
+        // reconciles (no createOr(update) here, deliberately -- see the class Javadoc): every
+        // other resource above is rebuilt fresh from the tenant spec each time, which is fine
+        // because none of it is a secret a client already holds. A push token is different --
+        // paper-worldpush is configured with the value once and keeps using it; regenerating it
+        // on every resync (as createOr(update) would, since a freshly-built object here would
+        // carry brand-new random stringData) would silently break every server already pushing.
+        if (existingPushToken == null) {
+            client.secrets()
+                    .inNamespace(namespace)
+                    .resource(new SecretBuilder()
+                            .withNewMetadata()
+                            .withName(PushTokenSecrets.SECRET_NAME)
+                            .withNamespace(namespace)
+                            .withLabels(pushTokenLabels(tenantName, tenantUid))
+                            .withOwnerReferences(ownerReference)
+                            .endMetadata()
+                            .withStringData(Map.of(PushTokenSecrets.TOKEN_KEY, PushTokenSecrets.generate()))
+                            .build())
+                    .create();
+        }
+        tenant.getStatus().setPushTokenSecret(PushTokenSecrets.SECRET_NAME);
 
         client.resourceQuotas()
                 .inNamespace(namespace)
@@ -258,6 +303,19 @@ public class TenantReconciler implements Reconciler<Tenant> {
         if (tenantUid != null && !tenantUid.isBlank()) {
             labels.put(Labels.TENANT_UID, tenantUid);
         }
+        return labels;
+    }
+
+    /**
+     * The push-token Secret's labels: the standard tenant-ownership labels every resource here
+     * carries (so the same {@link #ownedBySameTenant} check applies to it), plus {@link
+     * PushTokenSecrets#LABEL_KEY}/{@link PushTokenSecrets#LABEL_VALUE} -- the label {@code
+     * FabricPushTokenRepository} in the {@code api} module actually queries by, since a raw push
+     * token carries no namespace of its own to look the Secret up by name directly.
+     */
+    private static Map<String, String> pushTokenLabels(String tenantName, String tenantUid) {
+        Map<String, String> labels = new HashMap<>(tenantLabels(tenantName, tenantUid));
+        labels.put(PushTokenSecrets.LABEL_KEY, PushTokenSecrets.LABEL_VALUE);
         return labels;
     }
 
