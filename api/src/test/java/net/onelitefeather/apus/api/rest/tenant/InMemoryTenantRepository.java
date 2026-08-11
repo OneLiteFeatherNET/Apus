@@ -28,12 +28,18 @@ import net.onelitefeather.apus.operator.api.Tenant;
  * kubernetes-server-mock}/{@code micronaut-test-junit5}, neither of which is on this module's
  * test classpath (task-1-report.md's "Concerns" section) -- see {@code TenantRepository}'s
  * Javadoc for why the repository is an interface in the first place.
+ *
+ * <p>Public (not package-private): {@code BlueMapRenderControllerTest} (in the sibling {@code
+ * rest.render} test package) also needs a {@code TenantRepository} fake for {@code
+ * GET /api/renders/cluster}'s tests, and this is the one already exercised by {@code
+ * TenantControllerTest} -- reusing it keeps there from being two divergent in-memory fakes for
+ * the same interface.
  */
-final class InMemoryTenantRepository implements TenantRepository {
+public final class InMemoryTenantRepository implements TenantRepository {
 
     private final Map<String, Tenant> byName = new LinkedHashMap<>();
 
-    void put(Tenant tenant) {
+    public void put(Tenant tenant) {
         byName.put(tenant.getMetadata().getName(), tenant);
     }
 
@@ -49,6 +55,12 @@ final class InMemoryTenantRepository implements TenantRepository {
 
     @Override
     public Tenant create(Tenant tenant) {
+        put(tenant);
+        return tenant;
+    }
+
+    @Override
+    public Tenant update(Tenant tenant) {
         put(tenant);
         return tenant;
     }

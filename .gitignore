@@ -6,3 +6,15 @@ build/
 .idea/
 *.iml
 runner/vendor/
+
+# ui/ (Nuxt) -- not a Gradle module, see ui/README.md. Node dependencies and build/test
+# output never belong in the repository.
+ui/node_modules/
+ui/.nuxt/
+ui/.output/
+ui/dist/
+ui/coverage/
+ui/.env
+# Local marker @nuxt/test-utils writes recording which version last ran -- see
+# vitest.nuxt.config.ts/tests/nuxt/ (added for the layout render regression test).
+ui/.nuxtrc
