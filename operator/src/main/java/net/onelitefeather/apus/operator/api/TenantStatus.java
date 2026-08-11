@@ -27,6 +27,7 @@ public class TenantStatus {
     private String namespace;
     private String objectStoreUser;
     private Long storageUsedBytes;
+    private String pushTokenSecret;
     private List<Condition> conditions = new ArrayList<>();
 
     public String getNamespace() {
@@ -51,6 +52,22 @@ public class TenantStatus {
 
     public void setStorageUsedBytes(Long storageUsedBytes) {
         this.storageUsedBytes = storageUsedBytes;
+    }
+
+    /**
+     * The name of the {@code Secret} carrying this tenant's {@code world:push} service token, or
+     * {@code null} if none has been provisioned yet. Deliberately only the Secret's name (a
+     * fixed, non-secret constant, {@code PushTokenSecrets.SECRET_NAME}) -- never the token value
+     * itself, which must never appear in a Custom Resource's status, in an event, or in a log
+     * line. This field says at most "a token exists, here is where"; reading its value always
+     * requires a separate, RBAC-guarded {@code Secret} read.
+     */
+    public String getPushTokenSecret() {
+        return pushTokenSecret;
+    }
+
+    public void setPushTokenSecret(String pushTokenSecret) {
+        this.pushTokenSecret = pushTokenSecret;
     }
 
     public List<Condition> getConditions() {

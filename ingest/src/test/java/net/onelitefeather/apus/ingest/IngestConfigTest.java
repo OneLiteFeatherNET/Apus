@@ -94,11 +94,54 @@ class IngestConfigTest {
     @Test
     void anUnsupportedSourceTypeIsRejectedRatherThanGuessedAt() {
         Map<String, String> env = minimalS3Env();
-        env.put(IngestConfig.ENV_SOURCE_TYPE, "upload");
+        env.put(IngestConfig.ENV_SOURCE_TYPE, "ftp");
 
         IngestConfig.ConfigurationException e =
                 assertThrows(IngestConfig.ConfigurationException.class, () -> IngestConfig.fromEnv(env));
-        assertTrue(e.getMessage().contains("upload"));
+        assertTrue(e.getMessage().contains("ftp"));
+    }
+
+    @Test
+    void pushAndUploadSourceConfigMapEnvVarsToTheSharedStagingConnectorConfigKeys() {
+        for (String sourceType : new String[] {"push", "upload"}) {
+            Map<String, String> env = minimalS3Env();
+            env.put(IngestConfig.ENV_SOURCE_TYPE, sourceType);
+            env.put(IngestConfig.ENV_SOURCE_STAGING_BUCKET, "staging");
+            env.put(IngestConfig.ENV_SOURCE_STAGING_ENDPOINT, "http://staging-minio:9000");
+            env.put(IngestConfig.ENV_SOURCE_STAGING_PREFIX, "acme/survival/");
+            env.put(IngestConfig.ENV_SOURCE_STAGING_ACCESS_KEY, "staging-access");
+            env.put(IngestConfig.ENV_SOURCE_STAGING_SECRET_KEY, "staging-secret");
+            env.put(IngestConfig.ENV_SOURCE_STAGING_REGION, "eu-central-1");
+
+            Map<String, String> sourceConfig = IngestConfig.fromEnv(env).sourceConfig();
+
+            assertEquals("staging", sourceConfig.get(net.onelitefeather.apus.ingest.connector.PushSourceConnector.CONFIG_BUCKET));
+            assertEquals(
+                    "http://staging-minio:9000",
+                    sourceConfig.get(net.onelitefeather.apus.ingest.connector.PushSourceConnector.CONFIG_ENDPOINT));
+            assertEquals(
+                    "acme/survival/",
+                    sourceConfig.get(net.onelitefeather.apus.ingest.connector.PushSourceConnector.CONFIG_PREFIX));
+            assertEquals(
+                    "staging-access",
+                    sourceConfig.get(net.onelitefeather.apus.ingest.connector.PushSourceConnector.CONFIG_ACCESS_KEY_ID));
+            assertEquals(
+                    "staging-secret",
+                    sourceConfig.get(
+                            net.onelitefeather.apus.ingest.connector.PushSourceConnector.CONFIG_SECRET_ACCESS_KEY));
+            assertEquals("eu-central-1", sourceConfig.get(net.onelitefeather.apus.ingest.connector.PushSourceConnector.CONFIG_REGION));
+        }
+    }
+
+    @Test
+    void missingStagingBucketIsDetectedForPushSources() {
+        Map<String, String> env = minimalS3Env();
+        env.put(IngestConfig.ENV_SOURCE_TYPE, "push");
+        // APUS_SOURCE_STAGING_BUCKET intentionally left unset.
+
+        IngestConfig.ConfigurationException e =
+                assertThrows(IngestConfig.ConfigurationException.class, () -> IngestConfig.fromEnv(env));
+        assertTrue(e.getMessage().contains(IngestConfig.ENV_SOURCE_STAGING_BUCKET));
     }
 
     @Test
