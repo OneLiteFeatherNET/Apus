@@ -24,6 +24,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import io.micronaut.security.authentication.Authentication;
 import java.util.List;
 import net.onelitefeather.apus.api.rest.support.BadRequestException;
+import net.onelitefeather.apus.api.rest.support.NotFoundException;
 import net.onelitefeather.apus.api.security.ForbiddenException;
 import net.onelitefeather.apus.api.support.PrincipalResolver;
 import net.onelitefeather.apus.operator.api.Tenant;
@@ -91,5 +92,55 @@ class TenantControllerTest {
     void createRejectsABlankName() {
         var request = new CreateTenantRequest(" ", "Globex", null, null, List.of());
         assertThrows(BadRequestException.class, () -> controller.create(platformAdmin(), request));
+    }
+
+    @Test
+    void updateChangesQuotaAndAllowedDomainsForAPlatformAdmin() {
+        Tenant tenant = new Tenant();
+        tenant.getMetadata().setName("acme");
+        tenant.getSpec().setDisplayName("Acme Corp");
+        tenant.getSpec().getStorage().setQuota("100Gi");
+        repository.put(tenant);
+
+        var request = new UpdateTenantRequest("500Gi", 42_000L, List.of("*.acme.example.net"));
+        var response = controller.update(platformAdmin(), "acme", request);
+
+        assertEquals(200, response.getStatus().getCode());
+        assertEquals("500Gi", response.body().storage().quota());
+        assertEquals(42_000L, response.body().storage().maxObjects());
+        assertEquals(List.of("*.acme.example.net"), response.body().allowedHostingDomains());
+        // displayName is untouched -- this endpoint only ever changes quota/domains.
+        assertEquals("Acme Corp", response.body().displayName());
+    }
+
+    @Test
+    void updateLeavesAFieldUntouchedWhenItsRequestValueIsNull() {
+        Tenant tenant = new Tenant();
+        tenant.getMetadata().setName("acme");
+        tenant.getSpec().getStorage().setQuota("100Gi");
+        tenant.getSpec().getHosting().setAllowedDomains(List.of("maps.acme.example.net"));
+        repository.put(tenant);
+
+        var request = new UpdateTenantRequest(null, null, null);
+        var response = controller.update(platformAdmin(), "acme", request);
+
+        assertEquals("100Gi", response.body().storage().quota());
+        assertEquals(List.of("maps.acme.example.net"), response.body().allowedHostingDomains());
+    }
+
+    @Test
+    void updateRejectsANonPlatformAdmin() {
+        Tenant tenant = new Tenant();
+        tenant.getMetadata().setName("acme");
+        repository.put(tenant);
+
+        var request = new UpdateTenantRequest("500Gi", null, null);
+        assertThrows(ForbiddenException.class, () -> controller.update(tenantOwner(), "acme", request));
+    }
+
+    @Test
+    void updateRejectsAnUnknownTenant() {
+        var request = new UpdateTenantRequest("500Gi", null, null);
+        assertThrows(NotFoundException.class, () -> controller.update(platformAdmin(), "does-not-exist", request));
     }
 }
