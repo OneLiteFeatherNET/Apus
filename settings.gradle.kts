@@ -1,6 +1,6 @@
 rootProject.name = "Apus"
 
-include("telemetry-addon", "runner")
+include("telemetry-addon", "runner", "operator")
 
 dependencyResolutionManagement {
     repositories {
@@ -15,6 +15,8 @@ dependencyResolutionManagement {
             version("testcontainers", "1.20.4")
             version("spotless", "8.3.0")
             version("shadow", "9.3.2")
+            version("josdk", "5.5.1")
+            version("fabric8", "7.8.0")
 
             library("bluemap.api", "de.bluecolored", "bluemap-api").versionRef("bluemap-api")
             library("bluemap.core", "de.bluecolored", "bluemap-core").versionRef("bluemap")
@@ -27,6 +29,16 @@ dependencyResolutionManagement {
             library("testcontainers.bom", "org.testcontainers", "testcontainers-bom").versionRef("testcontainers")
             library("testcontainers.junit", "org.testcontainers", "junit-jupiter").withoutVersion()
             library("testcontainers.minio", "org.testcontainers", "minio").withoutVersion()
+            library("testcontainers.k3s", "org.testcontainers", "k3s").withoutVersion()
+
+            library("josdk", "io.javaoperatorsdk", "operator-framework").versionRef("josdk")
+            library("josdk.junit", "io.javaoperatorsdk", "operator-framework-junit").versionRef("josdk")
+            library("crd.generator.api.v2", "io.fabric8", "crd-generator-api-v2").versionRef("fabric8")
+            library("crd.generator.collector", "io.fabric8", "crd-generator-collector").versionRef("fabric8")
+            library("fabric8.junit", "io.fabric8", "kubernetes-junit-jupiter").versionRef("fabric8")
+            // @EnableKubernetesMockClient lives here, NOT in kubernetes-junit-jupiter
+            // (that one targets tests against a real cluster and ships no mock classes).
+            library("fabric8.server.mock", "io.fabric8", "kubernetes-server-mock").versionRef("fabric8")
 
             plugin("spotless", "com.diffplug.spotless").versionRef("spotless")
             plugin("shadow", "com.gradleup.shadow").versionRef("shadow")
