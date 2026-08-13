@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": ["auth", "api", "ui"],
+  "properties": {
+    "auth": {
+      "type": "object",
+      "required": ["issuer"],
+      "properties": {
+        "issuer": {
+          "type": "string",
+          "minLength": 1,
+          "format": "uri",
+          "description": "OIDC issuer the API validates tokens against. Deliberately has no default: an unset issuer must fail the install, never start an API that accepts unvalidated tokens."
+        }
+      }
+    }
+  }
+}

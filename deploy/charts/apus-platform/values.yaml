@@ -37,7 +37,12 @@ api:
       memory: 1Gi
   metrics:
     serviceMonitor:
+      # The API does not export Prometheus metrics yet (Phase 8 Task 5 adds
+      # micronaut-management and micrometer, exposing /prometheus). Off by default: turning
+      # this on before then just wires Prometheus up to a 404, not empty data.
       enabled: false
+      interval: 30s
+      labels: {}
   serviceAccount:
     create: true
     name: ""
@@ -74,6 +79,11 @@ ui:
       memory: 64Mi
     limits:
       memory: 128Mi
+  podAnnotations: {}
+  podLabels: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
 
 ingress:
   enabled: false

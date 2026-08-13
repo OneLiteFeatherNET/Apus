@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "apus-platform.ui.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "apus-platform.componentLabels" (dict "ctx" . "component" "ui") | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "apus-platform.componentSelectorLabels" (dict "ctx" . "component" "ui") | nindent 4 }}
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP
