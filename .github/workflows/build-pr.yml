@@ -1,0 +1,39 @@
+name: build-pr
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  gradle:
+    uses: OneLiteFeatherNET/workflows/.github/workflows/gradle-build-pr.yml@v2.4.0
+    with:
+      java-version: "25"
+      java-distribution: "temurin"
+      paths-filters: |
+        code:
+          - '**/*.java'
+          - '**/*.kts'
+          - '**/*.properties'
+          - 'gradle/**'
+          - 'gradlew'
+          - '.spotless/**'
+    secrets: inherit
+
+  ui:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ui
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: ui/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test
