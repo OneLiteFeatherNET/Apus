@@ -162,6 +162,10 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: azure/setup-helm@v4
+        with:
+          # Same pin, same reason as build-pr.yml (see the comment there): the chart that ships
+          # must be packaged by the exact Helm version the PR job linted and rendered it with.
+          version: v4.2.2
       - name: Package and push charts
         env:
           HARBOR_REGISTRY: ${{ secrets.HARBOR_REGISTRY }}
@@ -169,11 +173,30 @@ jobs:
           HARBOR_PASSWORD: ${{ secrets.HARBOR_PASSWORD }}
           VERSION: ${{ needs.release-please.outputs.root-version }}
         run: |
-          printf '%s' "${HARBOR_PASSWORD}" | \
-            helm registry login "${HARBOR_REGISTRY}" -u "${HARBOR_USERNAME}" --password-stdin
+          # Deliberately no `helm registry login`. Like regctl's login it starts with an
+          # anonymous connectivity ping, and this Harbor answers that with a 401 carrying no
+          # WWW-Authenticate header -- the `empty challenge header` failure the image push hit
+          # until the org's docker-publish.yml switched to `regctl registry login --skip-check`
+          # ("skips its anonymous connectivity ping, which a private registry answers with 401;
+          # credentials are exercised during the push"). Helm has no --skip-check, so the same
+          # idea is applied one level down: write the credential file `helm registry login`
+          # would have written and hand it to `helm push`, which authenticates on the push
+          # request itself. The file is docker's config.json format -- the format Helm's own
+          # login writes and its ORAS client reads.
+          # Pushing the .tgz with regctl instead would drop Helm from the publish path entirely
+          # and make us hand-assemble the chart's OCI config and layer media types; keeping
+          # `helm push` means the artifact stays exactly what `helm pull` expects.
+          config="${RUNNER_TEMP}/helm-registry-config.json"
+          umask 077
+          printf '{"auths":{"%s":{"auth":"%s"}}}' \
+            "${HARBOR_REGISTRY}" \
+            "$(printf '%s:%s' "${HARBOR_USERNAME}" "${HARBOR_PASSWORD}" | base64 -w0)" \
+            > "${config}"
+          trap 'rm -f "${config}"' EXIT
           for chart in apus-operator apus-platform; do
             helm package "deploy/charts/${chart}"
-            helm push "${chart}-${VERSION}.tgz" "oci://${HARBOR_REGISTRY}/apus/charts"
+            helm push "${chart}-${VERSION}.tgz" "oci://${HARBOR_REGISTRY}/apus/charts" \
+              --registry-config "${config}"
           done
 
   publish-telemetry-addon:
