@@ -1,0 +1,76 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "apus-platform.api.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "apus-platform.componentLabels" (dict "ctx" . "component" "api") | nindent 4 }}
+spec:
+  replicas: {{ .Values.api.replicaCount }}
+  strategy:
+    # The API is stateless -- every instance validates JWTs and talks to the Kubernetes
+    # API itself, no local state to lose by running old and new pods side by side.
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      {{- include "apus-platform.componentSelectorLabels" (dict "ctx" . "component" "api") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "apus-platform.componentLabels" (dict "ctx" . "component" "api") | nindent 8 }}
+        {{- with .Values.api.podLabels }}{{- toYaml . | nindent 8 }}{{- end }}
+      {{- with .Values.api.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "apus-platform.api.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.api.podSecurityContext | nindent 8 }}
+      containers:
+        - name: api
+          image: {{ include "apus-platform.image" (dict "image" .Values.api.image "ctx" .) }}
+          imagePullPolicy: {{ .Values.api.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.api.securityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            # Maps 1:1 onto application.yml's micronaut.security.token.jwt.claims-validators.issuer
+            # and .signatures.jwks.apus-issuer.jwks-uri -- there is no default for either (see
+            # values.yaml's auth.issuer comment).
+            - name: APUS_JWT_ISSUER
+              value: {{ .Values.auth.issuer | quote }}
+            - name: APUS_JWT_JWKS_URI
+              value: {{ .Values.auth.jwksUri | quote }}
+          resources:
+            {{- toYaml .Values.api.resources | nindent 12 }}
+          # No readiness/liveness probes: api/build.gradle.kts does not depend on
+          # micronaut-management yet, so /health/readiness and /health/liveness do not exist on
+          # this classpath -- probing them would just crash-loop the pod. Phase 8 Task 5 adds the
+          # dependency; add the probes back then.
+          volumeMounts:
+            # readOnlyRootFilesystem is on; the JVM still needs a writable temp dir.
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      {{- with .Values.api.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.api.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.api.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

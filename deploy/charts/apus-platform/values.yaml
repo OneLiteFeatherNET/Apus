@@ -1,0 +1,88 @@
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+auth:
+  # No default on purpose. The API validates JWTs against this issuer; an empty value
+  # must fail the install rather than let the API start and accept unvalidated tokens.
+  issuer: ""
+  jwksUri: ""
+  # Not wired into the API's environment yet -- audience validation is not implemented
+  # in application.yml (only issuer and jwks-uri are, see design spec §15 point 3, the
+  # identity-broker product choice is still open). Declared here so the schema in the
+  # next task has somewhere to point once it lands.
+  audience: apus
+
+api:
+  image:
+    repository: harbor.onelitefeather.dev/apus/api
+    tag: ""
+    pullPolicy: IfNotPresent
+  replicaCount: 1
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+    seccompProfile:
+      type: RuntimeDefault
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: ["ALL"]
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      memory: 1Gi
+  metrics:
+    serviceMonitor:
+      enabled: false
+  serviceAccount:
+    create: true
+    name: ""
+    annotations: {}
+  rbac:
+    create: true
+  podAnnotations: {}
+  podLabels: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+ui:
+  image:
+    repository: harbor.onelitefeather.dev/apus/ui
+    tag: ""
+    pullPolicy: IfNotPresent
+  replicaCount: 2
+  podSecurityContext:
+    runAsNonRoot: true
+    # The unprivileged nginx image runs as uid 101, not 10001 like the Java images.
+    runAsUser: 101
+    seccompProfile:
+      type: RuntimeDefault
+  securityContext:
+    allowPrivilegeEscalation: false
+    # nginx writes its cache and pid below /tmp and /var/cache; not read-only.
+    readOnlyRootFilesystem: false
+    capabilities:
+      drop: ["ALL"]
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 128Mi
+
+ingress:
+  enabled: false
+  className: nginx
+  annotations: {}
+  host: ""
+  tls:
+    enabled: false
+    secretName: ""
+    issuerRef:
+      name: ""
+      kind: ClusterIssuer
