@@ -170,7 +170,10 @@ git commit -m "feat: give the runner a dedicated exit code for exhausted storage
 
 - Modify: `api/src/main/java/net/onelitefeather/apus/api/rest/push/FabricPushTokenRepository.java`
 - Modify: `api/src/test/java/net/onelitefeather/apus/api/rest/push/FabricPushTokenRepositoryTest.java`
-- Modify: `deploy/base/api-rbac.yaml` (aus Phase 8, Task 3)
+- Modify: `deploy/charts/apus-platform/templates/api-rbac.yaml` — das Kustomize-Overlay
+  `deploy/base/api-rbac.yaml` aus dem ursprünglichen Phase-8-Plan entsteht nicht mehr; die
+  API-RBAC lebt seit den Helm-Charts nur noch in diesem Template, dessen Kommentar
+  ausdrücklich auf „phase 9 task 2" verweist.
 
 **Interfaces:**
 
@@ -285,7 +288,7 @@ Expected: PASS, ohne dass ein vorbestehender Test angepasst werden musste. War e
 
 - [ ] **Schritt 6: RBAC verengen**
 
-In `deploy/base/api-rbac.yaml` die weite Secret-Regel ersetzen:
+In `deploy/charts/apus-platform/templates/api-rbac.yaml` die weite Secret-Regel ersetzen:
 
 ```yaml
   # Service-token lookup, narrowed in phase 9: the API only ever reads the one Secret
@@ -318,7 +321,7 @@ Expected: der Wert stimmt exakt mit `resourceNames` überein. Weicht er ab, lies
 - [ ] **Schritt 9: Commit**
 
 ```bash
-git add api/ deploy/base/api-rbac.yaml docs/superpowers/specs/2026-08-08-apus-design.md
+git add api/ deploy/charts/apus-platform/templates/api-rbac.yaml docs/superpowers/specs/2026-08-08-apus-design.md
 git commit -m "fix: read only the fixed-name push token secret instead of listing all secrets"
 ```
 

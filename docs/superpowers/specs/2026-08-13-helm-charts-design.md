@@ -314,13 +314,44 @@ der CRDs als Templates statt im `crds/`-Verzeichnis liegen.
 
 ## 11. Offene Punkte
 
-1. **Harbor-Authentifizierung.** Der Image-Push scheitert aktuell mit `empty challenge header`;
-   der Chart-Push geht an dieselbe Registry und wird ohne Lösung ebenso scheitern. Zu klären,
-   bevor der Publish-Job gebaut wird.
+1. **Harbor-Authentifizierung.** Der Image-Push scheiterte mit `empty challenge header`, bis
+   `docker-publish.yml` auf `regctl registry login --skip-check` umgestellt hat — der
+   anonyme Connectivity-Ping vor dem eigentlichen Push ist die Ursache. Der Chart-Push geht an
+   dieselbe Registry und vermeidet den Ping jetzt auf demselben Weg: kein
+   `helm registry login`, stattdessen wird die Credential-Datei direkt geschrieben und per
+   `--registry-config` an `helm push` übergeben (`release-please.yml`). **Nicht gegen die
+   echte Registry getestet** — lokal ist nur nachgewiesen, dass `helm push` mit einer
+   handgeschriebenen Credential-Datei und ohne vorherigen Login gegen eine Registry mit
+   Basic-Auth durchläuft. Ob Harbor sich beim Push selbst zufriedengibt, zeigt erst der erste
+   Release-Lauf.
 2. **Harbor-Projekt für Charts.** Ob `apus/charts` als Repository-Pfad im bestehenden
    Projekt `apus` liegt oder ein eigenes Harbor-Projekt bekommt, ist eine Betriebsentscheidung.
 3. **Chart-Publishing im zentralen Katalog.** Zunächst repo-eigener Job; die Aufnahme in
    `OneLiteFeatherNET/workflows` steht an, sobald ein zweites Projekt Charts veröffentlicht.
-4. **`values.schema.json`-Umfang.** Der Issuer ist als Pflichtfeld gesetzt. Ob weitere Werte
-   (Rook-Namen, Bundle-Bucket) ebenfalls erzwungen werden sollen, entscheidet sich beim Bauen
-   an der Frage, ob ein sinnvoller Default existiert.
+4. **`values.schema.json`-Umfang.** Issuer und JWKS-URI sind als Pflichtfelder gesetzt — beide
+   kommen in `application.yml` ohne Default aus der Umgebung, ein leerer Wert lässt die API
+   also entweder ungeprüfte Token akzeptieren oder mangels Signaturschlüsseln jedes Token
+   ablehnen. Ob weitere Werte (Rook-Namen, Bundle-Bucket) ebenfalls erzwungen werden sollen,
+   entscheidet sich an der Frage, ob ein sinnvoller Default existiert.
+5. **Das Dashboard ist gar nicht konfigurierbar.** `ui/nuxt.config.ts` setzt `oidcIssuer` und
+   `oidcClientId` auf `''`, `ui/Dockerfile` ruft `pnpm generate` ohne Build-Argumente auf, und
+   ins nginx-Image wandert nur `.output/public`. Damit sind die leeren OIDC-Werte im
+   veröffentlichten Image eingefroren: `NUXT_PUBLIC_*` wirkt zur Laufzeit nur mit einem
+   Nitro-Server, den dieses Image nicht enthält. Konsequenz: **keine Installation kann sich
+   anmelden**, unabhängig davon, was im Chart steht — `apus-platform` reicht die Werte heute
+   bewusst nur an die API weiter, das UI-Deployment bekommt sie nicht, weil es sie nicht lesen
+   könnte. Das ist kein Chart-, sondern ein UI-/Build-Problem: die Reparatur ändert, wie das UI
+   gebaut wird (Build-Args plus `pnpm generate` je Installation, oder ein zur Laufzeit
+   geladenes `config.json` neben `index.html`, oder doch ein Nitro-Server im Image). Erst
+   danach ist im Chart überhaupt etwas zu verdrahten. Blockiert damit jede echte
+   Inbetriebnahme des Dashboards.
+6. **Kein Image-Pull-Secret für die vom Operator erzeugten Workloads.** Die Render- und
+   Ingest-Jobs sowie die Hosting-Deployments, die der Operator baut, tragen weder ein
+   `imagePullSecrets` noch einen ServiceAccount — die Charts setzen die zugehörigen Images
+   aber per Default auf ein privates Harbor-Projekt. Auf einem Cluster ohne node-weite
+   Registry-Credentials bleibt damit jeder Render-Job in `ImagePullBackOff` hängen, während
+   Operator und API selbst laufen (deren Pull-Secret setzt das Chart). Der Fix gehört in den
+   Operator-Code (die Ressourcen-Builder in `render`, `ingest`, `hosting`), nicht in die
+   Charts; die Charts können ihn nur begleiten, indem sie den Namen des Secrets bzw. des
+   ServiceAccounts als Wert an die Operator-Konfiguration durchreichen. `imagePullSecrets` in
+   `values.yaml` deckt heute ausschließlich die Pods, die die Charts selbst erzeugen.
