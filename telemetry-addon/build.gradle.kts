@@ -40,8 +40,11 @@ publishing {
         create<MavenPublication>("maven") {
             groupId = "net.onelitefeather.apus"
             artifactId = "telemetry-addon"
-            // The shadow jar is the artifact consumers need -- the thin jar would leave
-            // them to resolve the relocated dependencies themselves.
+            // Every dependency of this module is compileOnly, so shadowJar bundles and
+            // relocates nothing -- its output is content-identical to the thin jar. It is
+            // published anyway so that the artifact in the Maven repo is literally the same
+            // file the runner image ships (telemetry-addon/build/libs/apus-telemetry-addon.jar),
+            // leaving no second jar that could drift from it.
             artifact(tasks.named("shadowJar"))
         }
     }
