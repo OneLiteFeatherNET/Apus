@@ -151,6 +151,31 @@ jobs:
       dockerfile: "ui/Dockerfile"
     secrets: inherit
 
+  publish-charts:
+    needs: [release-please, publish-ui]
+    # Last link of the publish chain (see the concurrency note above). Charts go to the
+    # same registry as the images, so they share its serialisation constraint.
+    if: ${{ !cancelled() && needs.release-please.outputs.root-released == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - uses: azure/setup-helm@v4
+      - name: Package and push charts
+        env:
+          HARBOR_REGISTRY: ${{ secrets.HARBOR_REGISTRY }}
+          HARBOR_USERNAME: ${{ secrets.HARBOR_USERNAME }}
+          HARBOR_PASSWORD: ${{ secrets.HARBOR_PASSWORD }}
+          VERSION: ${{ needs.release-please.outputs.root-version }}
+        run: |
+          printf '%s' "${HARBOR_PASSWORD}" | \
+            helm registry login "${HARBOR_REGISTRY}" -u "${HARBOR_USERNAME}" --password-stdin
+          for chart in apus-operator apus-platform; do
+            helm package "deploy/charts/${chart}"
+            helm push "${chart}-${VERSION}.tgz" "oci://${HARBOR_REGISTRY}/apus/charts"
+          done
+
   publish-telemetry-addon:
     needs: release-please
     if: needs.release-please.outputs.telemetry-released == 'true'
