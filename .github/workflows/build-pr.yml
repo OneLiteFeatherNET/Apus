@@ -53,3 +53,44 @@ jobs:
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test
+
+  helm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: azure/setup-helm@v4
+      - name: Lint charts
+        run: |
+          helm lint deploy/charts/apus-operator --set bundles.s3Endpoint=http://example
+          helm lint deploy/charts/apus-platform --set auth.issuer=https://id.example.net
+      - name: Render charts
+        run: |
+          helm template t deploy/charts/apus-operator --set bundles.s3Endpoint=http://example > /tmp/operator.yaml
+          helm template t deploy/charts/apus-platform --set auth.issuer=https://id.example.net > /tmp/platform.yaml
+      - name: The values schema actually rejects missing required values
+        run: |
+          # A schema that never rejects anything is worse than none: it looks like a guard.
+          # A `helm template` that fails for an unrelated reason would also pass a bare
+          # exit-code check, so grep the error for the field the schema is supposed to guard.
+          if error=$(helm template t deploy/charts/apus-platform 2>&1 >/dev/null); then
+            echo "values.schema.json did not reject a missing auth.issuer" >&2
+            exit 1
+          fi
+          if ! grep -q '/auth/issuer' <<<"$error"; then
+            echo "helm template failed, but not because of auth.issuer:" >&2
+            echo "$error" >&2
+            exit 1
+          fi
+          if error=$(helm template t deploy/charts/apus-operator --set bundles.s3Endpoint="" 2>&1 >/dev/null); then
+            echo "values.schema.json did not reject an empty bundles.s3Endpoint" >&2
+            exit 1
+          fi
+          if ! grep -q '/bundles/s3Endpoint' <<<"$error"; then
+            echo "helm template failed, but not because of bundles.s3Endpoint:" >&2
+            echo "$error" >&2
+            exit 1
+          fi
+      - name: Validate against the Kubernetes API schema
+        run: |
+          kubectl apply --dry-run=client -f /tmp/operator.yaml
+          kubectl apply --dry-run=client -f /tmp/platform.yaml
