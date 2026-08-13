@@ -22,3 +22,99 @@ jobs:
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+  build-context:
+    needs: release-please
+    if: needs.release-please.outputs.root-released == 'true'
+    uses: OneLiteFeatherNET/workflows/.github/workflows/gradle-docker-context.yml@v2.4.0
+    with:
+      java-version: "25"
+      version: ${{ needs.release-please.outputs.root-version }}
+      gradle-command: "./gradlew :telemetry-addon:shadowJar :ingest:shadowJar :operator:shadowJar :api:shadowJar"
+      context-path: "."
+      artifact-name: "docker-context"
+    secrets: inherit
+
+  publish-runner:
+    needs: [release-please, build-context]
+    permissions:
+      contents: read
+      id-token: write
+    uses: OneLiteFeatherNET/workflows/.github/workflows/docker-publish.yml@v2.4.0
+    with:
+      image-name: "apus/runner"
+      version: ${{ needs.release-please.outputs.root-version }}
+      context: "."
+      dockerfile: "runner/Dockerfile"
+      artifact-name: "docker-context"
+    secrets: inherit
+
+  publish-ingest:
+    needs: [release-please, build-context]
+    permissions:
+      contents: read
+      id-token: write
+    uses: OneLiteFeatherNET/workflows/.github/workflows/docker-publish.yml@v2.4.0
+    with:
+      image-name: "apus/ingest"
+      version: ${{ needs.release-please.outputs.root-version }}
+      context: "."
+      dockerfile: "ingest/Dockerfile"
+      artifact-name: "docker-context"
+    secrets: inherit
+
+  publish-hosting:
+    needs: release-please
+    if: needs.release-please.outputs.root-released == 'true'
+    permissions:
+      contents: read
+      id-token: write
+    uses: OneLiteFeatherNET/workflows/.github/workflows/docker-publish.yml@v2.4.0
+    with:
+      image-name: "apus/hosting"
+      version: ${{ needs.release-please.outputs.root-version }}
+      context: "hosting"
+      dockerfile: "hosting/Dockerfile"
+    secrets: inherit
+
+  publish-operator:
+    needs: [release-please, build-context]
+    permissions:
+      contents: read
+      id-token: write
+    uses: OneLiteFeatherNET/workflows/.github/workflows/docker-publish.yml@v2.4.0
+    with:
+      image-name: "apus/operator"
+      version: ${{ needs.release-please.outputs.root-version }}
+      context: "."
+      dockerfile: "operator/Dockerfile"
+      artifact-name: "docker-context"
+    secrets: inherit
+
+  publish-api:
+    needs: [release-please, build-context]
+    permissions:
+      contents: read
+      id-token: write
+    uses: OneLiteFeatherNET/workflows/.github/workflows/docker-publish.yml@v2.4.0
+    with:
+      image-name: "apus/api"
+      version: ${{ needs.release-please.outputs.root-version }}
+      context: "."
+      dockerfile: "api/Dockerfile"
+      artifact-name: "docker-context"
+    secrets: inherit
+
+  publish-ui:
+    needs: release-please
+    if: needs.release-please.outputs.root-released == 'true'
+    permissions:
+      contents: read
+      id-token: write
+    uses: OneLiteFeatherNET/workflows/.github/workflows/docker-publish.yml@v2.4.0
+    with:
+      image-name: "apus/ui"
+      version: ${{ needs.release-please.outputs.root-version }}
+      context: "."
+      dockerfile: "ui/Dockerfile"
+    secrets: inherit
