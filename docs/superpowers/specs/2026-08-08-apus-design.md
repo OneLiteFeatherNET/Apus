@@ -28,6 +28,13 @@ bei gleichzeitig laufenden Shards nach; die Entscheidung fiel zugunsten vertikal
 Skalierung über `render-threads` — siehe §14, Phase 4, für die volle Begründung.
 `BlueMapMap.spec.shards` existiert und bleibt bis auf Weiteres auf `1` beschränkt.
 
+**Auslieferung steht seit Phase 7.** Alle sechs Komponenten liegen als Container-Image vor
+(`runner`, `ingest`, `hosting`, `operator`, `api`, `ui`), `telemetry-addon` und
+`paper-worldpush` werden nach Maven veröffentlicht. Versionen und Changelogs entstehen
+über Release Please aus Conventional Commits; `telemetry-addon` und `paper-worldpush`
+tragen dabei eigene Release-Spuren, wie in §4 vorgesehen. Was weiterhin fehlt, sind die
+Cluster-Manifeste und die Observability-Verdrahtung — siehe den Plan zu Phase 8.
+
 **Bewusst offen gelassene Punkte** (Details in §15):
 
 - **Identity-Broker nicht ausgewählt.** Die API validiert JWTs gegen einen
@@ -761,7 +768,7 @@ Credentials erscheinen nie in CR-Status, Events oder Logs.
 | Baustein | Vorgehen |
 | --- | --- |
 | `ingest` | Fixture-Archive je Layout (Pterodactyl-`tar.gz`, Bukkit-Split, Vanilla, ZIP mit Unterordner, defektes Archiv) gegen den Layout-Detektor. Reine Unit-Tests, plus MinIO-gestützte Integrationstests je Connector (`s3`, `pterodactyl`, `push`, `upload`) und ein Ende-zu-Ende-Test (`PushIngestEndToEndTest`), der einen kompletten Ingest-Lauf für Push/Upload-Quellen gegen echtes MinIO fährt |
-| `telemetry-addon` | Contract-Test pro BlueMap-Version: Mini-Welt rendern, `/progress` auf plausible Werte prüfen (deckt den Log-Tail-Weg ab, siehe §7.2). **Offen:** Eine CI-Matrix über unterstützte BlueMap-Versionen als Frühwarnsystem existiert nicht — Phase 1 hat im Repository keinerlei CI-Konfiguration angelegt. Bis dahin muss der Contract-Test vor jedem BlueMap-Upgrade manuell laufen |
+| `telemetry-addon` | Contract-Test pro BlueMap-Version: Mini-Welt rendern, `/progress` auf plausible Werte prüfen (deckt den Log-Tail-Weg ab, siehe §7.2). **Teilweise offen:** CI existiert seit Phase 7 (`.github/workflows/build-pr.yml`), eine Matrix über mehrere BlueMap-Versionen als Frühwarnsystem aber noch nicht — der Contract-Test läuft gegen die eine im Katalog gepinnte Version. Bis eine Matrix existiert, muss er vor jedem BlueMap-Upgrade weiterhin gezielt laufen |
 | `runner` | Integrationstest gegen S3-Testcontainer mit kleiner Welt, inkl. `IngestRenderContractTest` (Ingest → Bundle → Render Ende-zu-Ende) |
 | `operator` | JOSDK `LocallyRunOperatorExtension` gegen k3s via Testcontainers, plus `EnableKubernetesMockClient`-Tests je Reconciler |
 | `api` | Micronaut-Tests gegen einen Fake-Kubernetes-Client bzw. `EnableKubernetesMockClient`, Auth-Fälle je Rolle. **Offen:** kein Lauf gegen einen echten Identity-Broker (siehe §0/§15, Punkt 3) |
@@ -880,6 +887,16 @@ für die Begründung.
 7. **Kein belastbares Quota-Signal aus dem Runner-Image.** `BlueMapRenderReconciler` erkennt ein Speicherlimit derzeit heuristisch aus dem Grund/der Meldung des terminierten Render-Pods (Muster wie `QuotaExceeded` oder "quota" kombiniert mit einem S3-Bezug wie `bucket`/`rgw`/`ceph`), gestützt auf `terminationMessagePolicy: FallbackToLogsOnError`, damit überhaupt eine Meldung ankommt. Das bleibt Best-Effort: das Kubelet-Vokabular für den Terminierungsgrund enthält "quota" nie, und die Meldung ist nur ein Log-Ausschnitt ohne Vertrag. Ein belastbares Signal (z. B. ein eigener Exit-Code des Runners für "Quota erschöpft") muss vor einem produktiven Einsatz nachgezogen werden, bevor mehr Verhalten (etwa automatische Benachrichtigungen) darauf aufbaut.
 8. **`paper-worldpush`'s Save-Fenster ungetestet gegen einen echten Paper-Server.** §13.2 sah ursprünglich MockBukkit für die Kopierlogik plus einen Lauf gegen einen echten Paper-Server für `BukkitSaveCoordinator`s Autosave-Pause-und-Force-Save-Schritt vor; tatsächlich existiert nur Unit-Testabdeckung für Kopierlogik, Konfiguration und den HTTP-Report-Weg (`HttpPushNotifierTest` gegen einen lokalen `HttpServer`-Stub). Ob das kurze Zeitfenster zwischen `disableAutoSave()`/`forceSave()` und dem Beginn des inkrementellen Kopierens auf einem echten, unter Last laufenden Server tatsächlich einen konsistenten Snapshot liefert, ist vor einem produktiven Einsatz zu verifizieren.
 9. **RBAC für den Push-Token-Lookup der API breiter als ideal.** `FabricPushTokenRepository#resolveNamespace` sucht (mangels Tenant-Hinweis im Request) per Label über alle Namespaces nach Service-Token-Secrets; Kubernetes-RBAC kann diesen Zugriff nicht auf das Label einschränken, sodass die schmalste *funktionierende* Berechtigung für das heutige Vorgehen trotzdem `get`/`list` auf **alle** Secrets im Cluster ist (siehe die Klassendoku für die volle Abwägung und einen skizzierten, aber nicht umgesetzten schmaleren Weg über `Tenant`-Enumeration + `get` mit festem Secret-Namen).
+10. **Kein SLF4J-Provider im Runtime-Classpath — keine Anwendungslogs auf stdout.** In keinem
+    `build.gradle.kts` des Monorepos steht eine Abhängigkeit auf `logback-classic` oder einen
+    anderen SLF4J-Provider; für `api` und `operator` wurde das zusätzlich am laufenden Container
+    bestätigt (`SLF4J(W): No SLF4J providers were found` beim Start, Fallback auf den No-Op-
+    Logger). Damit schreibt aktuell kein gebautes Image Anwendungslogs nach stdout. Das betrifft
+    zwei Stellen der Spec direkt: §13.1 setzt voraus, dass Alloy Pod-Logs nach Loki weiterreicht,
+    und §11.1s `GET /api/renders/{id}/logs` liest genau diesen Loki-Stream für die API-SSE-Route —
+    beides bleibt ohne Wirkung, solange kein Modul einen Logging-Provider mitbringt. Muss vor der
+    Observability-Verdrahtung (Phase 8) behoben werden; diese Lücke wird hier nur festgehalten,
+    nicht behoben.
 
 ---
 
