@@ -2,6 +2,7 @@ import java.time.Duration
 
 plugins {
     application
+    alias(libs.plugins.shadow)
 }
 
 dependencies {
@@ -122,4 +123,17 @@ val integrationTest by tasks.registering(Test::class) {
 
 application {
     mainClass.set("net.onelitefeather.apus.operator.ApusOperator")
+}
+
+tasks {
+    shadowJar {
+        archiveClassifier.set("")
+        archiveBaseName.set("apus-operator")
+        // Fixed name instead of the default "apus-operator-<version>.jar": operator/Dockerfile
+        // COPYs the file by name (no glob), the same convention ingest and telemetry-addon use.
+        archiveFileName.set("apus-operator.jar")
+    }
+    build {
+        dependsOn(shadowJar)
+    }
 }
