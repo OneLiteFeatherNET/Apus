@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": ["image", "images", "rook", "bundles"],
+  "properties": {
+    "image": {
+      "type": "object",
+      "required": ["repository"],
+      "properties": {
+        "repository": { "type": "string", "minLength": 1 },
+        "tag": { "type": "string" },
+        "pullPolicy": { "enum": ["Always", "IfNotPresent", "Never"] }
+      }
+    },
+    "crds": {
+      "type": "object",
+      "properties": { "install": { "type": "boolean" } }
+    },
+    "bundles": {
+      "type": "object",
+      "required": ["bucket", "s3Endpoint"],
+      "properties": {
+        "bucket": { "type": "string", "minLength": 1 },
+        "s3Endpoint": {
+          "type": "string",
+          "minLength": 1,
+          "description": "S3 endpoint of the bundle bucket. No default exists -- a wrong or empty endpoint makes every ingest fail at runtime instead of at install time."
+        }
+      }
+    },
+    "replicaCount": { "type": "integer", "minimum": 1, "maximum": 1 }
+  }
+}

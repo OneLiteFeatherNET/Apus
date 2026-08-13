@@ -1,0 +1,26 @@
+{{- /*
+The operator does not export metrics yet -- that lands in Phase 8 Task 4. Until then the
+/metrics endpoint returns nothing, so metrics.serviceMonitor.enabled defaults to false.
+Turning it on today just wires Prometheus up to an endpoint with no data, leaving you with
+empty Grafana panels and no indication why.
+*/ -}}
+{{- if and .Values.metrics.enabled .Values.metrics.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "apus-operator.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "apus-operator.labels" . | nindent 4 }}
+    {{- with .Values.metrics.serviceMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "apus-operator.selectorLabels" . | nindent 6 }}
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: {{ .Values.metrics.serviceMonitor.interval }}
+{{- end }}
