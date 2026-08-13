@@ -21,3 +21,7 @@
 .idea/
 *.tmproj
 .vscode/
+# Developer tooling: sync-crds.sh copies the generated CRDs from deploy/crds/ into
+# files/crds/ and only ever runs in this repository. It has no purpose inside the packaged
+# chart -- the CRDs it produces are already there.
+sync-crds.sh

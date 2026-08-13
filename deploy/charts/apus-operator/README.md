@@ -26,6 +26,39 @@ helm install apus-operator deploy/charts/apus-operator \
 `bundles.s3Endpoint` has no default and is enforced by `values.schema.json` — see
 [Values](#values) below.
 
+### Reinstalling under a different release name
+
+The six CRDs are annotated `helm.sh/resource-policy: keep`, so `helm uninstall` leaves them
+in the cluster together with the `meta.helm.sh/release-name` and `meta.helm.sh/release-namespace`
+annotations of the release that first installed them. Installing again under a *different*
+release name or in a different namespace therefore fails, for every CRD at once:
+
+```text
+Error: rendered manifests contain a resource that already exists. Unable to continue with
+install: CustomResourceDefinition "tenants.bluemap.onelitefeather.net" in namespace "" exists
+and cannot be imported into the current release: invalid ownership metadata; annotation
+validation error: key "meta.helm.sh/release-name" must equal "apus": current value is
+"apus-operator"
+```
+
+This is not a broken cluster — the CRDs are exactly where they should be, only labelled as
+belonging to the old release. Two ways out:
+
+- Hand the CRDs to the new release:
+
+  ```bash
+  for crd in tenants worldsources worldingests bluemapmaps bluemaprenders bluemaphostings; do
+    kubectl annotate crd "${crd}.bluemap.onelitefeather.net" \
+      meta.helm.sh/release-name=<new-release> \
+      meta.helm.sh/release-namespace=<new-namespace> --overwrite
+  done
+  ```
+
+- Or leave them out of the new release entirely with `--set crds.install=false`, which is
+  also the right choice when CRDs are managed separately from the operator.
+
+Reinstalling under the *same* release name in the same namespace needs neither.
+
 ## Values
 
 The table is derived from [`values.yaml`](./values.yaml); every key defined there is

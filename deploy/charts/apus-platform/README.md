@@ -20,23 +20,38 @@ the `apus-operator` chart for those.
 
 ```bash
 helm install apus-platform deploy/charts/apus-platform \
-  --set auth.issuer=https://id.example.net
+  --set auth.issuer=https://id.example.net \
+  --set auth.jwksUri=https://id.example.net/oauth/v2/keys
 ```
 
-`auth.issuer` has no default and is enforced by `values.schema.json` — see
-[Values schema](#values-schema) below. The API validates every JWT against this issuer; an
-unset issuer must fail the install, not start an API that accepts unvalidated tokens.
+Neither `auth.issuer` nor `auth.jwksUri` has a default, and both are enforced by
+`values.schema.json` — see [Values schema](#values-schema) below. The API validates every
+JWT against the issuer and fetches the signing keys from the JWKS URI; either one unset must
+fail the install, not start an API that accepts unvalidated tokens or rejects every single
+one of them.
 
 To expose both workloads through a single host:
 
 ```bash
 helm install apus-platform deploy/charts/apus-platform \
   --set auth.issuer=https://id.example.net \
+  --set auth.jwksUri=https://id.example.net/oauth/v2/keys \
   --set ingress.enabled=true \
   --set ingress.host=apus.example.net \
   --set ingress.tls.enabled=true \
   --set ingress.tls.issuerRef.name=letsencrypt-prod
 ```
+
+### Reinstalling under a different release name
+
+This chart itself survives it: everything it creates is either namespaced or named after the
+release, so a second install under another name collides with nothing. The `apus-operator`
+chart it depends on does **not** — its CRDs are annotated `helm.sh/resource-policy: keep`,
+survive `helm uninstall`, and keep the `meta.helm.sh/release-name` of whichever release
+installed them first, so reinstalling *that* chart under a different name fails on every CRD.
+See [Reinstalling under a different release name](../apus-operator/README.md#reinstalling-under-a-different-release-name)
+in the operator chart for the two ways out (`kubectl annotate crd … --overwrite`, or
+`--set crds.install=false`).
 
 ## Values
 
@@ -49,7 +64,7 @@ listed here.
 | `nameOverride` | string | `""` | Overrides `apus-platform.name`. |
 | `fullnameOverride` | string | `""` | Overrides `apus-platform.fullname`. |
 | `auth.issuer` | string | `""` | OIDC issuer the API validates tokens against. **Required** — enforced by `values.schema.json`, since an unset issuer would let the API start and accept unvalidated tokens. |
-| `auth.jwksUri` | string | `""` | JWKS URI the API fetches signing keys from. |
+| `auth.jwksUri` | string | `""` | JWKS URI the API fetches signing keys from. **Required** — enforced by `values.schema.json` for the same reason as `auth.issuer`: without signing keys the API rejects every token at runtime instead of failing at install time. |
 | `auth.audience` | string | `"apus"` | Not wired into the API's environment yet — audience validation is not implemented in `application.yml` (only issuer and JWKS URI are). Declared here so a schema addition has somewhere to point once it lands. |
 | `api.image.repository` | string | `"harbor.onelitefeather.dev/apus/api"` | API container image repository. |
 | `api.image.tag` | string | `""` | Image tag. Empty on purpose: falls back to `.Chart.AppVersion` so the chart version and the image version cannot drift apart. |
@@ -96,6 +111,7 @@ listed here.
 `values.schema.json` enforces only what has no sensible default:
 
 - `auth.issuer` must be a non-empty, valid URI.
+- `auth.jwksUri` must be a non-empty, valid URI.
 
 Everything else (image repositories, resource sizes, replica counts, ingress host, …) has a
 working default and is left unenforced.

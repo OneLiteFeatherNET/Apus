@@ -5,8 +5,9 @@ The apus-operator is installed.
    kubectl get deployment {{ include "apus-operator.fullname" . }} -n {{ .Release.Namespace }}
 
 2. No tenant exists yet. The operator does nothing until a Tenant custom resource is
-   created -- it is what causes a namespace, quota and network policy to be provisioned
-   (design spec §8.1). Create a minimal one:
+   created -- it is what provisions a namespace with a ResourceQuota, a LimitRange and the
+   `apus-push-token` Secret (design spec §8.1; the per-tenant NetworkPolicy described there
+   is not implemented yet). Create a minimal one:
 
    cat <<EOF | kubectl apply -f -
    apiVersion: bluemap.onelitefeather.net/v1alpha1
@@ -26,14 +27,15 @@ The apus-operator is installed.
 {{- if .Values.metrics.serviceMonitor.enabled }}
 
 3. metrics.serviceMonitor.enabled is set, but the operator does not export metrics yet
-   (that lands in Phase 8 Task 4). The /metrics endpoint exists and Prometheus will scrape
-   it, but every panel built on it will stay empty until that phase ships.
+   (that lands in Phase 8 Task 4). There is no HTTP server in the operator at all so far:
+   Prometheus will scrape port {{ .Values.metrics.port }} and get a connection refused on
+   every attempt until that phase ships.
 {{- else }}
 
-3. Metrics are exposed on the "metrics" Service port ({{ .Values.metrics.port }}), but no
-   ServiceMonitor is installed (metrics.serviceMonitor.enabled is false by default) -- the
-   operator does not export metrics yet, so there is nothing to scrape until Phase 8 Task 4
-   ships.
+3. The "metrics" Service port ({{ .Values.metrics.port }}) is declared, but nothing listens
+   on it yet -- the operator has no HTTP server and exports no metrics until Phase 8 Task 4
+   ships. No ServiceMonitor is installed either (metrics.serviceMonitor.enabled is false by
+   default), which is why nothing is scraping the dead port.
 {{- end }}
 {{- end }}
 
