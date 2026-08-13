@@ -172,7 +172,7 @@ git commit -m "ci: adopt the central OneLiteFeather Renovate preset"
 
 **Interfaces:**
 
-- Produces: Die Workflow-Outputs `.--release_created`, `.--version`, `telemetry-addon--release_created`, `paper-worldpush--release_created`. Task 9 und Task 10 hängen sich daran.
+- Produces: Die Workflow-Outputs `release_created`, `version`, `telemetry-addon--release_created`, `paper-worldpush--release_created`. Task 9 und Task 10 hängen sich daran. **Achtung:** Das Root-Paket ist die Ausnahme von der `<pfad>--<schlüssel>`-Regel — `setPathOutput()` in der Action setzt bei Paketpfad `.` den blanken Schlüssel. `.--release_created` ist immer leer.
 
 - [ ] **Schritt 1: Aktuellen Zustand festhalten**
 
@@ -293,8 +293,9 @@ jobs:
   release-please:
     runs-on: ubuntu-latest
     outputs:
-      root-released: ${{ steps.release.outputs['.--release_created'] }}
-      root-version: ${{ steps.release.outputs['.--version'] }}
+      # Root package: bare keys, no prefix -- setPathOutput() special-cases path ".".
+      root-released: ${{ steps.release.outputs.release_created }}
+      root-version: ${{ steps.release.outputs.version }}
       telemetry-released: ${{ steps.release.outputs['telemetry-addon--release_created'] }}
       paper-released: ${{ steps.release.outputs['paper-worldpush--release_created'] }}
     steps:
@@ -434,7 +435,9 @@ Das Repository trägt ungewöhnlich viel Dokumentation (Design-Spec, Pläne, Spi
   "ignores": [
     "**/node_modules/**",
     "**/build/**",
-    "CHANGELOG.md"
+    // Alle Changelogs, nicht nur das im Wurzelverzeichnis: Release Please schreibt
+    // eines je Release-Spur. Ein blankes "CHANGELOG.md" trifft nur die Wurzeldatei.
+    "**/CHANGELOG.md"
   ]
 }
 ```
