@@ -25,11 +25,13 @@
 Heute erzeugt `./gradlew :operator:generateCrds` die sechs CRDs nach `operator/build/crds`. Wer Apus ausrollt, braucht sie aber vor dem ersten Operator-Start — und ein Cluster-Repository soll dafür kein Gradle ausführen müssen.
 
 **Files:**
+
 - Create: `deploy/crds/*.yaml` (sechs Dateien, Generator-Ausgabe)
 - Create: `operator/src/test/java/net/onelitefeather/apus/operator/CrdsInSyncTest.java`
 - Modify: `operator/build.gradle.kts` (Ausgabeverzeichnis des Generators zusätzlich nach `deploy/crds`)
 
 **Interfaces:**
+
 - Consumes: `generateCrds` (JavaExec-Task, `operator/build.gradle.kts:62`), der nach `build/crds` schreibt.
 - Produces: `deploy/crds/` als eingecheckte Quelle für Task 2.
 
@@ -158,6 +160,7 @@ git commit -m "feat: check in the generated CRDs and guard them against drift"
 ### Task 2: Kustomize-Basis für den Operator
 
 **Files:**
+
 - Create: `deploy/base/kustomization.yaml`
 - Create: `deploy/base/namespace.yaml`
 - Create: `deploy/base/operator-serviceaccount.yaml`
@@ -166,6 +169,7 @@ git commit -m "feat: check in the generated CRDs and guard them against drift"
 - Create: `deploy/README.md`
 
 **Interfaces:**
+
 - Consumes: `deploy/crds/` aus Task 1; die Umgebungsvariablen aus `OperatorConfig` (`APUS_ROOK_NAMESPACE`, `APUS_CEPH_OBJECT_STORE`, `APUS_BUCKET_STORAGE_CLASS`, `APUS_RUNNER_IMAGE`, `APUS_INGEST_IMAGE`, `APUS_HOSTING_IMAGE`, `APUS_BUNDLE_BUCKET`, `APUS_BUNDLE_S3_ENDPOINT`, `APUS_BUNDLE_S3_REGION`, `APUS_BUNDLE_CREDENTIALS_SECRET`).
 - Produces: die Basis, auf die Task 3 (API und UI) und Task 6 (PodMonitor) aufsetzen.
 
@@ -421,6 +425,7 @@ git commit -m "feat: add a Kustomize base for rolling out the operator"
 ### Task 3: Manifeste für API und UI
 
 **Files:**
+
 - Create: `deploy/base/api-deployment.yaml`
 - Create: `deploy/base/api-service.yaml`
 - Create: `deploy/base/api-rbac.yaml`
@@ -540,6 +545,7 @@ git commit -m "feat: add deployment manifests for the API and the dashboard"
 Design-Spec §13.1 verlangt „Renders nach Phase, Ingest-Dauer, Quota-Auslastung je Mandant". Nichts davon existiert.
 
 **Files:**
+
 - Modify: `settings.gradle.kts` (Micrometer im Katalog)
 - Modify: `operator/build.gradle.kts`
 - Create: `operator/src/main/java/net/onelitefeather/apus/operator/metrics/ApusMetrics.java`
@@ -549,7 +555,9 @@ Design-Spec §13.1 verlangt „Renders nach Phase, Ingest-Dauer, Quota-Auslastun
 - Modify: `operator/src/main/java/net/onelitefeather/apus/operator/ApusOperator.java`
 
 **Interfaces:**
+
 - Produces:
+
   ```java
   public final class ApusMetrics {
       public ApusMetrics(MeterRegistry registry);
@@ -566,6 +574,7 @@ Design-Spec §13.1 verlangt „Renders nach Phase, Ingest-Dauer, Quota-Auslastun
       @Override public void close();
   }
   ```
+
 - Consumes: `JOSDK 5.5.1`s `Metrics`-Schnittstelle für die Reconciliation-Metriken.
 
 - [ ] **Schritt 1: Katalogeinträge ergänzen**
@@ -835,6 +844,7 @@ git commit -m "feat: export operator metrics for renders, ingests and tenant sto
 ### Task 5: API-Metriken
 
 **Files:**
+
 - Modify: `settings.gradle.kts`
 - Modify: `api/build.gradle.kts`
 - Modify: `api/src/main/resources/application.yml`
@@ -958,6 +968,7 @@ git commit -m "feat: expose Prometheus metrics and health endpoints from the API
 ### Task 6: Scrape-Konfiguration
 
 **Files:**
+
 - Create: `deploy/base/podmonitor-render.yaml`
 - Create: `deploy/base/servicemonitor-operator.yaml`
 - Create: `deploy/base/servicemonitor-api.yaml`
@@ -1022,6 +1033,7 @@ git commit -m "feat: add scrape configuration for render pods, operator and API"
 Design-Spec §13.1: „ein Grafana-Dashboard je Ebene (Plattform, Mandant)".
 
 **Files:**
+
 - Create: `deploy/dashboards/apus-platform.json`
 - Create: `deploy/dashboards/apus-tenant.json`
 - Create: `deploy/base/dashboards-configmap.yaml`
@@ -1037,6 +1049,7 @@ Expected: die vollständige Liste. Jedes Panel darf ausschließlich diese Namen 
 - [ ] **Schritt 2: Plattform-Dashboard bauen**
 
 `deploy/dashboards/apus-platform.json`, Panels:
+
 1. **Renders nach Phase** (Zeitreihe): `sum by (phase) (rate(apus_renders_total[5m]))`
 2. **Fehlerquote** (Stat): `sum(rate(apus_renders_total{phase="Failed"}[1h])) / sum(rate(apus_renders_total[1h]))`
 3. **Speicherverbrauch je Mandant** (Balken): `apus_storage_used_bytes`
@@ -1115,10 +1128,12 @@ git commit -m "feat: add Grafana dashboards for the platform and tenant views"
 Design-Spec §13.2 sieht vor: „k3s + S3: kompletter Durchlauf Ingest → Render → Hosting mit Mini-Welt". Vorhanden sind `PushIngestEndToEndTest` (Ingest allein) und `RenderEndToEndTest` (Render allein) — der Durchlauf über alle drei Stufen fehlt, und Hosting ist in keinem E2E-Test enthalten.
 
 **Files:**
+
 - Create: `operator/src/test/java/net/onelitefeather/apus/operator/FullPipelineIntegrationTest.java`
 - Modify: `operator/build.gradle.kts` (nur falls der `integrationTest`-Task angepasst werden muss)
 
 **Interfaces:**
+
 - Consumes: die bestehende k3s-Testcontainers-Infrastruktur der vorhandenen `*IntegrationTest`-Klassen sowie `testdata/mini-world`.
 
 - [ ] **Schritt 1: Bestehende Integrationstest-Infrastruktur ansehen**
@@ -1129,6 +1144,7 @@ Expected: das vorhandene Muster für k3s- und MinIO-Container. Der neue Test üb
 - [ ] **Schritt 2: Failing test schreiben**
 
 Der Test fährt in einer Methode:
+
 1. k3s starten, die sechs CRDs aus `deploy/crds` anwenden, den Operator über `LocallyRunOperatorExtension` gegen diesen Cluster laufen lassen.
 2. MinIO starten, `testdata/mini-world` als Push-Quelle in den Staging-Prefix legen.
 3. `Tenant` anlegen, auf `status.namespace` warten.
@@ -1147,6 +1163,7 @@ Expected: FAIL. Der Fehlschlag muss aus einer der Wartestufen kommen, nicht aus 
 - [ ] **Schritt 4: Test zum Laufen bringen**
 
 Was hier zu tun ist, hängt vom Fehlschlag ab. Erwartbare Stolpersteine, jeweils mit dem Ort, an dem sie zu beheben sind:
+
 - Der Operator im Test kennt die Image-Namen nicht → `OperatorConfig`-Umgebungsvariablen im Test setzen, so wie das Deployment aus Task 2 es tut.
 - Rook existiert im k3s-Testcluster nicht → der Test setzt `storage.bucketClaim` nicht auf `auto`, sondern legt Bucket und Secret direkt in MinIO an und referenziert sie; die Rook-Integration ist eigener Scope und in `OperatorIntegrationTest` bereits abgedeckt.
 - Der Hosting-Pod braucht einen Ingress-Controller → im Test gegen den `Service` prüfen statt gegen die Ingress-URL; `status.ready` ist das Signal, nicht die externe Erreichbarkeit.
@@ -1173,6 +1190,7 @@ git commit -m "test: cover the full ingest, render and hosting pipeline on k3s"
 ### Task 9: Design-Spec nachziehen
 
 **Files:**
+
 - Modify: `docs/superpowers/specs/2026-08-08-apus-design.md`
 
 - [ ] **Schritt 1: §13.1 als umgesetzt kennzeichnen**
@@ -1181,6 +1199,7 @@ Der Abschnitt beschreibt Metriken, Logs und Dashboards im Futur. Umschreiben auf
 
 - [ ] **Schritt 2: §13.2, Zeile „E2E", auf den neuen Test verweisen**
 
+<!-- markdownlint-disable-next-line MD038 -->
 Ersetzen durch: `k3s + S3: kompletter Durchlauf Ingest → Render → Hosting mit Mini-Welt (`FullPipelineIntegrationTest`, Teil von `./gradlew :operator:integrationTest`)`.
 
 - [ ] **Schritt 3: §0 um den Deployment-Stand ergänzen**

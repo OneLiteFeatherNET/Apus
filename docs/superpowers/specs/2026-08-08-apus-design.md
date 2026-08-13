@@ -12,6 +12,7 @@ und erlaubt Bedienung ohne YAML.
 
 ## 0. Stand der Umsetzung
 
+<!-- markdownlint-disable-next-line MD036 -->
 *(Ergänzt nach Abschluss von Phase 6 — Einstieg für alle, die neu dazukommen.)*
 
 **Alle sechs Phasen aus §14 sind gebaut**, einschließlich Phase 6 (Push-Quellen:
@@ -67,7 +68,7 @@ böswillige Nutzer ist es nicht.
 Drei Rollenebenen:
 
 | Ebene | Wer | Darf |
-|---|---|---|
+| --- | --- | --- |
 | Plattform | OLF als Betreiber | Mandanten anlegen, Quotas setzen, alles sehen |
 | Mandant-Verwaltung | Owner/Admin eines Mandanten | Quellen, Maps, Hosting, Mitglieder des eigenen Mandanten |
 | Mandant-Nutzung | Operator/Viewer | Renders auslösen bzw. nur zusehen |
@@ -109,7 +110,7 @@ BlueMap-Version zu verifizieren:
 
 ## 3. Architekturüberblick
 
-```
+```text
   Pterodactyl-API ─┐   Pull:  Backup-Liste abfragen, tar.gz streamen
   S3-Bucket ───────┤   Pull:  Prefix auf neue Objekte prüfen
   Paper-Plugin ────┤   Push:  async + inkrementell in Staging-Prefix
@@ -151,7 +152,7 @@ BlueMap, rechts davon niemand etwas von Pterodactyl, ZIP-Uploads oder Bukkit-Ord
 Alle in einem Gradle-Monorepo `Apus`, mehrmodulig.
 
 | Modul | Sprache/Stack | Zweck |
-|---|---|---|
+| --- | --- | --- |
 | `telemetry-addon` | Java 25, BlueMap-Addon | Exponiert Render-Fortschritt als JSON und Prometheus-Metriken |
 | `ingest` | Java 25 | ETL: Connector-SPI (s3, pterodactyl, push, upload), Layout-Erkennung, Bundle-Writer. Läuft als Job |
 | `runner` | Dockerfile + Entrypoint | BlueMap-CLI + beide Addons + Bundle-Sync |
@@ -176,7 +177,7 @@ lediglich Integrationstests, die den Vertrag mit `ingest` prüfen.
 Ein Bundle ist eine unveränderliche, versionierte Momentaufnahme einer Welt in
 normalisierter Form.
 
-```
+```text
 worlds/<tenant>/<world-id>/<version>/
   manifest.json
   overworld/region/r.0.0.mca …
@@ -229,7 +230,7 @@ interface WorldSourceConnector {
 ```
 
 | Connector | Art | Extract |
-|---|---|---|
+| --- | --- | --- |
 | `pterodactyl` | Pull | Backup-Liste über die Client-API abfragen, ausgewähltes Backup als signierte URL laden, `tar.gz` streamen und nur Welt-Pfade herausschreiben |
 | `s3` | Pull | Bucket-Prefix auf neue Objekte prüfen, Archiv oder Ordnerstruktur laden |
 | `upload` | Push | Presigned Multipart in ein Staging-Prefix, Abschluss meldet die UI |
@@ -243,7 +244,7 @@ selektiv geschrieben. Das gesamte Archiv landet nie auf der Platte.
 Der kritische Teil. Erkannt wird anhand der Verzeichnisstruktur:
 
 | Layout | Erkennungsmerkmal | Abbildung |
-|---|---|---|
+| --- | --- | --- |
 | `vanilla` | `<w>/region`, `<w>/DIM-1/region`, `<w>/DIM1/region` | direkt |
 | `bukkit` | `<w>/region`, `<w>_nether/DIM-1/region`, `<w>_the_end/DIM1/region` | Ordner zusammenführen |
 | `nested` | genau ein Unterordner, darin eines der obigen | Ebene überspringen, erneut prüfen |
@@ -384,7 +385,7 @@ aus §9.1. Verifiziert und ausgeliefert in Phase 1 (`runner/entrypoint.sh`,
 `runner/bin/render-config.sh`):
 
 | Variable | Pflicht | Bedeutung |
-|---|---|---|
+| --- | --- | --- |
 | `APUS_MAP_ID` | ja | Map-Id, z.B. `overworld`. Wird als Pfadsegment verwendet — nur Kleinbuchstaben, Ziffern, `-`, `_` |
 | `APUS_DIMENSION` | ja | `minecraft:overworld`, `minecraft:the_nether`, `minecraft:the_end` |
 | `APUS_MC_VERSION` | ja | z.B. `1.21.10` |
@@ -596,7 +597,7 @@ Aus der CR und den Rook-Werten erzeugt der Operator für den Hosting-Pod die vol
 BlueMap-Konfiguration als ConfigMap (plus Secret für Zugangsdaten):
 
 | Datei | Inhalt |
-|---|---|
+| --- | --- |
 | `core.conf` | Datenverzeichnis, `render-threads`, Metrics deaktiviert, `accept-download: true` (**erforderlich** — ohne diesen Schlüssel lädt BlueMap die Minecraft-Ressourcen nicht und jeder Render schlägt mit Exit-Code 2 fehl), `scan-for-mod-resources: false` |
 | `storages/s3.conf` | Endpoint, Bucket, Path-Style-Zugriff, Credentials — für `BlueMapS3Storage` |
 | `maps/<id>.conf` | Weltpfad aus dem Bundle-Manifest, Dimension, Render-Einstellungen |
@@ -680,7 +681,7 @@ und damit den Namespace.
 Rollen: `platform-admin`, `tenant-owner`, `tenant-operator`, `tenant-viewer`.
 
 | Rolle | Darf |
-|---|---|
+| --- | --- |
 | `platform-admin` | Tenants anlegen/ändern/löschen, Quotas, clusterweite Sicht |
 | `tenant-owner` | alles im eigenen Mandanten inkl. Mitgliederverwaltung |
 | `tenant-operator` | Quellen und Maps pflegen, Renders auslösen |
@@ -703,7 +704,7 @@ Micronaut, REST plus SSE. Die CRs sind die Quelle der Wahrheit; die API hält ke
 Kopie des Zustands, sondern liest über einen Informer-Cache.
 
 | Endpunkt | Zweck |
-|---|---|
+| --- | --- |
 | `GET /api/tenants` … | Plattformebene, nur `platform-admin` |
 | `GET /api/sources`, `POST /api/sources` | Quellen des eigenen Mandanten |
 | `POST /api/maps/{id}/render` | Render auslösen (erzeugt `BlueMapRender`) |
@@ -733,7 +734,7 @@ Karte später eingebettet und gesteuert werden, statt nur verlinkt zu sein. Nich
 ## 12. Fehlerbehandlung
 
 | Fall | Verhalten |
-|---|---|
+| --- | --- |
 | Render-Pod stirbt (OOM, Eviction) | Neuer Pod setzt über den Render-State in S3 fort. Nach `backoffLimit` Phase `Failed`, letzter Fortschritt bleibt sichtbar |
 | Zwei Renders auf dieselbe Map | Durch `concurrencyPolicy: Forbid` verhindert, Lock über CR-Status |
 | Ingest bricht ab | Kein Manifest → Bundle gilt als nicht existent. Kein halber Zustand im Render-Pfad |
@@ -758,7 +759,7 @@ Credentials erscheinen nie in CR-Status, Events oder Logs.
 ### 13.2 Tests
 
 | Baustein | Vorgehen |
-|---|---|
+| --- | --- |
 | `ingest` | Fixture-Archive je Layout (Pterodactyl-`tar.gz`, Bukkit-Split, Vanilla, ZIP mit Unterordner, defektes Archiv) gegen den Layout-Detektor. Reine Unit-Tests, plus MinIO-gestützte Integrationstests je Connector (`s3`, `pterodactyl`, `push`, `upload`) und ein Ende-zu-Ende-Test (`PushIngestEndToEndTest`), der einen kompletten Ingest-Lauf für Push/Upload-Quellen gegen echtes MinIO fährt |
 | `telemetry-addon` | Contract-Test pro BlueMap-Version: Mini-Welt rendern, `/progress` auf plausible Werte prüfen (deckt den Log-Tail-Weg ab, siehe §7.2). **Offen:** Eine CI-Matrix über unterstützte BlueMap-Versionen als Frühwarnsystem existiert nicht — Phase 1 hat im Repository keinerlei CI-Konfiguration angelegt. Bis dahin muss der Contract-Test vor jedem BlueMap-Upgrade manuell laufen |
 | `runner` | Integrationstest gegen S3-Testcontainer mit kleiner Welt, inkl. `IngestRenderContractTest` (Ingest → Bundle → Render Ende-zu-Ende) |
@@ -885,7 +886,7 @@ für die Begründung.
 ## 16. Entscheidungen
 
 | Entscheidung | Begründung |
-|---|---|
+| --- | --- |
 | BlueMap-CLI unverändert statt eigenem Renderer | Geringste Kopplung an BlueMap-Interna; Upgrades sind ein Image-Tag |
 | Addon-API bevorzugt, Log-Tailing als tragender Weg in Phase 1 | Ursprünglich war Log-Parsing verworfen worden (kein Vertrag, Locale-/Formatrisiko). Verifiziert in Task 8 (§7.2): Der CLI konstruiert `BlueMapAPIImpl` unbedingt mit `Plugin = null`, wodurch der dokumentierte Addon-Weg (`plugin().getRenderManager()`) im CLI-Betrieb strukturell nie greift — es gibt dort kein über `BlueMapAPI` erreichbares `RenderManager`-Objekt. Log-Tailing auf `Logger.global` ist im CLI-Betrieb der einzige funktionierende Weg und bleibt hinter derselben `RenderManagerAccess`-Schnittstelle gekapselt; der Addon-Weg bleibt für einen künftigen Server-Plugin-Betrieb der bevorzugte, reichhaltigere Pfad |
 | Ein Addon, keine Aufteilung in Telemetry und Control | Der Operator löst Renders über CRs aus; ein Control-Endpunkt wäre ein zweiter Weg zum selben Ziel |

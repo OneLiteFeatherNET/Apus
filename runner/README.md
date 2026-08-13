@@ -67,7 +67,7 @@ Kubernetes operator will drive (see `docs/superpowers/specs/2026-08-08-apus-desi
 §7.4).
 
 | Variable | Required | Default | Meaning |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `APUS_MAP_ID` | yes | — | Map id, e.g. `overworld`. Used as a path segment (`maps/<id>.conf`); must match `^[a-z0-9_-]+$`, `render-config.sh` rejects anything else with exit code `5` |
 | `APUS_DIMENSION` | yes | — | `minecraft:overworld`, `minecraft:the_nether`, `minecraft:the_end` |
 | `APUS_MC_VERSION` | yes | — | Minecraft version, e.g. `1.21.10` |
@@ -123,7 +123,7 @@ registers itself on BlueMap's own `Logger.global`
 (`de.bluecolored.bluemap.core.logger.Logger`/`MultiLogger`) and parses the exact
 progress line BlueMap's CLI already logs on its own during a render:
 
-```
+```text
 updating map 'overworld': 35.208% (ETA: 38 seconds)
 ```
 

@@ -14,7 +14,7 @@
 - **Wiederverwendbare Workflows werden auf den vollen SemVer-Tag gepinnt** — `@v2.4.0`, niemals `@main` und niemals `@v2`.
 - **Kein `clean` in Gradle-Tasks der CI** — das entwertet den `setup-gradle`-Cache.
 - **Der Versionsmarker lebt in `build.gradle.kts`, nicht in `gradle.properties`.** Aktuell steht `version = 999.0.0` in `gradle.properties`; dieser Eintrag wird ersatzlos entfernt.
-- **Dockerfiles bauen aus dem Repository-Root als Kontext** und kopieren mit modulqualifiziertem Pfad (`COPY operator/... `), genau wie `runner/Dockerfile` und `ingest/Dockerfile` es tun.
+- **Dockerfiles bauen aus dem Repository-Root als Kontext** und kopieren mit modulqualifiziertem Pfad (`COPY operator/...`), genau wie `runner/Dockerfile` und `ingest/Dockerfile` es tun.
 - **Non-root in jedem Image:** Benutzer `apus`, uid 10001, Arbeitsverzeichnis unterhalb `/work` bzw. `/app`.
 - **Jar-Dateinamen sind fest** (kein Glob im `COPY`), Konvention wie `ingest`: `archiveFileName.set("apus-<modul>.jar")`.
 - **AGPL-Lizenzheader** über jede neue Java-Datei — Spotless erzwingt das via `.spotless/Copyright.java`.
@@ -40,6 +40,7 @@ oder in Task 2 stattdessen ein bestehendes Team einzusetzen — `infrastructure-
 Das Repository hat keinen Einstiegspunkt. Modul-READMEs existieren für `runner`, `hosting`, `ingest`, `ui` und `testdata`, aber wer das Repository öffnet, findet keine Orientierung.
 
 **Files:**
+
 - Create: `README.md`
 
 - [ ] **Schritt 1: README schreiben**
@@ -112,9 +113,11 @@ git commit -m "docs: add a root README with module overview and build instructio
 ### Task 2: Renovate
 
 **Files:**
+
 - Create: `renovate.json`
 
 **Interfaces:**
+
 - Produces: Die Datei, über die Renovate ab jetzt auch die Workflow-Pins aus Task 4/5/9 aktualisiert.
 
 - [ ] **Schritt 1: `renovate.json` anlegen**
@@ -157,6 +160,7 @@ git commit -m "ci: adopt the central OneLiteFeather Renovate preset"
 `gradle.properties` trägt heute `version = 999.0.0` — ein Platzhalter ohne Automatik dahinter. Release Please verlangt den Marker im jeweiligen `build.gradle.kts`. Apus bekommt drei Release-Spuren: das Gesamtprojekt (dessen Version die Container-Images tragen), `telemetry-addon` und `paper-worldpush`.
 
 **Files:**
+
 - Modify: `gradle.properties` (Zeile `version = 999.0.0` entfernen)
 - Modify: `build.gradle.kts` (Versionsmarker und Weitergabe an Subprojekte)
 - Modify: `telemetry-addon/build.gradle.kts` (eigener Marker)
@@ -167,6 +171,7 @@ git commit -m "ci: adopt the central OneLiteFeather Renovate preset"
 - Create: `.github/workflows/release-please.yml`
 
 **Interfaces:**
+
 - Produces: Die Workflow-Outputs `.--release_created`, `.--version`, `telemetry-addon--release_created`, `paper-worldpush--release_created`. Task 9 und Task 10 hängen sich daran.
 
 - [ ] **Schritt 1: Aktuellen Zustand festhalten**
@@ -328,6 +333,7 @@ git commit -m "chore: manage versions and changelogs with release-please"
 ### Task 4: PR-Build
 
 **Files:**
+
 - Create: `.github/workflows/build-pr.yml`
 
 - [ ] **Schritt 1: Workflow anlegen**
@@ -409,6 +415,7 @@ git commit -m "ci: build and test Gradle modules and the UI on pull requests"
 Das Repository trägt ungewöhnlich viel Dokumentation (Design-Spec, Pläne, Spike-Berichte, sechs READMEs) mit vielen Querverweisen. Kaputte Links fallen sonst niemandem auf.
 
 **Files:**
+
 - Create: `.github/workflows/markdown-lint.yml`
 - Create: `.github/workflows/close-invalid-prs.yml`
 - Create: `.markdownlint-cli2.jsonc`
@@ -483,11 +490,13 @@ git commit -m "ci: lint markdown and close pull requests from fork default branc
 ### Task 6: Container-Image für den Operator
 
 **Files:**
+
 - Create: `operator/Dockerfile`
 - Modify: `operator/build.gradle.kts` (Shadow-Plugin und fester Jar-Name)
 - Modify: `settings.gradle.kts` — nur falls `shadow` im Katalog fehlt; er ist bereits als `version("shadow", "9.3.2")` vorhanden, dann entfällt die Änderung
 
 **Interfaces:**
+
 - Consumes: `application { mainClass.set("net.onelitefeather.apus.operator.ApusOperator") }`, bereits vorhanden in `operator/build.gradle.kts:124`.
 - Produces: `operator/build/libs/apus-operator.jar`, das der Dockerfile per festem Namen kopiert.
 
@@ -569,10 +578,12 @@ git commit -m "feat: package the operator as a container image"
 ### Task 7: Container-Image für die API
 
 **Files:**
+
 - Create: `api/Dockerfile`
 - Modify: `api/build.gradle.kts` (Shadow-Plugin und fester Jar-Name)
 
 **Interfaces:**
+
 - Consumes: `application { mainClass.set("net.onelitefeather.apus.api.Application") }`, vorhanden in `api/build.gradle.kts:113`.
 - Produces: `api/build/libs/apus-api.jar`.
 
@@ -654,6 +665,7 @@ git commit -m "feat: package the API as a container image"
 Die UI läuft laut Design-Spec §11.2 als SPA (`ssr: false`). Ein statisches Build-Ergebnis, ausgeliefert von nginx, ist damit die passende Form — kein Node-Prozess im Cluster.
 
 **Files:**
+
 - Create: `ui/Dockerfile`
 - Create: `ui/nginx.conf`
 
@@ -748,9 +760,11 @@ git commit -m "feat: package the dashboard as a static nginx container image"
 Sechs Images: `runner`, `ingest`, `hosting`, `operator`, `api`, `ui`. Die ersten drei haben ihre Dockerfiles bereits, die letzten drei kommen aus Task 6–8.
 
 **Files:**
+
 - Modify: `.github/workflows/release-please.yml` (Publish-Jobs anhängen)
 
 **Interfaces:**
+
 - Consumes: `needs.release-please.outputs.root-released` und `root-version` aus Task 3.
 
 - [ ] **Schritt 1: Gradle-Job für die Jar-Artefakte ergänzen**
@@ -885,6 +899,7 @@ git commit -m "ci: publish all six container images on release"
 `telemetry-addon` konsumieren BlueMap-Nutzer, `paper-worldpush` Server-Betreiber. Beide sind ohne Publishing nicht erreichbar.
 
 **Files:**
+
 - Modify: `telemetry-addon/build.gradle.kts`
 - Modify: `paper-worldpush/build.gradle.kts`
 - Modify: `.github/workflows/release-please.yml`
@@ -979,6 +994,7 @@ git commit -m "feat: publish telemetry-addon and paper-worldpush to the OneLiteF
 Die Spec führt in §13.2 „Phase 1 hat im Repository keinerlei CI-Konfiguration angelegt" als offenen Punkt. Nach diesem Plan stimmt das nicht mehr.
 
 **Files:**
+
 - Modify: `docs/superpowers/specs/2026-08-08-apus-design.md`
 
 - [ ] **Schritt 1: §13.2, Zeile zum `telemetry-addon`, umschreiben**

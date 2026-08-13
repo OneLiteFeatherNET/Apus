@@ -23,12 +23,14 @@
 **Offener Punkt §15.7.** `BlueMapRenderReconciler` erkennt ein erschöpftes Speicherkontingent heute daran, dass die Terminierungsmeldung des Pods bestimmte Zeichenketten enthält (`UNAMBIGUOUS_QUOTA_TOKENS`, plus „quota" in Verbindung mit `bucket`/`rgw`/`ceph`). Das Kubelet-Vokabular enthält „quota" nie, und die Meldung ist ein Log-Ausschnitt ohne Vertrag.
 
 **Files:**
+
 - Modify: `runner/entrypoint.sh`
 - Modify: `runner/README.md` (Exit-Code-Tabelle)
 - Modify: `operator/src/main/java/net/onelitefeather/apus/operator/render/BlueMapRenderReconciler.java`
 - Modify: `operator/src/test/java/net/onelitefeather/apus/operator/render/BlueMapRenderReconcilerTest.java`
 
 **Interfaces:**
+
 - Produces: Exit-Code `6` des Runner-Containers als Vertrag „Speicherkontingent erschöpft". Die bestehende `quotaExceededMessage(Pod)`-Heuristik bleibt als Fallback erhalten, wird aber nachrangig.
 
 - [ ] **Schritt 1: Feststellen, wo der Quota-Fehler tatsächlich auftritt**
@@ -143,7 +145,7 @@ Expected: `exit=6`
 - [ ] **Schritt 8: `runner/README.md` um die Exit-Code-Tabelle ergänzen**
 
 | Code | Bedeutung | Wiederholbar |
-|---|---|---|
+| --- | --- | --- |
 | 0 | Render erfolgreich | — |
 | 1 | Allgemeiner Fehler | ja |
 | 3 | Bundle-Sync fehlgeschlagen | ja |
@@ -165,11 +167,13 @@ git commit -m "feat: give the runner a dedicated exit code for exhausted storage
 **Offener Punkt §15.9.** `FabricPushTokenRepository#resolveNamespace` sucht per Label über alle Namespaces. RBAC kann einen Label-Filter nicht einschränken, also braucht die API heute `get`/`list` auf **alle** Secrets im Cluster. Der Klassen-Javadoc skizziert den schmaleren Weg bereits — er wurde nur nicht umgesetzt.
 
 **Files:**
+
 - Modify: `api/src/main/java/net/onelitefeather/apus/api/rest/push/FabricPushTokenRepository.java`
 - Modify: `api/src/test/java/net/onelitefeather/apus/api/rest/push/FabricPushTokenRepositoryTest.java`
 - Modify: `deploy/base/api-rbac.yaml` (aus Phase 8, Task 3)
 
 **Interfaces:**
+
 - Consumes: `PushTokenSecrets.SECRET_NAME` (fester Name), `TenantRepository` (listet die cluster-scoped `Tenant`-Ressourcen), `TenantReconciler.namespaceFor(...)` (Namespace-Konvention).
 - Produces: unverändert `Optional<String> resolveNamespace(String rawToken)` — die Signatur bleibt, nur der Weg dahinter ändert sich.
 
@@ -325,6 +329,7 @@ git commit -m "fix: read only the fixed-name push token secret instead of listin
 **Offene Punkte §0 und §15.3.** Die API validiert JWTs gegen einen konfigurierbaren Issuer, aber welches Produkt davor steht, ist nicht entschieden, und ein Lauf gegen einen echten Broker hat nie stattgefunden — die Auth-Tests arbeiten mit selbst ausgestellten Test-JWTs.
 
 **Files:**
+
 - Create: `docs/superpowers/specs/2026-08-12-identity-broker-entscheidung.md`
 - Modify: `settings.gradle.kts` (Keycloak-Testcontainer)
 - Modify: `api/build.gradle.kts`
@@ -511,6 +516,7 @@ Expected: BUILD SUCCESSFUL
 §0 und §15 Punkt 3: Produktwahl eintragen, den Verweis auf „nie gegen einen echten Broker getestet" streichen und durch den Test verweisen.
 
 §10.3 um drei Angaben ergänzen, die dort heute fehlen und ohne die niemand einen zweiten Mandanten anlegen kann:
+
 1. Der konkrete Claim-Name, aus dem der Mandant abgeleitet wird, und die Form, in der die Rollen im Token stehen.
 2. Dass die Rollenstruktur für beide Anmeldewege identisch ist — föderierter IdP des Mandanten und lokale Accounts im Broker — samt der Modellierung, die das erreicht (nativ organisationsgebundene Rollen oder die Gruppen-Behelfslösung aus Schritt 5).
 3. Dass Rollen **niemals** aus einem föderierten Token übernommen werden, sondern ausschließlich im Apus-Broker vergeben werden. Das ist keine Feinheit, sondern die Grenze, ab der ein Mandant sich sonst selbst zum `platform-admin` erklären könnte.
@@ -529,6 +535,7 @@ git commit -m "feat: verify the auth path against a real identity broker"
 **Offener Punkt §15.8.** `BukkitSaveCoordinator` pausiert das Autosave und erzwingt einen Save, bevor kopiert wird. Ob das kurze Fenster auf einem laufenden Server einen konsistenten Snapshot liefert, wurde nie geprüft — es existiert nur Unit-Abdeckung für Kopierlogik, Konfiguration und den HTTP-Report-Weg.
 
 **Files:**
+
 - Modify: `settings.gradle.kts` (MockBukkit)
 - Modify: `paper-worldpush/build.gradle.kts`
 - Create: `paper-worldpush/src/test/java/net/onelitefeather/apus/paper/BukkitSaveCoordinatorTest.java`
@@ -676,6 +683,7 @@ git commit -m "test: cover the paper-worldpush save window with MockBukkit"
 **Offener Punkt §15.6.** „`emptyDir` genügt bis zu einer Größe, die von der Node-Ausstattung abhängt; darüber ist ein PVC nötig." Die Grenze wurde nie gemessen, obwohl sie laut Spec vor Phase 2 nachzuholen war — und der Operator legt heute trotzdem einen Default fest.
 
 **Files:**
+
 - Create: `docs/superpowers/spikes/2026-08-12-emptydir-grenze.md`
 - Create: `docs/superpowers/spikes/2026-08-12-emptydir-grenze/run-spike.sh`
 - Modify: `operator/src/main/java/net/onelitefeather/apus/operator/render/RenderJobBuilder.java`
@@ -690,6 +698,7 @@ Expected: der aktuell erzeugte Volume-Typ und, falls vorhanden, ein `sizeLimit`.
 - [ ] **Schritt 2: Messskript schreiben**
 
 `run-spike.sh` im Stil des vorhandenen Sharding-Spikes (`docs/superpowers/spikes/2026-08-09-lowres-sharding-spike/run-spike.sh` als Vorlage lesen). Es fährt gegen einen Cluster:
+
 1. Node-Ausstattung erheben: `kubectl get nodes -o json | jq '.items[].status.allocatable["ephemeral-storage"]'`.
 2. Render-Jobs mit `emptyDir` und wachsenden Welt-Größen starten (1, 5, 10, 20, 40 GiB Bundle).
 3. Je Lauf festhalten: Erfolg/Misserfolg, Grund bei Misserfolg (`Evicted` mit `ephemeral-storage`-Bezug ist der gesuchte Fall), Spitzenverbrauch über `kubectl top pod`.
@@ -766,7 +775,7 @@ git commit -m "feat: pick the render volume type from a measured limit instead o
 ## Reihenfolge und Abhängigkeiten
 
 | Task | Blockiert von | Kann parallel zu |
-|---|---|---|
+| --- | --- | --- |
 | 1 — Quota-Exit-Code | — | 2, 3, 4, 5 |
 | 2 — Push-Token-RBAC | Phase 8 Task 3 (die Datei, die verengt wird) | 1, 3, 4, 5 |
 | 3 — Identity-Broker | — (die Produktentscheidung in Schritt 1 ist der einzige Blocker) | 1, 2, 4, 5 |

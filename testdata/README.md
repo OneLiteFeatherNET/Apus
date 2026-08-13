@@ -16,7 +16,7 @@ Regenerate the original two-region set with the snippet in
 
 ### Region layout
 
-```
+```text
             region x=-1        region x=0
 region z=0   r.-1.0.mca          r.0.0.mca
 region z=1   r.-1.1.mca          r.0.1.mca

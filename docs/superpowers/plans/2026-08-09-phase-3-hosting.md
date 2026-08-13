@@ -35,7 +35,7 @@ Aus `Kubernetes-FLUX`: Es gibt zwei IngressClasses (`nginx` und `cloudflare-tunn
 
 ## File Structure
 
-```
+```text
 hosting/                                  neues Modul: Container-Image
 ├── Dockerfile
 ├── entrypoint.sh
@@ -54,13 +54,14 @@ operator/src/main/java/net/onelitefeather/apus/operator/
 ## Parallelisierung
 
 | Gruppe | Aufgaben | Ausführung |
-|---|---|---|
+| --- | --- | --- |
 | A | Task 1 — CRD und Konfigurationserzeugung | sequenziell |
 | B | Task 2, Task 3 | **parallel**, je eigener Worktree |
 | C | Task 4 — Reconciler | sequenziell |
 | D | Task 5 — Integrationstest | sequenziell |
 
 **Dateien der parallelen Gruppe** (disjunkt):
+
 - Task 2: alles unter `hosting/`
 - Task 3: `operator/.../hosting/HostingResourceBuilder.java` + Test
 
@@ -69,6 +70,7 @@ operator/src/main/java/net/onelitefeather/apus/operator/
 ### Task 1: `BlueMapHosting` und die Konfiguration für mehrere Karten
 
 **Files:**
+
 - Create: `operator/src/main/java/.../api/BlueMapHosting.java`, `BlueMapHostingSpec.java`, `BlueMapHostingStatus.java`
 - Modify: `operator/src/main/java/.../map/BlueMapConfigBuilder.java`
 - Test: `operator/src/test/java/.../api/HostingResourceTest.java`
@@ -175,7 +177,7 @@ Analog zu `runner/`, aber im Webserver-Modus. Der Container läuft **dauerhaft**
 **Umgebungsvariablen-Vertrag:**
 
 | Variable | Pflicht | Bedeutung |
-|---|---|---|
+| --- | --- | --- |
 | `APUS_S3_ENDPOINT` | ja | S3-Endpunkt |
 | `APUS_S3_ACCESS_KEY` | ja | Zugangsschlüssel |
 | `APUS_S3_SECRET_KEY` | ja | Geheimer Schlüssel |
@@ -185,6 +187,7 @@ Analog zu `runner/`, aber im Webserver-Modus. Der Container läuft **dauerhaft**
 Die Karten- und Storage-Konfiguration kommt hier **als gemountete ConfigMap** — anders als beim Render, wo Umgebungsvariablen genügen. Der Entrypoint ergänzt nur die Zugangsdaten in den Storage-Dateien, die der Operator ohne sie erzeugt hat. Achte darauf: Eine gemountete ConfigMap ist schreibgeschützt, der Entrypoint muss also in ein beschreibbares Verzeichnis kopieren, bevor er ergänzt.
 
 **Betriebsrelevant:**
+
 - Eine Bereitschaftsprüfung muss möglich sein. Prüfe, welchen Pfad BlueMaps Webserver ausliefert, und dokumentiere ihn — der Reconciler in Task 4 braucht ihn für die Probes.
 - `exec` für den Hauptprozess, damit `SIGTERM` ankommt.
 - Nicht-root.
@@ -210,6 +213,7 @@ public final class HostingResourceBuilder {
 ```
 
 **Tests, die zählen:**
+
 - Alle erzeugten Ressourcen tragen die gemeinsamen `Labels` und eine `ownerReference` auf die `BlueMapHosting`, damit Kubernetes sie aufräumt.
 - Zugangsdaten kommen über `secretKeyRef`, niemals als Klartext im Manifest.
 - Der Ingress verweist auf den Service, der Service auf die Pods, und der Ingress trägt den Hostnamen aus der Spec.
@@ -226,6 +230,7 @@ public final class HostingResourceBuilder {
 Erzeugt aus einer `BlueMapHosting`: ConfigMap (über `BlueMapConfigBuilder.buildForHosting`), Deployment, Service, Ingress, optional Certificate. Trägt die URL in den Status ein, sobald der Ingress bereit ist.
 
 **Bindend:**
+
 - Eigentümerprüfung über Name und UID vor jedem Schreibvorgang.
 - Die referenzierten Karten müssen im selben Namespace liegen und einen gebundenen Bucket im Status haben. Fehlt eine, entsteht kein Deployment, sondern eine sprechende Condition — ein Webserver, der auf einen leeren Bucket zeigt, liefert eine kaputte Seite aus.
 - `client.supports(Certificate.class)` prüfen, bevor cert-manager-Ressourcen angefasst werden.

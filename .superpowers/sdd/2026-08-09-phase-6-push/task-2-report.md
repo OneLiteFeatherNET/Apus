@@ -83,7 +83,7 @@ The one endpoint in the module that is **not** JWT-authenticated
 ## Which upload restrictions are actually enforced — the honest answer
 
 | Restriction | Status | How it was verified |
-|---|---|---|
+| --- | --- | --- |
 | **Confined to the caller's own tenant prefix** | **Enforced, structurally.** | `stagingKey` is a pure function of a server-derived namespace; unit-tested with adversarial input. S3 has no `..`-traversal semantics, so there is no string a caller can supply that escapes the prefix. |
 | **A presigned part URL can't be redirected to a different key** | **Enforced, confirmed against real MinIO.** | `MultipartUploadServiceIntegrationTest.aPresignedPartUrlCannotBeRedirectedToADifferentTenantsKey` swaps the tenant segment in a legitimate presigned URL and gets HTTP 403 from MinIO — SigV4 signs the exact key. |
 | **A part can't carry more bytes than it was sized for** | **Enforced, confirmed against real MinIO (2026-08-09).** | `Content-Length` is set on each presigned `UploadPartRequest`; AWS SDK v2 includes it among that URL's signed headers. Sending more bytes than declared gets HTTP 403 `SignatureDoesNotMatch` from MinIO before the extra bytes are accepted — I drove a real oversized `PUT` against a real MinIO instance rather than trusting SDK documentation (which does not state this explicitly). **Caveat**: verified against MinIO specifically, not independently re-verified against Ceph RGW (the actual production backend per design spec §9.1). Both implement SigV4 presigned-URL validation the same way, so I expect the same result, but that is an inference from one data point, not a second measurement. |

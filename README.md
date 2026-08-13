@@ -11,7 +11,7 @@ Das vollständige Design steht in
 ## Module
 
 | Modul | Zweck | Auslieferung |
-|---|---|---|
+| --- | --- | --- |
 | `telemetry-addon` | BlueMap-Addon, exponiert Render-Fortschritt als JSON und Prometheus-Metriken | Maven |
 | `ingest` | ETL: Connectoren (s3, pterodactyl, push, upload), Layout-Erkennung, Bundle-Writer | Container-Image |
 | `runner` | BlueMap-CLI plus beide Addons, rendert eine Welt aus S3 nach S3 | Container-Image |

@@ -1,0 +1,18 @@
+{
+  "config": {
+    // The design spec and the plans use long prose lines; wrapping them would make
+    // diffs unreadable.
+    "MD013": false,
+    // Release Please writes the changelog; its heading structure is not ours to police.
+    "MD024": { "siblings_only": true },
+    // SDD task briefs and reports under .superpowers/sdd/ are excerpts of a larger phase
+    // plan and intentionally start at the same heading level (###) they have there;
+    // requiring a top-level H1 would misrepresent their place in that hierarchy.
+    "MD041": false
+  },
+  "ignores": [
+    "**/node_modules/**",
+    "**/build/**",
+    "CHANGELOG.md"
+  ]
+}

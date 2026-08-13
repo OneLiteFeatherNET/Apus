@@ -1,0 +1,12 @@
+name: markdown-lint
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '**/*.md'
+
+jobs:
+  lint:
+    uses: OneLiteFeatherNET/workflows/.github/workflows/markdown-lint.yml@v2.4.0
+    secrets: inherit

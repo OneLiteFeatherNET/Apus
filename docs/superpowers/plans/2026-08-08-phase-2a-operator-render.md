@@ -83,7 +83,7 @@ Für beide CRDs gibt es keine fertigen Java-Modelle. Wir definieren schlanke eig
 
 ## File Structure
 
-```
+```text
 operator/
 ├── build.gradle.kts                      JOSDK, CRD-Generierung, Micronaut
 └── src/
@@ -122,7 +122,7 @@ Logik, die sie nutzt, in derselben Aufgabe stecken, hängt alles an allem — si
 vorgezogen, berühren die drei Folgeaufgaben komplett getrennte Dateien.
 
 | Gruppe | Aufgaben | Ausführung |
-|---|---|---|
+| --- | --- | --- |
 | A | Task 1 — Modul und CRD-Generierung | sequenziell (Fundament) |
 | B | Task 2 — vollständiges Datenmodell | sequenziell (alle bauen darauf) |
 | C | Task 3, Task 4, Task 5 | **parallel**, je eigener Worktree |
@@ -136,6 +136,7 @@ müssten beide gegen Schnittstellen programmieren, die sich noch ändern — die
 fräße den Zeitgewinn wieder auf.
 
 **Dateien der parallelen Gruppe C** (nachweislich disjunkt):
+
 - Task 3: `tenant/TenantReconciler.java` + zugehöriger Test
 - Task 4: `map/BucketProvisioner.java`, `map/BlueMapConfigBuilder.java` + Tests
 - Task 5: `render/RenderJobBuilder.java` + Test
@@ -147,6 +148,7 @@ Keine der drei Aufgaben ändert eine Datei einer anderen oder die Build-Dateien.
 ### Task 1: Operator-Modul und CRD-Generierung
 
 **Files:**
+
 - Modify: `settings.gradle.kts` (Modul `operator` und neue Katalog-Einträge)
 - Create: `operator/build.gradle.kts`
 - Create: `operator/src/main/java/net/onelitefeather/apus/operator/api/Tenant.java` (Minimalfassung, damit es etwas zu generieren gibt)
@@ -155,6 +157,7 @@ Keine der drei Aufgaben ändert eine Datei einer anderen oder die Build-Dateien.
 - Test: `operator/src/test/java/net/onelitefeather/apus/operator/CrdGenerationTest.java`
 
 **Interfaces:**
+
 - Consumes: nichts
 - Produces: Katalog-Aliase `libs.josdk`, `libs.josdk.junit`, `libs.crd.generator.api.v2`, `libs.crd.generator.collector`, `libs.fabric8.junit`; Gradle-Task `generateCrds`, die YAML nach `operator/build/crds/` schreibt; die Klasse `net.onelitefeather.apus.operator.api.Tenant`
 
@@ -363,10 +366,12 @@ application {
 ```
 
 > **Zu verifizieren in Step 5:** Der Hauptklassenname des Generator-CLI (`io.fabric8.crdv2.generator.cli.CRDGeneratorCLI`) und seine Argumentnamen stammen aus der Recherche, nicht aus einer Ausführung. Stimmt der Aufruf nicht, ermittle die echte Einstiegsklasse aus dem Jar und korrigiere Plan und Build:
+>
 > ```bash
 > ./gradlew :operator:dependencies --configuration crdGenerator | grep crd-generator
 > unzip -l ~/.gradle/caches/modules-2/files-2.1/io.fabric8/crd-generator-api-v2/7.8.0/*/crd-generator-api-v2-7.8.0.jar | grep -iE "cli|Main"
 > ```
+>
 > Alternativ funktioniert immer der programmatische Weg: eine kleine Java-Klasse im `buildSrc` oder eine `JavaExec`-Task auf eine eigene Generator-Hauptklasse, die `new CRDGenerator().customResourceClasses(...).inOutputDir(dir).detailedGenerate()` aufruft. Wähle den Weg, der real funktioniert, und dokumentiere ihn.
 
 - [ ] **Step 4: Den fehlschlagenden Test schreiben**
@@ -486,6 +491,7 @@ Alle Klassen hier sind reine Datenhalter ohne Kubernetes-Zugriff und ohne Logik.
 zugleich die Schnittstelle, die Phase 5 (API und UI) später wiederverwendet.
 
 **Files:**
+
 - Create: `operator/src/main/java/net/onelitefeather/apus/operator/rook/ObjectBucketClaim.java`
 - Create: `operator/src/main/java/net/onelitefeather/apus/operator/rook/ObjectBucketClaimSpec.java`
 - Create: `operator/src/main/java/net/onelitefeather/apus/operator/rook/ObjectBucketClaimStatus.java`
@@ -503,8 +509,10 @@ zugleich die Schnittstelle, die Phase 5 (API und UI) später wiederverwendet.
 - Modify: `operator/src/test/java/net/onelitefeather/apus/operator/CrdGenerationTest.java` (Zusicherungen für die beiden neuen CRDs)
 
 **Interfaces:**
+
 - Consumes: `Tenant` und die CRD-Generierung aus Task 1
 - Produces:
+
 ```java
 // Beide sind namespaced.
 ObjectBucketClaim:  spec.bucketName, spec.storageClassName,
@@ -978,12 +986,15 @@ git commit -m "feat(operator): add the full apus and rook data model"
 > lege sie nicht erneut an und ändere sie nicht.
 
 **Files:**
+
 - Create: `operator/src/main/java/net/onelitefeather/apus/operator/tenant/TenantReconciler.java`
 - Test: `operator/src/test/java/net/onelitefeather/apus/operator/tenant/TenantReconcilerTest.java`
 
 **Interfaces:**
+
 - Consumes (alle aus Task 2 bzw. 1, unverändert zu benutzen): `Tenant`, `TenantSpec`, `TenantStatus`, `CephObjectStoreUser`, `Conditions.ready(...)`, `Conditions.set(...)`, `OperatorConfig.defaults()`
 - Produces:
+
 ```java
 @ControllerConfiguration
 public class TenantReconciler implements Reconciler<Tenant> {
@@ -992,6 +1003,7 @@ public class TenantReconciler implements Reconciler<Tenant> {
     public static String cephUserFor(Tenant tenant);    // "apus-<name>"
 }
 ```
+
 Der Reconciler erzeugt aus einem `Tenant`: Namespace `bluemap-<name>`, `ResourceQuota`, `LimitRange` und einen `CephObjectStoreUser` mit der Quota.
 
 - [ ] **Step 1: Den fehlschlagenden Test schreiben**
@@ -1294,14 +1306,17 @@ git commit -m "feat(operator): reconcile tenants into namespaces with quotas"
 > Berühre keine Datei aus Task 3 (`tenant/`) oder Task 5 (`render/`).
 
 **Files:**
+
 - Create: `operator/src/main/java/net/onelitefeather/apus/operator/map/BucketProvisioner.java`
 - Create: `operator/src/main/java/net/onelitefeather/apus/operator/map/BlueMapConfigBuilder.java`
 - Test: `operator/src/test/java/net/onelitefeather/apus/operator/map/BlueMapConfigBuilderTest.java`
 - Test: `operator/src/test/java/net/onelitefeather/apus/operator/map/BucketProvisionerTest.java`
 
 **Interfaces:**
+
 - Consumes: `ObjectBucketClaim` (Task 2), `OperatorConfig` (Task 3)
 - Produces:
+
 ```java
 BlueMapMapSpec:  source{sourceRef,world,dimension}, trigger{onNewBundle,schedule,concurrencyPolicy},
                  bluemap{version,configOverrides}, storage{bucketClaim,prefix},
@@ -1619,12 +1634,15 @@ git commit -m "feat(operator): provision map buckets through rook and build blue
 > befüllt; für deinen Test setzt du die Werte selbst.
 
 **Files:**
+
 - Create: `operator/src/main/java/net/onelitefeather/apus/operator/render/RenderJobBuilder.java`
 - Test: `operator/src/test/java/net/onelitefeather/apus/operator/render/RenderJobBuilderTest.java`
 
 **Interfaces:**
+
 - Consumes (alle aus Task 2, unverändert): `BlueMapMap`, `BlueMapRender`, `OperatorConfig`
 - Produces:
+
 ```java
 public final class RenderJobBuilder {
     public static Job build(BlueMapRender render, BlueMapMap map,
@@ -1757,14 +1775,17 @@ git commit -m "feat(operator): build render jobs against the phase 1 env contrac
 ### Task 6: Render-Reconciler mit Fortschritt und Nebenläufigkeitssperre
 
 **Files:**
+
 - Create: `operator/src/main/java/net/onelitefeather/apus/operator/render/BlueMapRenderReconciler.java`
 - Create: `operator/src/main/java/net/onelitefeather/apus/operator/render/ProgressPoller.java`
 - Test: `operator/src/test/java/net/onelitefeather/apus/operator/render/ProgressPollerTest.java`
 - Test: `operator/src/test/java/net/onelitefeather/apus/operator/render/BlueMapRenderReconcilerTest.java`
 
 **Interfaces:**
+
 - Consumes: `RenderJobBuilder` (Task 5), `BlueMapMap` (Task 4)
 - Produces:
+
 ```java
 public final class ProgressPoller {
     /** Parses the /progress payload the telemetry addon serves. */
@@ -1775,6 +1796,7 @@ public final class ProgressPoller {
 ```
 
 Zwei Verhaltensweisen sind hier entscheidend und in der Spec begründet:
+
 - **`concurrencyPolicy: Forbid` ist Default** (§7.3): Zwei gleichzeitige Renders auf denselben Map-Storage können die Karte inkonsistent hinterlassen. Der Reconciler startet keinen Job, solange ein anderer `BlueMapRender` derselben Map in einer aktiven Phase steht.
 - **Ein überschrittenes Speicherlimit wird nicht wiederholt** (§12): Die Condition `StorageQuotaExceeded` beendet den Render endgültig, statt endlos gegen die Wand zu laufen.
 
@@ -1919,10 +1941,12 @@ git commit -m "feat(operator): reconcile renders with progress and a concurrency
 ### Task 7: Operator-Einstiegspunkt
 
 **Files:**
+
 - Create: `operator/src/main/java/net/onelitefeather/apus/operator/ApusOperator.java`
 - Test: `operator/src/test/java/net/onelitefeather/apus/operator/ApusOperatorTest.java`
 
 **Interfaces:**
+
 - Consumes: alle Reconciler
 - Produces: ausführbare Hauptklasse; `OperatorConfig` aus Umgebungsvariablen
 
@@ -1985,6 +2009,7 @@ git commit -m "feat(operator): add the operator entrypoint"
 ### Task 8: Integrationstest gegen einen echten Cluster
 
 **Files:**
+
 - Create: `operator/src/test/java/net/onelitefeather/apus/operator/OperatorIntegrationTest.java`
 - Modify: `operator/build.gradle.kts` (eigene `integrationTest`-Task, wie im `runner`-Modul)
 

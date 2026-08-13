@@ -34,7 +34,7 @@
 
 ## File Structure
 
-```
+```text
 ingest/                                   neues Modul, Container-Image analog zu runner/
 ├── build.gradle.kts
 ├── Dockerfile
@@ -71,7 +71,7 @@ operator/src/main/java/net/onelitefeather/apus/operator/
 Dasselbe Muster wie in Phase 2a: Datenmodell zuerst, dann berühren die Folgeaufgaben getrennte Dateien.
 
 | Gruppe | Aufgaben | Ausführung |
-|---|---|---|
+| --- | --- | --- |
 | A | Task 1 — Modul und Datenmodell | sequenziell |
 | B | Task 2, Task 3, Task 4 | **parallel**, je eigener Worktree |
 | C | Task 5 — Ingest-Einstiegspunkt und Image | sequenziell |
@@ -79,6 +79,7 @@ Dasselbe Muster wie in Phase 2a: Datenmodell zuerst, dann berühren die Folgeauf
 | E | Task 7 — Integrationstest | sequenziell |
 
 **Dateien der parallelen Gruppe** (disjunkt):
+
 - Task 2: `LayoutDetector.java`, `WorldLayout.java` + Tests
 - Task 3: `BundleManifest.java`, `BundleWriter.java`, `S3Client.java` + Tests
 - Task 4: `connector/*` + Tests
@@ -88,6 +89,7 @@ Dasselbe Muster wie in Phase 2a: Datenmodell zuerst, dann berühren die Folgeauf
 ### Task 1: Modul, CRDs und gemeinsames Datenmodell
 
 **Files:**
+
 - Modify: `settings.gradle.kts` (Modul `ingest`, Katalog-Einträge für den S3-Client)
 - Create: `ingest/build.gradle.kts`
 - Create: `operator/src/main/java/.../api/WorldSource.java`, `WorldSourceSpec.java`, `WorldSourceStatus.java`
@@ -197,12 +199,13 @@ git commit -m "feat(ingest): add world source and ingest custom resources"
 **Das ist der inhaltliche Kern des ETL-Layers.** Die Quellen liefern unterschiedliche Verzeichnisstrukturen; BlueMap braucht pro Karte einen definierten Pfad zur richtigen Dimension.
 
 | Layout | Erkennungsmerkmal | Abbildung |
-|---|---|---|
+| --- | --- | --- |
 | `vanilla` | `<w>/region`, `<w>/DIM-1/region`, `<w>/DIM1/region` | direkt |
 | `bukkit` | `<w>/region`, `<w>_nether/DIM-1/region`, `<w>_the_end/DIM1/region` | Ordner zusammenführen |
 | `nested` | genau ein Unterverzeichnis, darin eines der obigen | Ebene überspringen, erneut prüfen |
 
 **Interfaces:**
+
 ```java
 public record WorldLayout(String kind, Map<String, Path> dimensions) {}
 // kind: "vanilla" | "bukkit"; dimensions: "overworld"/"the_nether"/"the_end" → Pfad zum region-Verzeichnis
@@ -218,6 +221,7 @@ public final class LayoutDetector {
 Baue die Verzeichnisstrukturen im Test mit `@TempDir` auf — keine Fixture-Dateien nötig, es geht nur um Struktur.
 
 Testfälle, jeder mit eigener Begründung im Testnamen:
+
 - Vanilla-Layout mit allen drei Dimensionen wird erkannt und korrekt zugeordnet.
 - Vanilla-Layout mit **nur** Overworld wird erkannt (kein Nether, kein End — das ist normal).
 - Bukkit-Layout mit `world`, `world_nether`, `world_the_end` wird erkannt und auf dieselben logischen Namen abgebildet.
@@ -234,6 +238,7 @@ Testfälle, jeder mit eigener Begründung im Testnamen:
 > Eigener Worktree. Ausschließlich `BundleManifest.java`, `BundleWriter.java`, `S3Client.java` und Tests.
 
 **Interfaces:**
+
 ```java
 public record BundleManifest(
         int schemaVersion, String tenant, String worldId, String version,
@@ -257,6 +262,7 @@ public final class BundleWriter {
 Damit Task 3 nicht auf Task 2 warten muss, nimmt `BundleWriter` eine schmale Schnittstelle entgegen (`WorldLayoutLike` mit `kind()` und `dimensions()`), die Task 2s Record später erfüllt. Definiere sie in deinem eigenen Paket.
 
 **Tests, die zählen:**
+
 - Das Manifest wird **zuletzt** geschrieben — prüfe die Reihenfolge der Schreibvorgänge über einen Fake-S3-Client, der sie protokolliert. Das ist der Commit-Punkt und die wichtigste Eigenschaft des Bundles.
 - Bricht das Schreiben mittendrin ab, existiert **kein** Manifest, das Bundle gilt also als nicht vorhanden.
 - Die Regionsliste im Manifest entspricht den tatsächlich geschriebenen `.mca`-Dateien; Koordinaten werden aus dem Dateinamen `r.<x>.<z>.mca` gelesen.
@@ -270,6 +276,7 @@ Damit Task 3 nicht auf Task 2 warten muss, nimmt `BundleWriter` eine schmale Sch
 > Eigener Worktree. Ausschließlich `connector/*` und Tests.
 
 **Interfaces:**
+
 ```java
 public interface WorldSourceConnector {
     String type();

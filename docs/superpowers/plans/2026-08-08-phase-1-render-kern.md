@@ -111,7 +111,7 @@ force-path-style: true
 
 ## File Structure
 
-```
+```text
 Apus/
 ├── settings.gradle.kts                 Module + Inline-Version-Catalog
 ├── build.gradle.kts                    Root: Spotless, Toolchain für alle Module
@@ -174,7 +174,7 @@ Apus/
 Aufgaben mit gleicher Gruppe können gleichzeitig von verschiedenen Agenten bearbeitet werden:
 
 | Gruppe | Aufgaben | Voraussetzung |
-|---|---|---|
+| --- | --- | --- |
 | A | Task 1 | — |
 | B | Task 2, Task 3, Task 4 | Task 1 |
 | C | Task 5, Task 6 | Task 2–4 |
@@ -188,6 +188,7 @@ Task 2 (Snapshot + JSON), Task 3 (Probe) und Task 4 (HTTP-Server) berühren getr
 ### Task 1: Monorepo-Grundgerüst
 
 **Files:**
+
 - Create: `settings.gradle.kts`
 - Create: `build.gradle.kts`
 - Create: `gradle.properties`
@@ -198,6 +199,7 @@ Task 2 (Snapshot + JSON), Task 3 (Probe) und Task 4 (HTTP-Server) berühren getr
 - Create: `telemetry-addon/src/test/java/net/onelitefeather/apus/telemetry/BuildSetupTest.java`
 
 **Interfaces:**
+
 - Consumes: nichts
 - Produces: Version-Catalog-Aliase `libs.bluemap.api`, `libs.bluemap.core`, `libs.bluemap.common`, `libs.junit.bom`, `libs.junit.jupiter`, `libs.junit.platform.launcher`, `libs.testcontainers.bom`, `libs.testcontainers.junit`, `libs.testcontainers.minio`, `libs.plugins.spotless`, `libs.plugins.shadow`. Modulname `:telemetry-addon`.
 
@@ -446,6 +448,7 @@ git commit -m "build: set up Apus gradle monorepo with telemetry-addon module"
 ### Task 2: ProgressSnapshot und Serialisierung
 
 **Files:**
+
 - Create: `telemetry-addon/src/main/java/net/onelitefeather/apus/telemetry/ProgressSnapshot.java`
 - Create: `telemetry-addon/src/main/java/net/onelitefeather/apus/telemetry/Numbers.java`
 - Create: `telemetry-addon/src/main/java/net/onelitefeather/apus/telemetry/JsonWriter.java`
@@ -456,8 +459,10 @@ git commit -m "build: set up Apus gradle monorepo with telemetry-addon module"
 - Test: `telemetry-addon/src/test/java/net/onelitefeather/apus/telemetry/PrometheusWriterTest.java`
 
 **Interfaces:**
+
 - Consumes: nichts aus anderen Aufgaben
 - Produces:
+
 ```java
 public record ProgressSnapshot(
         State state,              // RENDERING, IDLE, STARTING, UNKNOWN
@@ -922,6 +927,7 @@ git commit -m "feat(telemetry): add progress snapshot model with json and promet
 ### Task 3: Progress-Probe mit BlueMap-Zugriff
 
 **Files:**
+
 - Create: `telemetry-addon/src/main/java/net/onelitefeather/apus/telemetry/probe/RenderManagerAccess.java`
 - Create: `telemetry-addon/src/main/java/net/onelitefeather/apus/telemetry/probe/RenderProgressProbe.java`
 - Create: `telemetry-addon/src/main/java/net/onelitefeather/apus/telemetry/probe/BlueMapRenderManagerAccess.java`
@@ -929,8 +935,10 @@ git commit -m "feat(telemetry): add progress snapshot model with json and promet
 - Test: `telemetry-addon/src/test/java/net/onelitefeather/apus/telemetry/probe/RenderProgressProbeTest.java`
 
 **Interfaces:**
+
 - Consumes: `ProgressSnapshot` aus Task 2 (inklusive `unknown(String)` und `idle(int, int)`)
 - Produces:
+
 ```java
 public interface RenderManagerAccess {
     boolean isRunning();
@@ -1308,13 +1316,16 @@ git commit -m "feat(telemetry): read render progress through a single blueMap se
 ### Task 4: HTTP-Server
 
 **Files:**
+
 - Create: `telemetry-addon/src/main/java/net/onelitefeather/apus/telemetry/TelemetryServer.java`
 - Create: `telemetry-addon/src/main/java/net/onelitefeather/apus/telemetry/TelemetryConfig.java`
 - Test: `telemetry-addon/src/test/java/net/onelitefeather/apus/telemetry/TelemetryServerTest.java`
 
 **Interfaces:**
+
 - Consumes: `ProgressSnapshot`, `JsonWriter`, `PrometheusWriter` aus Task 2
 - Produces:
+
 ```java
 public record TelemetryConfig(String bindAddress, int port, boolean enabled) {
     public static TelemetryConfig fromEnvironment(Function<String, String> env);
@@ -1632,11 +1643,13 @@ git commit -m "feat(telemetry): serve progress over http as json and prometheus 
 ### Task 5: Addon-Entrypoint
 
 **Files:**
+
 - Create: `telemetry-addon/src/main/java/net/onelitefeather/apus/telemetry/ApusTelemetryAddon.java`
 - Create: `telemetry-addon/src/main/resources/bluemap.addon.json`
 - Test: `telemetry-addon/src/test/java/net/onelitefeather/apus/telemetry/AddonManifestTest.java`
 
 **Interfaces:**
+
 - Consumes: `TelemetryConfig`, `TelemetryServer` (Task 4), `RenderProgressProbe`, `BlueMapRenderManagerAccess` (Task 3)
 - Produces: Die Klasse `net.onelitefeather.apus.telemetry.ApusTelemetryAddon` als Addon-Entrypoint, referenziert in `bluemap.addon.json`
 
@@ -1803,6 +1816,7 @@ git commit -m "feat(telemetry): add bluemap addon entrypoint and manifest"
 ### Task 6: Runner-Image
 
 **Files:**
+
 - Create: `runner/Dockerfile`
 - Create: `runner/entrypoint.sh`
 - Create: `runner/bin/render-config.sh`
@@ -1810,11 +1824,12 @@ git commit -m "feat(telemetry): add bluemap addon entrypoint and manifest"
 - Create: `runner/README.md`
 
 **Interfaces:**
+
 - Consumes: `apus-telemetry-addon-<version>.jar` aus Task 5
 - Produces: Image `apus/runner:dev` mit folgendem Vertrag über Umgebungsvariablen:
 
 | Variable | Pflicht | Bedeutung |
-|---|---|---|
+| --- | --- | --- |
 | `APUS_MAP_ID` | ja | Map-Id, z.B. `overworld` |
 | `APUS_DIMENSION` | ja | `minecraft:overworld`, `minecraft:the_nether`, `minecraft:the_end` |
 | `APUS_MC_VERSION` | ja | z.B. `1.21.10` |
@@ -2118,6 +2133,7 @@ git commit -m "feat(runner): add container image running bluemap cli with apus a
 ### Task 7: Integrationstest gegen MinIO
 
 **Files:**
+
 - Create: `testdata/README.md`
 - Create: `testdata/mini-world/` (Fixture)
 - Create: `runner/build.gradle.kts`
@@ -2125,6 +2141,7 @@ git commit -m "feat(runner): add container image running bluemap cli with apus a
 - Modify: `settings.gradle.kts` (Modul `runner` ergänzen)
 
 **Interfaces:**
+
 - Consumes: Image `apus/runner:dev` aus Task 6, der Umgebungsvariablen-Vertrag aus Task 6
 - Produces: Bestätigung, dass `storage-type: "themeinerlp:s3"` und die kebab-case-Schlüssel korrekt sind; korrigiert bei Abweichung Task 6 **und** die Spec
 
@@ -2375,10 +2392,12 @@ git commit -m "test(runner): verify end-to-end render from s3 to s3 against mini
 ### Task 8: Telemetrie im echten Render nachweisen
 
 **Files:**
+
 - Modify: `runner/src/test/java/net/onelitefeather/apus/runner/RenderEndToEndTest.java`
 - Create: `runner/src/test/java/net/onelitefeather/apus/runner/TelemetryContractTest.java`
 
 **Interfaces:**
+
 - Consumes: alles aus Task 7
 - Produces: Der Nachweis, dass `/progress` während eines echten Renders belastbare Werte liefert — der Contract-Test, der ein BlueMap-Upgrade auffliegen lässt
 
