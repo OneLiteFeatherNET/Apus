@@ -4,7 +4,7 @@
   "include-component-in-tag": true,
   "include-v-in-tag": true,
   "separate-pull-requests": true,
-  "bootstrap-sha": "33487090",
+  "bootstrap-sha": "334870908b723cdf0179ffcf4862051010ed0d0c",
   "pull-request-header": "",
   "packages": {
     ".": {
@@ -18,14 +18,14 @@
       "package-name": "telemetry-addon",
       "changelog-path": "CHANGELOG.md",
       "extra-files": [
-        { "type": "generic", "path": "telemetry-addon/build.gradle.kts" }
+        { "type": "generic", "path": "build.gradle.kts" }
       ]
     },
     "paper-worldpush": {
       "package-name": "paper-worldpush",
       "changelog-path": "CHANGELOG.md",
       "extra-files": [
-        { "type": "generic", "path": "paper-worldpush/build.gradle.kts" }
+        { "type": "generic", "path": "build.gradle.kts" }
       ]
     }
   }
