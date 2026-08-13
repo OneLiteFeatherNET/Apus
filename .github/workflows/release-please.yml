@@ -12,8 +12,12 @@ jobs:
   release-please:
     runs-on: ubuntu-latest
     outputs:
-      root-released: ${{ steps.release.outputs['.--release_created'] }}
-      root-version: ${{ steps.release.outputs['.--version'] }}
+      # The root package is the one exception to the `<path>--<key>` output naming:
+      # release-please-action's setPathOutput() emits the bare key when the package path
+      # is ".", so `.--release_created` is always empty and every image publish silently
+      # skipped. Only the two component packages carry a prefix.
+      root-released: ${{ steps.release.outputs.release_created }}
+      root-version: ${{ steps.release.outputs.version }}
       telemetry-released: ${{ steps.release.outputs['telemetry-addon--release_created'] }}
       paper-released: ${{ steps.release.outputs['paper-worldpush--release_created'] }}
     steps:

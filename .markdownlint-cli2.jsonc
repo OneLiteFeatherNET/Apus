@@ -9,6 +9,9 @@
   "ignores": [
     "**/node_modules/**",
     "**/build/**",
-    "CHANGELOG.md"
+    // One changelog per release track, not just the root one: release-please writes
+    // telemetry-addon/CHANGELOG.md and paper-worldpush/CHANGELOG.md too. A bare
+    // "CHANGELOG.md" matches only the root file and leaves the others linted.
+    "**/CHANGELOG.md"
   ]
 }
