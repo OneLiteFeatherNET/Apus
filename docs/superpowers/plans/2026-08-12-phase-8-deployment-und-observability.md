@@ -4,9 +4,16 @@
 
 **Goal:** Apus lässt sich per GitOps in einen Cluster ausrollen, und wer es betreibt, sieht am Dashboard, was das System gerade tut — statt es aus `kubectl`-Ausgaben zusammenzureimen.
 
-**Architecture:** Das Repository liefert eine Kustomize-Basis unter `deploy/`, die das Cluster-Repository (`Kubernetes-FLUX`) referenziert und über ein Overlay mit seinen eigenen Werten überschreibt. Die sechs CRD-YAMLs werden eingecheckt statt nur generiert, damit ein Ausrollen keinen Gradle-Lauf voraussetzt; ein Test hält die eingecheckte Fassung mit dem Generator synchron. Metriken folgen dem im Repository bereits etablierten Muster: der Operator exponiert sie wie das `telemetry-addon` über den JDK-eigenen `HttpServer`, die API über Micronauts Micrometer-Integration.
+**Architecture:** Apus wird über zwei Helm Charts unter `deploy/charts/` ausgerollt
+(`apus-operator`, `apus-platform`) statt über eine Kustomize-Basis — siehe
+`docs/superpowers/plans/2026-08-13-helm-charts.md` und Design-Spec §9. Die sechs
+CRD-YAMLs werden eingecheckt statt nur generiert, damit ein Ausrollen keinen Gradle-Lauf
+voraussetzt; ein Test hält die eingecheckte Fassung mit dem Generator synchron. Metriken
+folgen dem im Repository bereits etablierten Muster: der Operator exponiert sie wie das
+`telemetry-addon` über den JDK-eigenen `HttpServer`, die API über Micronauts
+Micrometer-Integration.
 
-**Tech Stack:** Kustomize, Prometheus Operator (`PodMonitor`/`ServiceMonitor` aus dem im Cluster vorhandenen kube-prometheus-stack), Micrometer 1.15, JOSDK 5.5.1, Grafana, k3s via Testcontainers.
+**Tech Stack:** Helm, Prometheus Operator (`PodMonitor`/`ServiceMonitor` aus dem im Cluster vorhandenen kube-prometheus-stack), Micrometer 1.15, JOSDK 5.5.1, Grafana, k3s via Testcontainers.
 
 ## Global Constraints
 
@@ -24,6 +31,16 @@
 
 Heute erzeugt `./gradlew :operator:generateCrds` die sechs CRDs nach `operator/build/crds`. Wer Apus ausrollt, braucht sie aber vor dem ersten Operator-Start — und ein Cluster-Repository soll dafür kein Gradle ausführen müssen.
 
+**Extension-Hinweis:** Der Generator schreibt seine Ausgabe mit der Endung `.yml`, nicht
+`.yaml`. `deploy/crds/` und die davon abgeleiteten `deploy/charts/apus-operator/files/crds/`
+benutzen durchgängig `.yaml` — dieser Plan macht `deploy/crds/` konsistent dazu, indem der
+Copy-Task in Schritt 4 beim Kopieren umbenennt, statt die Endung des Generators zu
+übernehmen. Grund für diese Wahl statt umgekehrt (alles auf `.yml` umzustellen): `deploy/crds/`
+existiert im Repository bereits mit sechs `.yaml`-Dateien (eingecheckt beim Bau der Helm
+Charts), und jede Glob-Regel, die darauf aufsetzt — im Chart-Template, in `sync-crds.sh`,
+in der Doku — erwartet `.yaml`. Auf `.yml` umzustellen hieße, all das nachträglich zu ändern,
+ohne einen Vorteil dafür zu bekommen.
+
 **Files:**
 
 - Create: `deploy/crds/*.yaml` (sechs Dateien, Generator-Ausgabe)
@@ -38,7 +55,9 @@ Heute erzeugt `./gradlew :operator:generateCrds` die sechs CRDs nach `operator/b
 - [ ] **Schritt 1: CRDs erzeugen und Namen feststellen**
 
 Run: `./gradlew :operator:generateCrds && ls operator/build/crds/`
-Expected: sechs YAML-Dateien. Die exakten Dateinamen notieren — sie werden in Schritt 3 gebraucht.
+Expected: sechs Dateien mit der Endung `.yml` (nicht `.yaml` — das ist die tatsächliche
+Ausgabe des Generators, unabhängig von diesem Plan). Die exakten Dateinamen notieren — sie
+werden in Schritt 3 gebraucht.
 
 - [ ] **Schritt 2: Failing test schreiben**
 
@@ -95,9 +114,13 @@ class CrdsInSyncTest {
     private static Map<String, String> read(Path dir) throws IOException {
         assertTrue(Files.isDirectory(dir), dir + " does not exist");
         try (Stream<Path> files = Files.list(dir)) {
-            return files.filter(p -> p.toString().endsWith(".yaml"))
+            // The generator writes .yml; syncCrds (below) renames to .yaml on the way into
+            // deploy/crds, matching what the chart's files/crds already uses. Matching by
+            // extension-less basename lets the two directories carry different extensions
+            // without the drift check missing a renamed-but-changed file.
+            return files.filter(p -> p.toString().endsWith(".yaml") || p.toString().endsWith(".yml"))
                     .collect(Collectors.toMap(
-                            p -> p.getFileName().toString(),
+                            p -> p.getFileName().toString().replaceFirst("\\.ya?ml$", ""),
                             p -> {
                                 try {
                                     return Files.readString(p);
@@ -121,17 +144,19 @@ In `operator/build.gradle.kts` nach der `generateCrds`-Registrierung:
 
 ```kotlin
 val syncCrds by tasks.registering(Copy::class) {
-    description = "Copies the generated CRDs to deploy/crds, which is what gets rolled out."
+    description = "Copies the generated CRDs to deploy/crds, renaming .yml to .yaml -- " +
+            "the generator's own extension, but not what deploy/crds and the chart use."
     group = "build"
     from(generateCrds)
     into(rootProject.layout.projectDirectory.dir("deploy/crds"))
+    rename { fileName -> fileName.replace(Regex("\\.yml$"), ".yaml") }
 }
 ```
 
 - [ ] **Schritt 5: CRDs erzeugen und einchecken**
 
 Run: `./gradlew :operator:syncCrds && ls deploy/crds/`
-Expected: dieselben sechs Dateien wie in Schritt 1.
+Expected: dieselben sechs Dateinamen wie in Schritt 1, jetzt mit der Endung `.yaml`.
 
 - [ ] **Schritt 6: Test läuft grün**
 
@@ -157,386 +182,19 @@ git commit -m "feat: check in the generated CRDs and guard them against drift"
 
 ---
 
-### Task 2: Kustomize-Basis für den Operator
+### Task 2 und 3: ersetzt durch die Helm Charts
 
-**Files:**
-
-- Create: `deploy/base/kustomization.yaml`
-- Create: `deploy/base/namespace.yaml`
-- Create: `deploy/base/operator-serviceaccount.yaml`
-- Create: `deploy/base/operator-rbac.yaml`
-- Create: `deploy/base/operator-deployment.yaml`
-- Create: `deploy/README.md`
-
-**Interfaces:**
-
-- Consumes: `deploy/crds/` aus Task 1; die Umgebungsvariablen aus `OperatorConfig` (`APUS_ROOK_NAMESPACE`, `APUS_CEPH_OBJECT_STORE`, `APUS_BUCKET_STORAGE_CLASS`, `APUS_RUNNER_IMAGE`, `APUS_INGEST_IMAGE`, `APUS_HOSTING_IMAGE`, `APUS_BUNDLE_BUCKET`, `APUS_BUNDLE_S3_ENDPOINT`, `APUS_BUNDLE_S3_REGION`, `APUS_BUNDLE_CREDENTIALS_SECRET`).
-- Produces: die Basis, auf die Task 3 (API und UI) und Task 6 (PodMonitor) aufsetzen.
-
-- [ ] **Schritt 1: Namespace und ServiceAccount**
-
-`deploy/base/namespace.yaml`:
-
-```yaml
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: apus-system
-```
-
-`deploy/base/operator-serviceaccount.yaml`:
-
-```yaml
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: apus-operator
-  namespace: apus-system
-```
-
-- [ ] **Schritt 2: RBAC**
-
-`deploy/base/operator-rbac.yaml`:
-
-```yaml
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: apus-operator
-rules:
-  # Own custom resources, including status and finalizers.
-  - apiGroups: ["bluemap.onelitefeather.net"]
-    resources:
-      - tenants
-      - worldsources
-      - worldingests
-      - bluemapmaps
-      - bluemaprenders
-      - bluemaphostings
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  - apiGroups: ["bluemap.onelitefeather.net"]
-    resources:
-      - tenants/status
-      - worldsources/status
-      - worldingests/status
-      - bluemapmaps/status
-      - bluemaprenders/status
-      - bluemaphostings/status
-    verbs: ["get", "update", "patch"]
-  - apiGroups: ["bluemap.onelitefeather.net"]
-    resources:
-      - tenants/finalizers
-      - bluemapmaps/finalizers
-    verbs: ["update"]
-  # A Tenant creates a namespace with its quota and network policy (design spec §8.1).
-  - apiGroups: [""]
-    resources: ["namespaces", "resourcequotas", "limitranges"]
-    verbs: ["get", "list", "watch", "create", "update", "patch"]
-  - apiGroups: ["networking.k8s.io"]
-    resources: ["networkpolicies"]
-    verbs: ["get", "list", "watch", "create", "update", "patch"]
-  # Renders and ingests are Jobs; hosting is a Deployment behind a Service and Ingress.
-  - apiGroups: ["batch"]
-    resources: ["jobs"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  - apiGroups: ["apps"]
-    resources: ["deployments"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  - apiGroups: [""]
-    resources: ["services", "configmaps"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  - apiGroups: ["networking.k8s.io"]
-    resources: ["ingresses"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  # Reading the render pod's /progress endpoint and its termination message (design spec §7.2).
-  - apiGroups: [""]
-    resources: ["pods", "pods/log"]
-    verbs: ["get", "list", "watch"]
-  # Rook provisions bucket, credentials secret and endpoint ConfigMap (design spec §9.1).
-  - apiGroups: ["objectbucket.io"]
-    resources: ["objectbucketclaims"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  - apiGroups: ["ceph.rook.io"]
-    resources: ["cephobjectstoreusers"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  # The secrets Rook creates, wired into render jobs and hosting pods. Deliberately not
-  # cluster-wide write: the operator only ever reads them.
-  - apiGroups: [""]
-    resources: ["secrets"]
-    verbs: ["get", "list", "watch"]
-  - apiGroups: [""]
-    resources: ["events"]
-    verbs: ["create", "patch"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: apus-operator
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: apus-operator
-subjects:
-  - kind: ServiceAccount
-    name: apus-operator
-    namespace: apus-system
-```
-
-- [ ] **Schritt 3: RBAC gegen den tatsächlichen Code prüfen**
-
-Run: `grep -rhoE '\b(Job|Deployment|Service|Ingress|ConfigMap|Secret|Namespace|ResourceQuota|LimitRange|NetworkPolicy|ObjectBucketClaim|CephObjectStoreUser|Pod)\b' operator/src/main/java --include='*.java' | sort -u`
-Expected: Jeder ausgegebene Typ hat oben eine Regel. Fehlt einer, ergänzen — eine zu schmale ClusterRole äußert sich zur Laufzeit als `Forbidden` mitten in einer Reconciliation, nicht beim Start.
-
-- [ ] **Schritt 4: Operator-Deployment**
-
-`deploy/base/operator-deployment.yaml`:
-
-```yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: apus-operator
-  namespace: apus-system
-  labels:
-    app.kubernetes.io/name: apus-operator
-    app.kubernetes.io/part-of: apus
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app.kubernetes.io/name: apus-operator
-  template:
-    metadata:
-      labels:
-        app.kubernetes.io/name: apus-operator
-        app.kubernetes.io/part-of: apus
-    spec:
-      serviceAccountName: apus-operator
-      securityContext:
-        runAsNonRoot: true
-        runAsUser: 10001
-        seccompProfile:
-          type: RuntimeDefault
-      containers:
-        - name: operator
-          image: harbor.onelitefeather.dev/apus/operator:0.1.0
-          imagePullPolicy: IfNotPresent
-          ports:
-            - name: metrics
-              containerPort: 8080
-          env:
-            # Defaults live in OperatorConfig; every value here is set explicitly so that
-            # what a cluster runs with is readable from the manifest rather than the code.
-            - name: APUS_ROOK_NAMESPACE
-              value: rook-ceph
-            - name: APUS_CEPH_OBJECT_STORE
-              value: ceph-objectstore
-            - name: APUS_BUCKET_STORAGE_CLASS
-              value: ceph-bucket
-            - name: APUS_RUNNER_IMAGE
-              value: harbor.onelitefeather.dev/apus/runner:0.1.0
-            - name: APUS_INGEST_IMAGE
-              value: harbor.onelitefeather.dev/apus/ingest:0.1.0
-            - name: APUS_HOSTING_IMAGE
-              value: harbor.onelitefeather.dev/apus/hosting:0.1.0
-            - name: APUS_BUNDLE_BUCKET
-              value: apus-bundles
-            - name: APUS_BUNDLE_S3_ENDPOINT
-              value: http://rook-ceph-rgw-ceph-objectstore.rook-ceph.svc:80
-            - name: APUS_BUNDLE_S3_REGION
-              value: us-east-1
-            - name: APUS_BUNDLE_CREDENTIALS_SECRET
-              value: apus-bundle-credentials
-          resources:
-            requests:
-              cpu: 100m
-              memory: 256Mi
-            limits:
-              memory: 512Mi
-          securityContext:
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
-            capabilities:
-              drop: ["ALL"]
-```
-
-- [ ] **Schritt 5: Kustomization und README**
-
-`deploy/base/kustomization.yaml`:
-
-```yaml
-apiVersion: kustomize.config.k8s.io/v1beta1
-kind: Kustomization
-
-resources:
-  - ../crds
-  - namespace.yaml
-  - operator-serviceaccount.yaml
-  - operator-rbac.yaml
-  - operator-deployment.yaml
-```
-
-Dafür braucht `deploy/crds` eine eigene `kustomization.yaml`, die die sechs Dateien auflistet:
-
-```yaml
-apiVersion: kustomize.config.k8s.io/v1beta1
-kind: Kustomization
-
-resources:
-  - <die sechs Dateinamen aus Task 1, Schritt 1>
-```
-
-`deploy/README.md`:
-
-```markdown
-# Ausrollen
-
-`base/` ist die vollständige, aber unkonfigurierte Kustomize-Basis. Cluster-spezifische
-Werte — Registry, Image-Tags, Rook-Namen, Hostnamen — gehören in ein Overlay im
-Cluster-Repository, nicht hierher.
-
-    kubectl apply -k deploy/base            # direkt, für einen Testcluster
-    kustomize build deploy/base | kubectl apply -f -
-
-Die CRDs unter `crds/` sind generiert. Sie werden nicht von Hand bearbeitet, sondern über
-
-    ./gradlew :operator:syncCrds
-
-erneuert; `CrdsInSyncTest` bricht den Build, wenn das jemand vergisst.
-```
-
-- [ ] **Schritt 6: Manifeste validieren**
-
-Run: `kustomize build deploy/base > /tmp/apus-base.yaml && grep -c '^kind:' /tmp/apus-base.yaml`
-Expected: mindestens 11 Objekte (6 CRDs, Namespace, ServiceAccount, ClusterRole, ClusterRoleBinding, Deployment).
-
-Run: `kubectl apply --dry-run=client -f /tmp/apus-base.yaml`
-Expected: jede Zeile endet auf `(dry run)`, keine Fehler.
-
-- [ ] **Schritt 7: Commit**
-
-```bash
-git add deploy/
-git commit -m "feat: add a Kustomize base for rolling out the operator"
-```
-
----
-
-### Task 3: Manifeste für API und UI
-
-**Files:**
-
-- Create: `deploy/base/api-deployment.yaml`
-- Create: `deploy/base/api-service.yaml`
-- Create: `deploy/base/api-rbac.yaml`
-- Create: `deploy/base/ui-deployment.yaml`
-- Create: `deploy/base/ui-service.yaml`
-- Create: `deploy/base/ingress.yaml`
-- Modify: `deploy/base/kustomization.yaml`
-
-- [ ] **Schritt 1: RBAC der API ermitteln, statt sie zu raten**
-
-Run: `grep -rn 'resources(\|\.secrets()\|\.namespaces()\|customResources' api/src/main/java --include='*.java' | head -20`
-Expected: eine Liste der tatsächlich angesprochenen Ressourcen. Die API liest die Custom Resources und — für den Push-Token-Lookup — Secrets. Genau diese und keine weiteren kommen in die Rolle.
-
-- [ ] **Schritt 2: API-RBAC schreiben**
-
-`deploy/base/api-rbac.yaml`:
-
-```yaml
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: apus-api
-  namespace: apus-system
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: apus-api
-rules:
-  - apiGroups: ["bluemap.onelitefeather.net"]
-    resources:
-      - tenants
-      - worldsources
-      - worldingests
-      - bluemapmaps
-      - bluemaprenders
-      - bluemaphostings
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  # Service-token lookup. This is deliberately cluster-wide read on secrets today, which
-  # is wider than ideal -- see design spec §15, point 9. Narrowing it is scoped in the
-  # phase 9 plan; until then this rule must not be copied as a pattern for anything else.
-  - apiGroups: [""]
-    resources: ["secrets"]
-    verbs: ["get", "list"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: apus-api
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: apus-api
-subjects:
-  - kind: ServiceAccount
-    name: apus-api
-    namespace: apus-system
-```
-
-- [ ] **Schritt 3: Deployments und Services**
-
-`deploy/base/api-deployment.yaml` — gleiche Struktur wie das Operator-Deployment (`securityContext`, `runAsUser: 10001`, `readOnlyRootFilesystem`), Image `harbor.onelitefeather.dev/apus/api:0.1.0`, `serviceAccountName: apus-api`, Port 8080, plus:
-
-```yaml
-          env:
-            - name: MICRONAUT_ENVIRONMENTS
-              value: k8s
-            # The issuer is the one open product decision (design spec §15, point 3). The
-            # overlay in the cluster repository supplies the real value; the base leaves
-            # it empty on purpose so that a half-configured rollout fails loudly at startup
-            # instead of accepting unvalidated tokens.
-            - name: MICRONAUT_SECURITY_TOKEN_JWT_SIGNATURES_JWKS_DEFAULT_URL
-              value: ""
-          readinessProbe:
-            httpGet:
-              path: /health/readiness
-              port: 8080
-            initialDelaySeconds: 10
-          livenessProbe:
-            httpGet:
-              path: /health/liveness
-              port: 8080
-            initialDelaySeconds: 30
-```
-
-`deploy/base/api-service.yaml` und `deploy/base/ui-service.yaml`: je ein `ClusterIP`-Service auf Port 8080 mit passendem Selector.
-
-`deploy/base/ui-deployment.yaml`: Image `harbor.onelitefeather.dev/apus/ui:0.1.0`, `runAsUser: 101` (die unprivilegierte nginx-Basis aus Phase 7, Task 8 läuft unter dieser uid — nicht 10001), Port 8080, `readOnlyRootFilesystem: false`, weil nginx sein Cache-Verzeichnis beschreibt.
-
-- [ ] **Schritt 4: Ingress**
-
-`deploy/base/ingress.yaml` — ein Host, zwei Pfade: `/api` auf den API-Service, `/` auf den UI-Service. `ingressClassName: nginx`, TLS über cert-manager, Hostname als Platzhalter `apus.example.net`, den das Overlay ersetzt.
-
-- [ ] **Schritt 5: Health-Endpunkte verifizieren, bevor die Probes eingecheckt werden**
-
-Run: `grep -rn 'micronaut-management\|endpoints:' api/build.gradle.kts api/src/main/resources/application.yml`
-Expected: `micronaut-management` ist als Abhängigkeit vorhanden und `/health` aktiviert. Ist es das nicht, laufen die Probes ins Leere und der Pod wird endlos neu gestartet — dann zuerst Task 5 dieses Plans ausführen (der bringt `micronaut-management` mit) und danach hierher zurückkehren.
-
-- [ ] **Schritt 6: Kustomization erweitern und validieren**
-
-Die sechs neuen Dateien in `deploy/base/kustomization.yaml` unter `resources` ergänzen.
-
-Run: `kustomize build deploy/base | kubectl apply --dry-run=client -f -`
-Expected: keine Fehler.
-
-- [ ] **Schritt 7: Commit**
-
-```bash
-git add deploy/base
-git commit -m "feat: add deployment manifests for the API and the dashboard"
-```
+Ursprünglich: Kustomize-Basis für Operator (Task 2), API und UI (Task 3). Diese beiden
+Tasks sind überholt. Statt einer Kustomize-Basis unter `deploy/base` rollt
+Apus über zwei Helm Charts unter `deploy/charts/` aus — `apus-operator` (die sechs CRDs
+als Templates, der Operator, cluster-weite RBAC) und `apus-platform` (API, UI, Ingress).
+Umsetzung und Design stehen in `docs/superpowers/plans/2026-08-13-helm-charts.md` und
+`docs/superpowers/specs/2026-08-13-helm-charts-design.md`; beide Charts sind abgeschlossen
+und in diesem Repository unter `deploy/charts/apus-operator` und `deploy/charts/apus-platform`
+eingecheckt. Die Werte, die diese beiden Tasks ursprünglich als Manifest-Inhalt vorsahen —
+`OperatorConfig`-Umgebungsvariablen, RBAC-Regeln, Health-Probes, Ingress-Pfade — finden sich
+1:1 in den `values.yaml`/`values.schema.json` der beiden Charts wieder; dieser Plan
+wiederholt sie nicht.
 
 ---
 
@@ -965,15 +623,25 @@ git commit -m "feat: expose Prometheus metrics and health endpoints from the API
 
 ---
 
-### Task 6: Scrape-Konfiguration
+### Task 6: Scrape-Konfiguration für Render-Pods
+
+Die beiden `ServiceMonitor`s für Operator und API aus der ursprünglichen Fassung dieses
+Tasks sind bereits Chart-Templates
+(`deploy/charts/apus-operator/templates/servicemonitor.yaml`,
+`deploy/charts/apus-platform/templates/api-servicemonitor.yaml`), zusammen mit den
+zugehörigen `Service`s (`deploy/charts/apus-operator/templates/service.yaml`,
+`deploy/charts/apus-platform/templates/api-service.yaml`). Beide `ServiceMonitor`s sind
+standardmäßig aus (`metrics.serviceMonitor.enabled: false` bzw.
+`api.metrics.serviceMonitor.enabled: false`), bis Task 4 bzw. Task 5 dieses Plans die
+Metriken tatsächlich exportieren — vorher würden sie nur einen leeren Endpunkt scrapen.
+
+Offen bleibt nur der `PodMonitor` für die vom Operator erzeugten Render-Pods: Er selektiert
+Pods in Mandanten-Namespaces, die kein Chart kennt (Design-Spec §9), und ist deshalb kein
+Chart-Template, sondern ein eigenständiges Manifest außerhalb der Charts.
 
 **Files:**
 
-- Create: `deploy/base/podmonitor-render.yaml`
-- Create: `deploy/base/servicemonitor-operator.yaml`
-- Create: `deploy/base/servicemonitor-api.yaml`
-- Create: `deploy/base/operator-service.yaml`
-- Modify: `deploy/base/kustomization.yaml`
+- Create: `deploy/podmonitor-render.yaml`
 
 - [ ] **Schritt 1: Label prüfen, unter dem der Operator seine Render-Pods markiert**
 
@@ -987,6 +655,8 @@ apiVersion: monitoring.coreos.com/v1
 kind: PodMonitor
 metadata:
   name: apus-render
+  # Muss in demselben Namespace liegen wie die apus-operator-Chart-Installation, damit ein
+  # Prometheus, dessen podMonitorNamespaceSelector diesen Namespace einschließt, ihn findet.
   namespace: apus-system
   labels:
     app.kubernetes.io/part-of: apus
@@ -1008,36 +678,38 @@ Damit das greift, muss der Render-Job seinen Port benennen. Prüfen:
 Run: `grep -n 'containerPort\|withName' operator/src/main/java/net/onelitefeather/apus/operator/render/RenderJobBuilder.java`
 Expected: ein benannter Port `telemetry` auf 8099. Fehlt der Name, im selben Task ergänzen und den zugehörigen `RenderJobBuilderTest` erweitern.
 
-- [ ] **Schritt 3: Service und `ServiceMonitor` für Operator und API**
+- [ ] **Schritt 3: Validieren**
 
-`operator-service.yaml`: ClusterIP-Service auf Port 8080, Name `metrics`, Selector `app.kubernetes.io/name: apus-operator`.
+Run: `kubectl apply --dry-run=client -f deploy/podmonitor-render.yaml`
+Expected: keine Fehler. Der `PodMonitor` erfordert die CRDs des Prometheus-Operators; ist der
+lokal nicht vorhanden, schlägt `--dry-run=client` **nicht** fehl (es prüft nur Struktur) — für
+die echte Prüfung `--dry-run=server` gegen einen Cluster mit kube-prometheus-stack verwenden.
 
-Beide `ServiceMonitor`s selektieren auf denselben Labels; der für die API scrapt Pfad `/prometheus` und braucht die Basic-Auth- bzw. Token-Referenz, mit der der Endpunkt geschützt ist (`basicAuth` mit Verweis auf ein Secret, das das Overlay im Cluster-Repository liefert).
-
-- [ ] **Schritt 4: Validieren**
-
-Run: `kustomize build deploy/base | kubectl apply --dry-run=client -f - 2>&1 | tail -5`
-Expected: keine Fehler. `PodMonitor`/`ServiceMonitor` erfordern die CRDs des Prometheus-Operators; ist der lokal nicht vorhanden, schlägt `--dry-run=client` **nicht** fehl (es prüft nur Struktur) — für die echte Prüfung `--dry-run=server` gegen einen Cluster mit kube-prometheus-stack verwenden.
-
-- [ ] **Schritt 5: Commit**
+- [ ] **Schritt 4: Commit**
 
 ```bash
-git add deploy/base
-git commit -m "feat: add scrape configuration for render pods, operator and API"
+git add deploy/podmonitor-render.yaml
+git commit -m "feat: add scrape configuration for render pods"
 ```
 
 ---
 
 ### Task 7: Grafana-Dashboards
 
-Design-Spec §13.1: „ein Grafana-Dashboard je Ebene (Plattform, Mandant)".
+Design-Spec §13.1: „ein Grafana-Dashboard je Ebene (Plattform, Mandant)". Die ConfigMap,
+die diese Dashboards für die Grafana-Sidecar-Erkennung bereitstellt, wandert gegenüber der
+ursprünglichen Fassung dieses Tasks als optionale `dashboards.enabled`-Ressource ins
+`apus-platform`-Chart, statt über `kustomization.yaml` in die Kustomize-Basis eingebunden zu
+werden (Design-Spec §9).
 
 **Files:**
 
-- Create: `deploy/dashboards/apus-platform.json`
-- Create: `deploy/dashboards/apus-tenant.json`
-- Create: `deploy/base/dashboards-configmap.yaml`
-- Modify: `deploy/base/kustomization.yaml`
+- Create: `deploy/charts/apus-platform/files/dashboards/apus-platform.json`
+- Create: `deploy/charts/apus-platform/files/dashboards/apus-tenant.json`
+- Create: `deploy/charts/apus-platform/templates/dashboards-configmap.yaml`
+- Modify: `deploy/charts/apus-platform/values.yaml` (`dashboards.enabled`, `dashboards.labels`)
+- Modify: `deploy/charts/apus-platform/values.schema.json`
+- Modify: `deploy/charts/apus-platform/README.md` (Werte-Tabelle)
 
 - [ ] **Schritt 1: Verfügbare Metriknamen zusammenstellen**
 
@@ -1048,7 +720,7 @@ Expected: die vollständige Liste. Jedes Panel darf ausschließlich diese Namen 
 
 - [ ] **Schritt 2: Plattform-Dashboard bauen**
 
-`deploy/dashboards/apus-platform.json`, Panels:
+`deploy/charts/apus-platform/files/dashboards/apus-platform.json`, Panels:
 
 1. **Renders nach Phase** (Zeitreihe): `sum by (phase) (rate(apus_renders_total[5m]))`
 2. **Fehlerquote** (Stat): `sum(rate(apus_renders_total{phase="Failed"}[1h])) / sum(rate(apus_renders_total[1h]))`
@@ -1061,13 +733,13 @@ Als Template-Variable `datasource` vom Typ `prometheus`; keine fest verdrahtete 
 
 - [ ] **Schritt 3: Mandanten-Dashboard bauen**
 
-`deploy/dashboards/apus-tenant.json` mit derselben Datenquellen-Variable plus einer Variable `tenant` (`label_values(apus_storage_used_bytes, tenant)`). Panels: laufende Renders mit Fortschritt (`apus_render_progress_ratio` und `apus_render_eta_seconds` — die Namen, die `PrometheusWriter` im `telemetry-addon` tatsächlich schreibt), letzte Ingest-Dauer, Speicherverbrauch gegen Quota, Render-Historie nach Phase — alle mit `{tenant="$tenant"}` gefiltert.
+`deploy/charts/apus-platform/files/dashboards/apus-tenant.json` mit derselben Datenquellen-Variable plus einer Variable `tenant` (`label_values(apus_storage_used_bytes, tenant)`). Panels: laufende Renders mit Fortschritt (`apus_render_progress_ratio` und `apus_render_eta_seconds` — die Namen, die `PrometheusWriter` im `telemetry-addon` tatsächlich schreibt), letzte Ingest-Dauer, Speicherverbrauch gegen Quota, Render-Historie nach Phase — alle mit `{tenant="$tenant"}` gefiltert.
 
 Die Render-Metriken tragen allerdings **kein** `tenant`-Label: Das `telemetry-addon` läuft im Render-Pod und kennt nur `map`. Der Mandant kommt über die Pod-Labels herein, die der `PodMonitor` aus Task 6 anhängt — beim Bau der Panels ist zu prüfen, welches Label das ist (`grep` in `Labels.java`), und danach zu filtern. Wer stattdessen `{tenant="$tenant"}` auf `apus_render_progress_ratio` schreibt, bekommt ein dauerhaft leeres Panel.
 
 - [ ] **Schritt 4: JSON validieren**
 
-Run: `for f in deploy/dashboards/*.json; do python3 -c "import json,sys;json.load(open('$f'));print('$f ok')"; done`
+Run: `for f in deploy/charts/apus-platform/files/dashboards/*.json; do python3 -c "import json,sys;json.load(open('$f'));print('$f ok')"; done`
 Expected: beide `ok`.
 
 - [ ] **Schritt 5: Alle verwendeten Metriknamen gegen Schritt 1 gegenprüfen**
@@ -1075,10 +747,11 @@ Expected: beide `ok`.
 Nicht gegen den Quellcode greppen, sondern gegen einen echten Scrape — die Meter-Namen im Code und die gescrapten Namen unterscheiden sich (`apus_renders` im Code, `apus_renders_total` im Scrape; `apus_ingest_duration` im Code, `apus_ingest_duration_seconds*` im Scrape). Ein Abgleich gegen den Quellcode würde genau deshalb Fehlalarme produzieren.
 
 ```bash
-# Scrape einer laufenden Instanz als Referenz nehmen:
-kubectl -n apus-system port-forward svc/apus-operator 8080:8080 &
+# Scrape einer laufenden Instanz als Referenz nehmen. Der Service-Name kommt aus
+# deploy/charts/apus-operator/templates/service.yaml -- <release-name>-apus-operator-metrics.
+kubectl -n apus-system port-forward svc/apus-operator-metrics 8080:8080 &
 curl -s localhost:8080/metrics | grep -oE '^apus_[a-z_]+' | sort -u > /tmp/scraped.txt
-grep -ohE 'apus_[a-z_]+' deploy/dashboards/*.json | sort -u > /tmp/used.txt
+grep -ohE 'apus_[a-z_]+' deploy/charts/apus-platform/files/dashboards/*.json | sort -u > /tmp/used.txt
 comm -23 /tmp/used.txt /tmp/scraped.txt
 ```
 
@@ -1086,39 +759,50 @@ Expected: leere Ausgabe. Jeder Name, der hier erscheint, wird von keiner Instanz
 
 Metriken aus dem `telemetry-addon` (`apus_render_*`) erscheinen nicht im Operator-Scrape; für sie ist derselbe Abgleich gegen einen Render-Pod auf Port 8099 zu fahren.
 
-- [ ] **Schritt 6: ConfigMap für die Grafana-Sidecar-Erkennung**
+- [ ] **Schritt 6: ConfigMap als optionales Chart-Template**
 
-```yaml
+`deploy/charts/apus-platform/templates/dashboards-configmap.yaml` — nach demselben Muster
+wie `deploy/charts/apus-operator/templates/crds.yaml` (das die CRDs aus `files/crds/*.yaml`
+liest): ein `.Files.Glob` über die im Chart mitgelieferten JSON-Dateien, kein Kopieren von
+Hand.
+
+```gotemplate
+{{- if .Values.dashboards.enabled }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: apus-dashboards
-  namespace: apus-system
+  name: {{ include "apus-platform.fullname" . }}-dashboards
+  namespace: {{ .Release.Namespace }}
   labels:
+    {{- include "apus-platform.labels" . | nindent 4 }}
     # The kube-prometheus-stack Grafana sidecar picks up ConfigMaps carrying this label.
     grafana_dashboard: "1"
+data:
+  {{- range $path, $_ := .Files.Glob "files/dashboards/*.json" }}
+  {{ base $path }}: |-
+    {{- $.Files.Get $path | nindent 4 }}
+  {{- end }}
+{{- end }}
 ```
 
-Die beiden JSON-Dateien werden über `configMapGenerator` in `kustomization.yaml` eingebunden, nicht von Hand in die ConfigMap kopiert:
+In `values.yaml`:
 
 ```yaml
-configMapGenerator:
-  - name: apus-dashboards
-    namespace: apus-system
-    files:
-      - ../dashboards/apus-platform.json
-      - ../dashboards/apus-tenant.json
-    options:
-      labels:
-        grafana_dashboard: "1"
-      disableNameSuffixHash: true
+dashboards:
+  # The dashboards reference metric names that don't exist until Task 4 and Task 5 of the
+  # phase 8 plan land in the operator and the API. Off by default for the same reason the
+  # ServiceMonitors default to off -- enabling it earlier just leaves every panel empty.
+  enabled: false
 ```
 
-- [ ] **Schritt 7: Commit**
+- [ ] **Schritt 7: Validieren und Commit**
+
+Run: `helm template t deploy/charts/apus-platform --set auth.issuer=https://id.example.net --set dashboards.enabled=true | grep -c 'kind: ConfigMap'`
+Expected: mindestens `1`.
 
 ```bash
-git add deploy/dashboards deploy/base
-git commit -m "feat: add Grafana dashboards for the platform and tenant views"
+git add deploy/charts/apus-platform
+git commit -m "feat(helm): add Grafana dashboards to the apus-platform chart"
 ```
 
 ---
@@ -1134,7 +818,7 @@ Design-Spec §13.2 sieht vor: „k3s + S3: kompletter Durchlauf Ingest → Rende
 
 **Interfaces:**
 
-- Consumes: die bestehende k3s-Testcontainers-Infrastruktur der vorhandenen `*IntegrationTest`-Klassen sowie `testdata/mini-world`.
+- Consumes: die bestehende k3s-Testcontainers-Infrastruktur der vorhandenen `*IntegrationTest`-Klassen sowie `testdata/mini-world`; die beiden Helm Charts unter `deploy/charts/`.
 
 - [ ] **Schritt 1: Bestehende Integrationstest-Infrastruktur ansehen**
 
@@ -1145,7 +829,7 @@ Expected: das vorhandene Muster für k3s- und MinIO-Container. Der neue Test üb
 
 Der Test fährt in einer Methode:
 
-1. k3s starten, die sechs CRDs aus `deploy/crds` anwenden, den Operator über `LocallyRunOperatorExtension` gegen diesen Cluster laufen lassen.
+1. k3s starten, die sechs CRDs über `helm install apus-operator deploy/charts/apus-operator --set bundles.s3Endpoint=<minio-endpoint>` einspielen (statt einzelne CRD-Manifeste anzuwenden — das Chart installiert sie als Templates, siehe `deploy/charts/apus-operator/templates/crds.yaml`), den Operator-Reconciler zusätzlich über `LocallyRunOperatorExtension` gegen denselben Cluster laufen lassen.
 2. MinIO starten, `testdata/mini-world` als Push-Quelle in den Staging-Prefix legen.
 3. `Tenant` anlegen, auf `status.namespace` warten.
 4. `WorldSource` (Typ `push`) und `WorldIngest` anlegen, warten bis `status.phase == "Succeeded"` und `status.bundle.path` gesetzt ist.
@@ -1164,7 +848,7 @@ Expected: FAIL. Der Fehlschlag muss aus einer der Wartestufen kommen, nicht aus 
 
 Was hier zu tun ist, hängt vom Fehlschlag ab. Erwartbare Stolpersteine, jeweils mit dem Ort, an dem sie zu beheben sind:
 
-- Der Operator im Test kennt die Image-Namen nicht → `OperatorConfig`-Umgebungsvariablen im Test setzen, so wie das Deployment aus Task 2 es tut.
+- Der Operator im Test kennt die Image-Namen nicht → `OperatorConfig`-Umgebungsvariablen im Test setzen, so wie das `apus-operator`-Chart sie über seine `images.*`-Werte in das Deployment einsetzt (`deploy/charts/apus-operator/templates/deployment.yaml`).
 - Rook existiert im k3s-Testcluster nicht → der Test setzt `storage.bucketClaim` nicht auf `auto`, sondern legt Bucket und Secret direkt in MinIO an und referenziert sie; die Rook-Integration ist eigener Scope und in `OperatorIntegrationTest` bereits abgedeckt.
 - Der Hosting-Pod braucht einen Ingress-Controller → im Test gegen den `Service` prüfen statt gegen die Ingress-URL; `status.ready` ist das Signal, nicht die externe Erreichbarkeit.
 
@@ -1173,12 +857,30 @@ Was hier zu tun ist, hängt vom Fehlschlag ab. Erwartbare Stolpersteine, jeweils
 Run: `./gradlew :operator:integrationTest --tests '*FullPipelineIntegrationTest*'` (zweimal hintereinander)
 Expected: beide Male PASS. Ein E2E-Test, der nur beim ersten Lauf grün ist, hat Zustandsreste und ist nicht fertig.
 
-- [ ] **Schritt 6: Sicherstellen, dass er nicht im PR-Build landet**
+- [ ] **Schritt 6: `helm upgrade` mit geändertem CRD-Schema prüfen**
+
+Grund für diesen Schritt: Er belegt die Eigenschaft, wegen der die CRDs in
+`deploy/charts/apus-operator/templates/crds.yaml` liegen und nicht in Helms `crds/`-Sonder-
+verzeichnis (Design-Spec §9, Task-2-Bericht der Helm Charts) — Letzteres installiert Helm
+einmalig und rührt es bei `helm upgrade` nie wieder an, ein geändertes Schema bliebe im
+Cluster hängen.
+
+Gegen denselben k3s-Cluster aus Schritt 1:
+
+1. `helm install apus-operator deploy/charts/apus-operator --set bundles.s3Endpoint=<minio-endpoint>` mit dem Chart-Stand *vor* dieser Änderung (letzter Git-Tag bzw. letztes veröffentlichtes Chart-Archiv aus Harbor).
+2. Lokal ein Feld im generierten CRD-Schema ändern (z. B. eine neue optionale Property auf einer der `@Group`-annotierten Spec-Klassen), dann `./gradlew :operator:syncCrds` und `deploy/charts/apus-operator/sync-crds.sh` laufen lassen.
+3. `helm upgrade apus-operator deploy/charts/apus-operator --set bundles.s3Endpoint=<minio-endpoint>` mit dem geänderten Chart-Stand.
+4. `kubectl get crd bluemapmaps.bluemap.onelitefeather.net -o jsonpath='{.spec.versions[0].schema.openAPIV3Schema.properties.spec.properties}'` gegen das neue Feld prüfen.
+
+Run: das Vorstehende als Shell-Sequenz oder als eigener Testfall neben `FullPipelineIntegrationTest`.
+Expected: Das neue Feld erscheint im Cluster-Schema nach dem `helm upgrade`, ohne dass irgendjemand die CRD von Hand neu angewendet hat. Die Änderung am Schema danach wieder verwerfen (`git checkout` auf die betroffene Spec-Klasse), damit dieser Schritt keine echte CRD-Änderung hinterlässt.
+
+- [ ] **Schritt 7: Sicherstellen, dass er nicht im PR-Build landet**
 
 Run: `./gradlew :operator:test --tests '*FullPipeline*' 2>&1 | grep -c 'No tests found'`
 Expected: `1` — der Test greift die `*IntegrationTest`-Namenskonvention und ist damit aus `test` ausgeschlossen.
 
-- [ ] **Schritt 7: Commit**
+- [ ] **Schritt 8: Commit**
 
 ```bash
 git add operator/src/test/java/net/onelitefeather/apus/operator/FullPipelineIntegrationTest.java
@@ -1195,7 +897,11 @@ git commit -m "test: cover the full ingest, render and hosting pipeline on k3s"
 
 - [ ] **Schritt 1: §13.1 als umgesetzt kennzeichnen**
 
-Der Abschnitt beschreibt Metriken, Logs und Dashboards im Futur. Umschreiben auf den Ist-Zustand, mit den echten Dateinamen (`deploy/base/servicemonitor-*.yaml`, `deploy/dashboards/*.json`) und den tatsächlich exportierten Metriknamen.
+Der Abschnitt beschreibt Metriken, Logs und Dashboards im Futur. Umschreiben auf den
+Ist-Zustand, mit den echten Dateinamen (`deploy/charts/apus-operator/templates/servicemonitor.yaml`,
+`deploy/charts/apus-platform/templates/api-servicemonitor.yaml`,
+`deploy/podmonitor-render.yaml`, `deploy/charts/apus-platform/templates/dashboards-configmap.yaml`)
+und den tatsächlich exportierten Metriknamen.
 
 - [ ] **Schritt 2: §13.2, Zeile „E2E", auf den neuen Test verweisen**
 
@@ -1204,12 +910,18 @@ Ersetzen durch: `k3s + S3: kompletter Durchlauf Ingest → Render → Hosting mi
 
 - [ ] **Schritt 3: §0 um den Deployment-Stand ergänzen**
 
+Ein Absatz zu Phase-8-§0 ist bereits durch die Helm-Charts-Arbeit vorhanden (siehe deren
+Task 9); dieser Schritt erweitert ihn um das, was diese Phase zusätzlich liefert, statt ihn
+zu ersetzen:
+
 ```markdown
-**Ausrollbar seit Phase 8.** `deploy/base` ist eine vollständige Kustomize-Basis
-(CRDs, Operator, API, UI, RBAC, Scrape-Konfiguration); cluster-spezifische Werte kommen
-aus einem Overlay im Cluster-Repository. Operator und API exportieren Metriken, zwei
-Grafana-Dashboards liegen unter `deploy/dashboards`. Was offen bleibt, sind die
-inhaltlichen Härtungen aus §15 — siehe den Plan zu Phase 9.
+**Ausrollbar seit Phase 8.** Die beiden Helm Charts unter `deploy/charts/`
+(`apus-operator`, `apus-platform`) installieren CRDs, Operator, API, UI, RBAC und
+Scrape-Konfiguration; cluster-spezifische Werte kommen über `values:` aus der
+`HelmRelease` im Cluster-Repository. Operator und API exportieren Metriken, zwei
+Grafana-Dashboards liegen als optionale Ressource im `apus-platform`-Chart
+(`dashboards.enabled`). Was offen bleibt, sind die inhaltlichen Härtungen aus §15 — siehe
+den Plan zu Phase 9.
 ```
 
 - [ ] **Schritt 4: Lint und Commit**
@@ -1226,6 +938,6 @@ git commit -m "docs: record the phase 8 deployment and observability state"
 
 ## Was dieser Plan bewusst nicht abdeckt
 
-- **Das Flux-Overlay selbst.** Es gehört ins Cluster-Repository (`Kubernetes-FLUX`), nicht hierher: Registry-Hostnamen, Rook-Namen, Domains und Secret-Referenzen sind Cluster-Eigenschaften, keine Projekt-Eigenschaften. `deploy/base` ist so geschnitten, dass ein Overlay genau diese Werte patchen kann.
+- **Das Flux-Overlay selbst** (`OCIRepository` plus `HelmRelease`). Es gehört ins Cluster-Repository (`Kubernetes-FLUX`), nicht hierher: Registry-Hostnamen, Rook-Namen, Domains und Secret-Referenzen sind Cluster-Eigenschaften, keine Projekt-Eigenschaften. Die beiden Helm Charts unter `deploy/charts/` sind so geschnitten, dass eine `HelmRelease` genau diese Werte per `values:` überschreiben kann; siehe Design-Spec §9 und `docs/superpowers/plans/2026-08-13-helm-charts.md`.
 - **Alerting-Regeln.** Sinnvoll, aber sie brauchen erst Betriebserfahrung mit den neuen Metriken — Schwellwerte ohne Datengrundlage erzeugen nur Rauschen.
 - **Die Härtungen aus §15** (Identity-Broker, RBAC-Verengung, Quota-Signal, Paper-Save-Fenster, `emptyDir`-Grenze) — eigener Plan (Phase 9).
