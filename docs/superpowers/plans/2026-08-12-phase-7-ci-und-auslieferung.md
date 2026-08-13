@@ -435,7 +435,9 @@ Das Repository trägt ungewöhnlich viel Dokumentation (Design-Spec, Pläne, Spi
   "ignores": [
     "**/node_modules/**",
     "**/build/**",
-    "CHANGELOG.md"
+    // Alle Changelogs, nicht nur das im Wurzelverzeichnis: Release Please schreibt
+    // eines je Release-Spur. Ein blankes "CHANGELOG.md" trifft nur die Wurzeldatei.
+    "**/CHANGELOG.md"
   ]
 }
 ```
