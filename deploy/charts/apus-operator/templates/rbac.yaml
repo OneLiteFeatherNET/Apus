@@ -1,0 +1,87 @@
+{{- if .Values.rbac.create }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "apus-operator.fullname" . }}
+  labels:
+    {{- include "apus-operator.labels" . | nindent 4 }}
+rules:
+  # Own custom resources, including status and finalizers.
+  - apiGroups: ["bluemap.onelitefeather.net"]
+    resources:
+      - tenants
+      - worldsources
+      - worldingests
+      - bluemapmaps
+      - bluemaprenders
+      - bluemaphostings
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["bluemap.onelitefeather.net"]
+    resources:
+      - tenants/status
+      - worldsources/status
+      - worldingests/status
+      - bluemapmaps/status
+      - bluemaprenders/status
+      - bluemaphostings/status
+    verbs: ["get", "update", "patch"]
+  - apiGroups: ["bluemap.onelitefeather.net"]
+    resources:
+      - tenants/finalizers
+      - bluemapmaps/finalizers
+    verbs: ["update"]
+  # A Tenant creates a namespace with its quota and network policy (design spec §8.1).
+  - apiGroups: [""]
+    resources: ["namespaces", "resourcequotas", "limitranges"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  # Renders and ingests are Jobs; hosting is a Deployment behind a Service and Ingress.
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["services", "configmaps"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Reading the render pod's /progress endpoint and its termination message (design spec §7.2).
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list", "watch"]
+  # Rook provisions bucket, credentials secret and endpoint ConfigMap (design spec §9.1).
+  - apiGroups: ["objectbucket.io"]
+    resources: ["objectbucketclaims"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["ceph.rook.io"]
+    resources: ["cephobjectstoreusers"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # The secrets Rook creates, wired into render jobs and hosting pods. Deliberately not
+  # cluster-wide write: the operator only ever reads them.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "apus-operator.fullname" . }}
+  labels:
+    {{- include "apus-operator.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "apus-operator.fullname" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "apus-operator.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}
