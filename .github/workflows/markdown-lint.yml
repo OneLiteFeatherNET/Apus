@@ -9,4 +9,8 @@ on:
 jobs:
   lint:
     uses: OneLiteFeatherNET/workflows/.github/workflows/markdown-lint.yml@v2.4.0
+    with:
+      # The central default is `.markdownlint.json`, which this repo does not have --
+      # markdownlint-cli2 then throws and the job is always red.
+      config-file: .markdownlint-cli2.jsonc
     secrets: inherit
