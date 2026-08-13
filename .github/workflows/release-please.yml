@@ -118,3 +118,25 @@ jobs:
       context: "."
       dockerfile: "ui/Dockerfile"
     secrets: inherit
+
+  publish-telemetry-addon:
+    needs: release-please
+    if: needs.release-please.outputs.telemetry-released == 'true'
+    uses: OneLiteFeatherNET/workflows/.github/workflows/gradle-publish.yml@v2.4.0
+    with:
+      java-version: "25"
+      java-distribution: "temurin"
+      build-task: ":telemetry-addon:build"
+      publish-task: ":telemetry-addon:publish"
+    secrets: inherit
+
+  publish-paper-worldpush:
+    needs: release-please
+    if: needs.release-please.outputs.paper-released == 'true'
+    uses: OneLiteFeatherNET/workflows/.github/workflows/gradle-publish.yml@v2.4.0
+    with:
+      java-version: "25"
+      java-distribution: "temurin"
+      build-task: ":paper-worldpush:build"
+      publish-task: ":paper-worldpush:publish"
+    secrets: inherit
