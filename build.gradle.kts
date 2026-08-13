@@ -2,9 +2,17 @@ plugins {
     alias(libs.plugins.spotless) apply false
 }
 
+version = "0.1.0" // x-release-please-version
+
 subprojects {
     apply(plugin = "java")
     apply(plugin = "com.diffplug.spotless")
+
+    // telemetry-addon and paper-worldpush carry their own release track (design spec §4)
+    // and set their own version; every other module ships as part of the project as a whole.
+    if (name != "telemetry-addon" && name != "paper-worldpush") {
+        version = rootProject.version
+    }
 
     extensions.configure<JavaPluginExtension> {
         toolchain {

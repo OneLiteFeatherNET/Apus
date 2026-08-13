@@ -2,6 +2,8 @@ plugins {
     alias(libs.plugins.shadow)
 }
 
+version = "0.1.0" // x-release-please-version
+
 dependencies {
     compileOnly(libs.bluemap.api)
     compileOnly(libs.bluemap.core)

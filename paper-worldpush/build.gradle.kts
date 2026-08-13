@@ -2,6 +2,8 @@ plugins {
     alias(libs.plugins.shadow)
 }
 
+version = "0.1.0" // x-release-please-version
+
 dependencies {
     // Paper API only, never paper-server/paper-mojangapi -- a plugin compiles against the API
     // surface and runs inside whatever Paper build the operator actually deployed. See
