@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/OneLiteFeatherNET/Apus/compare/apus-v0.2.0...apus-v0.2.1) (2026-08-13)
+
+
+### Bug Fixes
+
+* **ci:** read the root release outputs without a path prefix ([#35](https://github.com/OneLiteFeatherNET/Apus/issues/35)) ([c0bd759](https://github.com/OneLiteFeatherNET/Apus/commit/c0bd759d62f407c1e6ab43de17ca7c73c972f2ff))
+
 ## [0.2.0](https://github.com/OneLiteFeatherNET/Apus/compare/apus-v0.1.0...apus-v0.2.0) (2026-08-13)
 
 
