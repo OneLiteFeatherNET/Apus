@@ -59,6 +59,13 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: azure/setup-helm@v4
+        with:
+          # Pinned on purpose: the schema checks below grep for JSON-Pointer paths
+          # (/auth/issuer), which Helm only emits since it moved to jsonschema/v6
+          # after 3.18.4. An older Helm would fail these checks with a misleading
+          # message even though the schema is fine. setup-helm's own fallback
+          # version is 3.18.3, so "latest" is not safe to rely on here.
+          version: v4.2.2
       - name: Lint charts
         run: |
           helm lint deploy/charts/apus-operator --set bundles.s3Endpoint=http://example
