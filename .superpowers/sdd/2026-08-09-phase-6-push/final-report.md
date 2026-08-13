@@ -30,8 +30,8 @@ already resolves a token to a *namespace*, not a source, which only makes sense 
 reading.
 
 - New `PushTokenSecrets` (operator, package `tenant`) is the single canonical definition of the
-  Secret shape (label, data key, fixed name `apus-push-token`, `generate()` using `SecureRandom`
-  + URL-safe base64, 256 bits).
+  Secret shape (label, data key, fixed name `apus-push-token`, `generate()` using `SecureRandom` +
+  URL-safe base64, 256 bits).
 - `TenantReconciler` creates this Secret once per tenant, alongside the namespace. Critically, it
   is **never regenerated** on later reconciles (no `createOr(update)` here) — a fresh random
   value on every resync would silently invalidate whatever `paper-worldpush` was already
@@ -47,8 +47,8 @@ exists anywhere in this repo to hang it on): `FabricPushTokenRepository`'s Javad
 that its current `list()`-by-label lookup, unavoidably, needs `get`/`list` on **all** Secrets
 cluster-wide (Kubernetes RBAC cannot filter by label) — broader than ideal — and documents the
 concrete narrower alternative (enumerate tenants via the already-listable `Tenant` CR, then `get`
-the fixed-name Secret per namespace, letting RBAC restrict to `resourceNames: ["apus-push-token"]`
-+ `get` only) as a deliberate follow-up, not implemented now to avoid an invasive rewrite of
+the fixed-name Secret per namespace, letting RBAC restrict to `resourceNames: ["apus-push-token"]` +
+`get` only) as a deliberate follow-up, not implemented now to avoid an invasive rewrite of
 already-tested code under this task's scope. Flagged as a concern below and as open item 9 in the
 spec.
 

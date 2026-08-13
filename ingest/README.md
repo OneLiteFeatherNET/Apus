@@ -46,7 +46,7 @@ The full contract this image accepts, and the interface `IngestJobBuilder` (phas
 builds Kubernetes Jobs against -- the ingest equivalent of `runner/README.md`'s table.
 
 | Variable | Required | Default | Meaning |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `APUS_SOURCE_TYPE` | yes | — | `s3`, `pterodactyl`, `push`, or `upload` -- an unsupported value fails fast rather than being guessed at |
 | `APUS_WORLD_NAME` | yes | — | The world's folder name at the source, e.g. `world` |
 | `APUS_LAYOUT` | no | `auto` | `auto`, `vanilla`, or `bukkit`. `auto` lets `LayoutDetector` decide; any other value forces that layout and fails detection rather than falling back if the fetched data doesn't actually match it |
@@ -89,7 +89,7 @@ message on stderr and a non-zero exit, **before** any connector is touched -- se
 ## Exit codes
 
 | Code | Meaning |
-|---|---|
+| --- | --- |
 | `0` | Bundle written successfully |
 | `1` | Configuration error: a required variable is missing/blank, or `APUS_SOURCE_TYPE` names an unimplemented source. Nothing was fetched. |
 | `2` | Layout detection failed -- no known world layout (vanilla/bukkit) could be recognised in the fetched data. The error message names the paths that were actually found. |

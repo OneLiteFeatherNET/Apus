@@ -1,6 +1,9 @@
 plugins {
+    `maven-publish`
     alias(libs.plugins.shadow)
 }
+
+version = "0.1.0" // x-release-please-version
 
 dependencies {
     // Paper API only, never paper-server/paper-mojangapi -- a plugin compiles against the API
@@ -64,5 +67,34 @@ tasks {
     }
     build {
         dependsOn(shadowJar)
+    }
+}
+
+publishing {
+    publications {
+        create<MavenPublication>("maven") {
+            groupId = "net.onelitefeather.apus"
+            artifactId = "paper-worldpush"
+            // The shadow jar is the artifact consumers need -- the thin jar would leave
+            // them to resolve the relocated dependencies themselves.
+            artifact(tasks.named("shadowJar"))
+        }
+    }
+    repositories {
+        maven {
+            // Name and credential env vars match the OneLiteFeather-wide convention (verified
+            // against OneLiteFeatherNET/Aves and the central gradle-publish.yml reusable
+            // workflow, which injects exactly these two secrets).
+            name = "OneLiteFeatherRepository"
+            credentials(PasswordCredentials::class) {
+                username = System.getenv("ONELITEFEATHER_MAVEN_USERNAME")
+                password = System.getenv("ONELITEFEATHER_MAVEN_PASSWORD")
+            }
+            url = if (project.version.toString().contains("SNAPSHOT")) {
+                uri("https://repo.onelitefeather.dev/onelitefeather-snapshots")
+            } else {
+                uri("https://repo.onelitefeather.dev/onelitefeather-releases")
+            }
+        }
     }
 }

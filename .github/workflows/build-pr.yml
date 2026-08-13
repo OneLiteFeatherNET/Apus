@@ -1,0 +1,55 @@
+name: build-pr
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  gradle:
+    uses: OneLiteFeatherNET/workflows/.github/workflows/gradle-build-pr.yml@v2.4.0
+    with:
+      java-version: "25"
+      java-distribution: "temurin"
+      # The central default is a three-OS matrix. Apus only ever ships to Linux
+      # containers, so windows/macos runners would burn minutes on a platform nothing
+      # deploys to.
+      runs-on: '["ubuntu-latest"]'
+      paths-filters: |
+        code:
+          - '**/*.java'
+          - '**/*.kts'
+          - '**/*.properties'
+          - 'gradle/**'
+          - 'gradlew'
+          - 'gradlew.bat'
+          - '.spotless/**'
+          - '**/src/**/resources/**'
+          - '**/entrypoint.sh'
+          - '**/bin/*.sh'
+          # Kept from the central default: a CI-only change must still run the build,
+          # otherwise a workflow edit merges without ever having been exercised.
+          - '.github/workflows/**'
+    secrets: inherit
+
+  ui:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ui
+    steps:
+      - uses: actions/checkout@v5
+      # There is no root package.json; packageManager lives in ui/package.json, and
+      # `defaults.run.working-directory` does not apply to action inputs, so the action
+      # has to be told where to read the pnpm version from.
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: ui/package.json
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: ui/.nvmrc
+          cache: pnpm
+          cache-dependency-path: ui/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test

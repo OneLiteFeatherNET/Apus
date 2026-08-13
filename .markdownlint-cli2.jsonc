@@ -1,0 +1,14 @@
+{
+  "config": {
+    // The design spec and the plans use long prose lines; wrapping them would make
+    // diffs unreadable.
+    "MD013": false,
+    // Release Please writes the changelog; its heading structure is not ours to police.
+    "MD024": { "siblings_only": true }
+  },
+  "ignores": [
+    "**/node_modules/**",
+    "**/build/**",
+    "CHANGELOG.md"
+  ]
+}

@@ -32,7 +32,7 @@ URL, OIDC issuer, OIDC client ID) — see "Configuration" below.
 ## Versions (pinned, verified against npm on 2026-08-09)
 
 | Package | Version | Why this one |
-|---|---|---|
+| --- | --- | --- |
 | `nuxt` | 4.5.2 | current stable Nuxt 4 |
 | `vue` | 3.5.41 | pulled in by Nuxt 4 |
 | `@nuxt/ui` | 4.10.0 | current stable; bundles its own Tailwind 4 wiring |
@@ -62,7 +62,7 @@ Nuxt 4's actual current default: an `app/` directory holds everything client-sid
 with no Nitro API routes of its own; the only thing Nitro does here is serve the built static
 assets (see "Why no server-side session" below).
 
-```
+```text
 app/
   app.vue                       -- <UApp><NuxtLayout><NuxtPage/></NuxtLayout></UApp>
   layouts/default.vue           -- header + nav, wraps every page

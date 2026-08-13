@@ -69,6 +69,7 @@ WorldIngest, BlueMapHosting) — confirms `Certificate` was not picked up by the
 ## File restriction compliance
 
 Only these files were created/modified:
+
 - `operator/src/main/java/net/onelitefeather/apus/operator/hosting/HostingResourceBuilder.java` (new)
 - `operator/src/main/java/net/onelitefeather/apus/operator/hosting/Certificate.java` (new)
 - `operator/src/test/java/net/onelitefeather/apus/operator/hosting/HostingResourceBuilderTest.java` (new)

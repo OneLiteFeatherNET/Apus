@@ -48,7 +48,7 @@ docker run --rm -p 8100:8100 \
 ### Environment variables
 
 | Variable | Required | Default | Meaning |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `APUS_S3_ENDPOINT` | yes | -- | e.g. `http://minio:9000` |
 | `APUS_S3_ACCESS_KEY` | yes | -- | Access key |
 | `APUS_S3_SECRET_KEY` | yes | -- | Secret key |

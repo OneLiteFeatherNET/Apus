@@ -1,6 +1,9 @@
 plugins {
+    `maven-publish`
     alias(libs.plugins.shadow)
 }
+
+version = "0.1.0" // x-release-please-version
 
 dependencies {
     compileOnly(libs.bluemap.api)
@@ -29,5 +32,37 @@ tasks {
     }
     build {
         dependsOn(shadowJar)
+    }
+}
+
+publishing {
+    publications {
+        create<MavenPublication>("maven") {
+            groupId = "net.onelitefeather.apus"
+            artifactId = "telemetry-addon"
+            // Every dependency of this module is compileOnly, so shadowJar bundles and
+            // relocates nothing -- its output is content-identical to the thin jar. It is
+            // published anyway so that the artifact in the Maven repo is literally the same
+            // file the runner image ships (telemetry-addon/build/libs/apus-telemetry-addon.jar),
+            // leaving no second jar that could drift from it.
+            artifact(tasks.named("shadowJar"))
+        }
+    }
+    repositories {
+        maven {
+            // Name and credential env vars match the OneLiteFeather-wide convention (verified
+            // against OneLiteFeatherNET/Aves and the central gradle-publish.yml reusable
+            // workflow, which injects exactly these two secrets).
+            name = "OneLiteFeatherRepository"
+            credentials(PasswordCredentials::class) {
+                username = System.getenv("ONELITEFEATHER_MAVEN_USERNAME")
+                password = System.getenv("ONELITEFEATHER_MAVEN_PASSWORD")
+            }
+            url = if (project.version.toString().contains("SNAPSHOT")) {
+                uri("https://repo.onelitefeather.dev/onelitefeather-snapshots")
+            } else {
+                uri("https://repo.onelitefeather.dev/onelitefeather-releases")
+            }
+        }
     }
 }

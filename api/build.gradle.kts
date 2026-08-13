@@ -6,6 +6,7 @@ evaluationDependsOn(":operator")
 
 plugins {
     application
+    alias(libs.plugins.shadow)
 }
 
 dependencies {
@@ -111,6 +112,22 @@ configurations.matching { it.name == "testCompileClasspath" || it.name == "testR
 
 application {
     mainClass.set("net.onelitefeather.apus.api.Application")
+}
+
+tasks {
+    shadowJar {
+        archiveClassifier.set("")
+        archiveBaseName.set("apus-api")
+        archiveFileName.set("apus-api.jar")
+        // Micronaut ships service files (annotation-driven bean definitions, serde config)
+        // in META-INF/services; without merging them the shadowed jar starts but resolves
+        // no beans, which surfaces as a confusing "no route matched" at runtime rather
+        // than a build failure.
+        mergeServiceFiles()
+    }
+    build {
+        dependsOn(shadowJar)
+    }
 }
 
 // TenantIsolationIntegrationTest starts a k3s container (via Testcontainers), applies the

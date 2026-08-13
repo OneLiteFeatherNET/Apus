@@ -1,19 +1,29 @@
 # syntax=docker/dockerfile:1
 
 ########################################
-# Stage 1: fetch the BlueMap CLI
+# Stage 1: fetch the BlueMap CLI and the S3 storage addon
 ########################################
 FROM eclipse-temurin:25-jre-jammy AS fetch
 
 ARG BLUEMAP_VERSION=5.23
+ARG BLUEMAP_S3_STORAGE_VERSION=1.5.1
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends curl ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /download
+# BlueMapS3Storage release assets are versioned (e.g. BlueMapS3Storage-1.5.1.jar, not
+# BlueMapS3Storage.jar), so releases/latest/download/BlueMapS3Storage.jar 404s -- the
+# version-pinned URL below is the reproducible way to fetch it (hosting/Dockerfile fetches
+# the same jar the same way). Bump BLUEMAP_S3_STORAGE_VERSION when a newer release is
+# needed. Fetching it here instead of copying a checked-in runner/vendor/ jar is what makes
+# this image buildable in CI at all: runner/vendor/ is gitignored, so it does not exist in
+# a fresh clone.
 RUN curl -fsSL -o bluemap-cli.jar \
-      "https://github.com/BlueMap-Minecraft/BlueMap/releases/download/v${BLUEMAP_VERSION}/bluemap-${BLUEMAP_VERSION}-cli.jar"
+      "https://github.com/BlueMap-Minecraft/BlueMap/releases/download/v${BLUEMAP_VERSION}/bluemap-${BLUEMAP_VERSION}-cli.jar" \
+ && curl -fsSL -o bluemap-s3-storage.jar \
+      "https://github.com/TheMeinerLP/BlueMapS3Storage/releases/download/v${BLUEMAP_S3_STORAGE_VERSION}/BlueMapS3Storage-${BLUEMAP_S3_STORAGE_VERSION}.jar"
 
 ########################################
 # Stage 2: runtime
@@ -48,8 +58,8 @@ COPY --chown=apus:apus runner/bin/ /opt/apus/bin/
 # Fixed file name (see telemetry-addon/build.gradle.kts archiveFileName) -- no glob, so
 # this keeps working once build/libs holds more than one version after a release.
 COPY --chown=apus:apus telemetry-addon/build/libs/apus-telemetry-addon.jar /work/config/packs/apus-telemetry.jar
-# The S3 storage addon; see BlueMapS3Storage releases.
-COPY --chown=apus:apus runner/vendor/BlueMapS3Storage.jar /work/config/packs/bluemap-s3-storage.jar
+# The S3 storage addon; fetched in the stage above, see BlueMapS3Storage releases.
+COPY --from=fetch --chown=apus:apus /download/bluemap-s3-storage.jar /work/config/packs/bluemap-s3-storage.jar
 
 RUN chmod +x /opt/apus/entrypoint.sh /opt/apus/bin/*.sh
 

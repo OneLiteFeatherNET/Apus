@@ -54,7 +54,7 @@ The fixture was extended with two more region files pulled from
 `playerdata/`/`stats/`/`advancements/`. This turns the fixture into a contiguous 2×2
 block of regions:
 
-```
+```text
             region x=-1        region x=0
 region z=0   r.-1.0.mca          r.0.0.mca
 region z=1   r.-1.1.mca          r.0.1.mca
@@ -119,7 +119,7 @@ Scripts, all committed alongside this report in
 `docs/superpowers/spikes/2026-08-09-lowres-sharding-spike/`:
 
 | File | Purpose |
-|---|---|
+| --- | --- |
 | `spike-entrypoint.sh` | Runner entrypoint variant that adds `render-mask` to `map.conf` |
 | `run-spike.sh` | Orchestrates network, MinIO, seeding, reference render, N parallel repeats, sequential control |
 | `compare_tiles.py` | Mirrors a bucket's lowres tiles locally and diffs them (MD5 + per-pixel) against the reference |
@@ -169,7 +169,7 @@ repeats — the same 7 files each time, and byte-for-byte (MD5) identical across
 repeats:**
 
 | Tile | Differing pixels | % of tile |
-|---|---:|---:|
+| --- | ---: | ---: |
 | `tiles/1/x-1/z1.png` | 456,494 / 502,002 | **90.93%** |
 | `tiles/2/x-1/z0.png` | 28,254 / 502,002 | 5.63% |
 | `tiles/1/x0/z1.png` | 1,928 / 502,002 | 0.38% |
@@ -215,7 +215,7 @@ sufficient to fix this on its own.
 ### 4.4 Reproducibility
 
 | Run | Lowres tiles differing | Deterministic across repeats? |
-|---|---:|---|
+| --- | ---: | --- |
 | Concurrent × 3 | 7/24 (29%) each time | Yes — MD5-identical corrupted bytes in all 3 repeats |
 | Sequential × 1 | 10/24 (42%) | N/A (single ordering by construction) |
 
