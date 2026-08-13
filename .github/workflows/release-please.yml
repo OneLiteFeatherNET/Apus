@@ -31,12 +31,32 @@ jobs:
       java-version: "25"
       version: ${{ needs.release-please.outputs.root-version }}
       gradle-command: "./gradlew :telemetry-addon:shadowJar :ingest:shadowJar :operator:shadowJar :api:shadowJar"
-      context-path: "."
+      # Only the four shadow jars are needed by the Dockerfiles. Uploading "." would ship
+      # the whole working tree (including .git and every build/ directory -- hundreds of
+      # MB) because the central workflow passes context-path straight to
+      # actions/upload-artifact with include-hidden-files: true.
+      # upload-artifact roots the archive at the least common ancestor of the matched
+      # files; the four jars live in four different top-level modules, so that ancestor is
+      # the workspace root and the artifact keeps the `<module>/build/libs/` prefix the
+      # Dockerfiles COPY by name.
+      context-path: "**/build/libs/*.jar"
       artifact-name: "docker-context"
     secrets: inherit
 
+  # The six publish-* jobs below are chained with `needs` on purpose -- do NOT "optimise"
+  # them back into parallel jobs. docker-publish.yml@v2.4.0 declares
+  #   concurrency: group: docker-publish-${{ github.workflow }}-${{ github.ref }}
+  # which every one of these six calls evaluates to the identical string, and a caller
+  # cannot override a callee's concurrency. Running them in parallel therefore puts all six
+  # in one concurrency group where they cancel each other. Serialising them keeps at most
+  # one of them pending at any time. (The proper fix is a `concurrency-suffix` input on the
+  # central docker-publish.yml; that is an upstream change.)
   publish-runner:
     needs: [release-please, build-context]
+    # First link of the chain. The three jobs after it gate on build-context's own result
+    # rather than on their predecessor, so a single failing image does not silently skip
+    # the rest -- the chain exists for serialisation only, not to express a dependency.
+    if: ${{ !cancelled() && needs.build-context.result == 'success' }}
     permissions:
       contents: read
       id-token: write
@@ -50,7 +70,8 @@ jobs:
     secrets: inherit
 
   publish-ingest:
-    needs: [release-please, build-context]
+    needs: [release-please, build-context, publish-runner]
+    if: ${{ !cancelled() && needs.build-context.result == 'success' }}
     permissions:
       contents: read
       id-token: write
@@ -64,8 +85,12 @@ jobs:
     secrets: inherit
 
   publish-hosting:
-    needs: release-please
-    if: needs.release-please.outputs.root-released == 'true'
+    # publish-api is a chain link only (see the concurrency note above); hosting builds
+    # from the checked-out repo and needs no Gradle artifact, so `!cancelled()` keeps its
+    # gate standalone -- it publishes whenever a root release happened, even if one of the
+    # Gradle-based images failed.
+    needs: [release-please, publish-api]
+    if: ${{ !cancelled() && needs.release-please.outputs.root-released == 'true' }}
     permissions:
       contents: read
       id-token: write
@@ -78,7 +103,8 @@ jobs:
     secrets: inherit
 
   publish-operator:
-    needs: [release-please, build-context]
+    needs: [release-please, build-context, publish-ingest]
+    if: ${{ !cancelled() && needs.build-context.result == 'success' }}
     permissions:
       contents: read
       id-token: write
@@ -92,7 +118,8 @@ jobs:
     secrets: inherit
 
   publish-api:
-    needs: [release-please, build-context]
+    needs: [release-please, build-context, publish-operator]
+    if: ${{ !cancelled() && needs.build-context.result == 'success' }}
     permissions:
       contents: read
       id-token: write
@@ -106,8 +133,9 @@ jobs:
     secrets: inherit
 
   publish-ui:
-    needs: release-please
-    if: needs.release-please.outputs.root-released == 'true'
+    # Last chain link; same standalone gate as publish-hosting.
+    needs: [release-please, publish-hosting]
+    if: ${{ !cancelled() && needs.release-please.outputs.root-released == 'true' }}
     permissions:
       contents: read
       id-token: write
@@ -122,6 +150,10 @@ jobs:
   publish-telemetry-addon:
     needs: release-please
     if: needs.release-please.outputs.telemetry-released == 'true'
+    # Narrow the workflow-level `contents: write, pull-requests: write` down to what a
+    # Maven publish actually needs, matching the six Docker jobs.
+    permissions:
+      contents: read
     uses: OneLiteFeatherNET/workflows/.github/workflows/gradle-publish.yml@v2.4.0
     with:
       java-version: "25"
@@ -133,6 +165,8 @@ jobs:
   publish-paper-worldpush:
     needs: release-please
     if: needs.release-please.outputs.paper-released == 'true'
+    permissions:
+      contents: read
     uses: OneLiteFeatherNET/workflows/.github/workflows/gradle-publish.yml@v2.4.0
     with:
       java-version: "25"
