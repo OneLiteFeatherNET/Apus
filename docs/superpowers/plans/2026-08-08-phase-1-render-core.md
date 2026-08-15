@@ -2188,7 +2188,7 @@ A minimal Vanilla-layout Minecraft world used by the render integration tests.
   `minecraft:overworld` without any dimension sub-folder.
 
 Regenerate with the snippet in
-`docs/superpowers/plans/2026-08-08-phase-1-render-kern.md`, Task 7, Step 1.
+`docs/superpowers/plans/2026-08-08-phase-1-render-core.md`, Task 7, Step 1.
 ```
 
 - [ ] **Step 3: Register the `runner` module**
