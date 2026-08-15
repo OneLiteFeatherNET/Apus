@@ -28,3 +28,7 @@ ui/**/.env
 # vitest.nuxt.config.ts/tests/nuxt/ (added for the layout render regression test).
 ui/.nuxtrc
 ui/**/.nuxtrc
+
+# Playwright MCP writes page snapshots and console logs here while a design is being
+# checked in a browser. Scratch output, never part of the repository.
+.playwright-mcp/
