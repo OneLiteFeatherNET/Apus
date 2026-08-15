@@ -20,10 +20,11 @@ directly, as below.
 corepack enable   # or: npm install -g pnpm
 pnpm install
 pnpm dev           # local dev server
-pnpm build          # production build (static SPA output, see nuxt.config.ts)
-pnpm test           # vitest, unit tests
-pnpm lint            # eslint, includes eslint-plugin-vuejs-accessibility
-pnpm typecheck        # vue-tsc
+pnpm build          # production build: .output/server + .output/public, what the image ships
+pnpm test            # vitest, unit tests (no build needed)
+pnpm test:server      # builds, then tests the built Nitro server -- see "Serving the built SPA"
+pnpm lint              # eslint, includes eslint-plugin-vuejs-accessibility
+pnpm typecheck          # vue-tsc
 ```
 
 Copy `.env.example` to `.env` for local development and fill in the three variables (API base
@@ -58,9 +59,10 @@ table was built.
 
 Nuxt 4's actual current default: an `app/` directory holds everything client-side
 (`app/pages`, `app/components`, `app/composables`, `app/layouts`, `app/middleware`,
-`app/plugins`, `app/utils`, `app.vue`). There is no `server/` directory — this is a pure SPA
-with no Nitro API routes of its own; the only thing Nitro does here is serve the built static
-assets (see "Why no server-side session" below).
+`app/plugins`, `app/utils`, `app.vue`). There is no `server/` directory — this SPA has no
+Nitro API routes of its own. The container does run a Nitro server (see "Serving the built
+SPA" below), but the only thing it serves is the SPA shell and the client bundle; nothing
+per-request is application logic, which is what "Why no server-side session" below rests on.
 
 ```text
 app/
@@ -86,6 +88,7 @@ app/
     role.ts                           -- UI-side role helpers (convenience only, see below)
     jwt.ts                             -- decodeJwtPayload(): unverified, display-only decode
 tests/unit/                       -- vitest; mirrors app/utils/, one spec file per module
+tests/server/                     -- vitest against the built Nitro server (needs a build)
 ```
 
 `app/utils/*` is deliberately framework-agnostic (no `useRuntimeConfig`, no `$fetch`, no
@@ -102,12 +105,50 @@ and `useApiClient` themselves are thin enough (a few lines of wiring) that they 
 indirectly through the pure functions they call, per the task brief's "pure presentation needs
 no tests" — the composables' own logic content is effectively zero.
 
+## Serving the built SPA
+
+`ui/Dockerfile` runs `pnpm build` and copies `.output` into
+`gcr.io/distroless/nodejs24-debian12:nonroot`, where the container starts Nuxt's own Nitro
+server (`nitro.preset: 'node-server'`). There is no `index.html` on disk — with `ssr: false`
+Nitro renders the SPA shell per request, which is what makes the runtime config below work.
+
+```bash
+pnpm build && PORT=8080 node .output/server/index.mjs   # exactly what the container does
+```
+
+**Configuration is read at runtime.** Every `runtimeConfig.public` key maps to `NUXT_PUBLIC_` +
+the key in SCREAMING_SNAKE_CASE (`apiBaseUrl` ← `NUXT_PUBLIC_API_BASE_URL`). The
+`apus-platform` chart passes them generically through `ui.env` (a map handed to the container
+verbatim) and `ui.envFrom`, so a new key needs no chart change:
+
+```yaml
+ui:
+  env:
+    NUXT_PUBLIC_API_BASE_URL: https://apus.example.net/api
+    NUXT_PUBLIC_OIDC_ISSUER: https://id.example.net/realms/apus
+    NUXT_PUBLIC_OIDC_CLIENT_ID: apus-ui
+```
+
+None of these are secrets: this is a public OIDC client, and every value ends up in the served
+HTML by design.
+
+**The header contract.** Nitro sends no `Cache-Control` on the shell at all, so `routeRules` in
+`nuxt.config.ts` pin `no-store` there and repeat Nitro's `immutable` on `/_nuxt/**` — without
+that, a deploy strands browsers on HTML referencing hashed assets the new build no longer
+ships. `tests/server/nitro.spec.ts` spawns the built server and holds it; it needs a build, so
+it runs as `pnpm test:server`.
+
+Why Nitro rather than nginx or `vite preview`, the measured memory and dependency trade-offs,
+the full variable and chart-value reference and the operational how-to are documented
+internally: engineering wiki, space *Entwicklung*, "Apus UI — Auslieferung &
+Runtime-Konfiguration".
+
 ### Why no server-side session
 
-`ssr: false` plus a static/`node-server`-served SPA output means there is no reliable backend
-component to hold a confidential OIDC client or a session cookie behind — the deploy target for
-this module (per the design spec, presumably a plain Deployment serving static files, mirroring
-how `BlueMapHosting` serves rendered maps) may not run any per-request server code at all. That
+`ssr: false` means there is no reliable backend component to hold a confidential OIDC client
+or a session cookie behind. The Nitro server in the image (see "Serving the built SPA" above)
+does not change that: it renders the SPA shell and serves assets, it holds no session store,
+and this module deliberately has no `server/` directory to put one in. That
 ruled out `nuxt-oidc-auth` (built around a server-side session) and shaped the client-only,
 public-client design in `useAuth.ts` below.
 
@@ -123,7 +164,8 @@ Flow: Authorization Code + PKCE, public client (no client secret — there is no
 keep one in a pure SPA). Configuration is three environment variables
 (`NUXT_PUBLIC_API_BASE_URL`, `NUXT_PUBLIC_OIDC_ISSUER`, `NUXT_PUBLIC_OIDC_CLIENT_ID`), matching
 the design spec's instruction to keep the broker choice (§15: Keycloak vs. Zitadel, undecided)
-out of code entirely.
+out of code entirely. They are read at runtime, not baked in — see "Runtime configuration"
+above for how the deployment supplies them.
 
 ### Token storage — binding requirement, and the reasoning
 

@@ -12,7 +12,8 @@ runner/vendor/
 ui/node_modules/
 ui/.nuxt/
 ui/.output/
-ui/dist/
+# No trailing slash: nuxt writes dist as a symlink, which `ui/dist/` would not match.
+ui/dist
 ui/coverage/
 ui/.env
 # Local marker @nuxt/test-utils writes recording which version last ran -- see

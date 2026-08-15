@@ -9,7 +9,9 @@ This chart installs:
   (`ClusterRole`/`ClusterRoleBinding`) needed to read and write the Apus custom resources
   (`Tenant`, `WorldSource`, `WorldIngest`, `BlueMapMap`, `BlueMapRender`, `BlueMapHosting`)
   and to tail render-job Pod logs as a Loki-less fallback.
-- The UI `Deployment` and `Service` — a prebuilt static SPA served by an unprivileged nginx.
+- The UI `Deployment` and `Service` — the SPA served out of a distroless image by Nuxt's own
+  Nitro server. Configure an installation with `ui.env`; see `ui/README.md`, "Serving the
+  built SPA".
 - Optionally, a single `Ingress` that routes `/api` to the API and `/` to the UI.
 - Optionally, a Prometheus Operator `ServiceMonitor` for the API.
 
@@ -89,9 +91,11 @@ listed here.
 | `ui.image.tag` | string | `""` | Image tag. Empty on purpose, same reasoning as `api.image.tag`. |
 | `ui.image.pullPolicy` | string | `"IfNotPresent"` | Image pull policy. |
 | `ui.replicaCount` | int | `2` | Number of UI replicas. The UI is a stateless static SPA, safe to scale. |
-| `ui.podSecurityContext` | object | `{"runAsNonRoot": true, "runAsUser": 101, "seccompProfile": {"type": "RuntimeDefault"}}` | Pod-level security context for the UI. `runAsUser: 101`, not `10001` like the Java images — the unprivileged nginx base image runs as uid 101. |
-| `ui.securityContext` | object | `{"allowPrivilegeEscalation": false, "readOnlyRootFilesystem": false, "capabilities": {"drop": ["ALL"]}}` | Container-level security context for the UI. `readOnlyRootFilesystem: false` — nginx writes its cache and pid below `/tmp` and `/var/cache`. |
-| `ui.resources` | object | `{"requests": {"cpu": "50m", "memory": "64Mi"}, "limits": {"memory": "128Mi"}}` | Resource requests/limits for the UI container. |
+| `ui.podSecurityContext` | object | `{"runAsNonRoot": true, "runAsUser": 65532, "seccompProfile": {"type": "RuntimeDefault"}}` | Pod-level security context for the UI. `runAsUser: 65532`, not `10001` like the Java images — the distroless `:nonroot` base image runs as uid 65532. |
+| `ui.securityContext` | object | `{"allowPrivilegeEscalation": false, "readOnlyRootFilesystem": true, "capabilities": {"drop": ["ALL"]}}` | Container-level security context for the UI. `readOnlyRootFilesystem: true` — the UI container only ever reads its own image; nothing in it needs a writable path. |
+| `ui.resources` | object | `{"requests": {"cpu": "50m", "memory": "128Mi"}, "limits": {"memory": "256Mi"}}` | Resource requests/limits for the UI container. Higher than nginx needed — Nitro costs ~63Mi idle and peaks near 115Mi under load; see the comment in `values.yaml`. |
+| `ui.env` | object | `{}` | Environment for the UI container, passed through verbatim. `NUXT_PUBLIC_*` keys configure the SPA at runtime — see `ui/README.md`. |
+| `ui.envFrom` | list | `[]` | `configMapRef`/`secretRef` entries for the UI container, passed through verbatim. |
 | `ui.podAnnotations` | object | `{}` | Extra annotations added to the UI pod. |
 | `ui.podLabels` | object | `{}` | Extra labels added to the UI pod. |
 | `ui.nodeSelector` | object | `{}` | Node selector for the UI pod. |

@@ -8,8 +8,7 @@ metadata:
 spec:
   replicas: {{ .Values.ui.replicaCount }}
   strategy:
-    # The UI is a stateless static SPA served by nginx -- no local state to lose by running
-    # old and new pods side by side.
+    # Stateless: no local state to lose by running old and new pods side by side.
     type: RollingUpdate
   selector:
     matchLabels:
@@ -37,17 +36,23 @@ spec:
           securityContext:
             {{- toYaml .Values.ui.securityContext | nindent 12 }}
           ports:
-            # The unprivileged nginx base image (nginxinc/nginx-unprivileged) listens on
-            # 8080 and runs as uid 101, not 80/root like the stock image.
+            # Nitro's own default is 3000; the image pins PORT=8080 (see ui/Dockerfile).
             - name: http
               containerPort: 8080
               protocol: TCP
-          # The UI is a prebuilt static SPA: config (API base URL, OIDC issuer/client) is
-          # baked in at build time, not read from the environment at runtime -- there is
-          # nothing to inject here.
+          {{- with .Values.ui.env }}
+          env:
+            {{- range $name, $value := . }}
+            - name: {{ $name }}
+              value: {{ $value | quote }}
+            {{- end }}
+          {{- end }}
+          {{- with .Values.ui.envFrom }}
+          envFrom:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           readinessProbe:
-            # Static SPA: a 200 on the root is a sufficient signal, no management endpoint
-            # needed like the API.
+            # A 200 on the root is a sufficient signal; no management endpoint like the API.
             httpGet:
               path: /
               port: http

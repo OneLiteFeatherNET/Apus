@@ -1,15 +1,36 @@
 // https://nuxt.com/docs/api/configuration/nuxt-config
 //
 // Apus UI is a pure SPA (design spec §11.2): `ssr: false`, no server-rendered routes, no
-// backend-for-frontend session. It is built as static assets (`nuxt generate` under the hood
-// via `nuxt build` + `ssr: false`) and served from a plain webserver container -- there is no
-// Nitro server available at runtime to lean on for anything (see ui/README.md "Why no
-// server-side session"). That absence is why auth (see app/composables/useAuth.ts) is a
-// client-only, public OIDC client rather than a confidential one behind a session cookie.
+// backend-for-frontend session. Auth (see app/composables/useAuth.ts) is therefore a
+// client-only, public OIDC client -- see ui/README.md, "Why no server-side session".
+//
+// The container runs Nitro's own node-server build; ui/README.md, "Serving the built SPA",
+// covers what that means for the output layout, the headers below and runtime config.
 export default defineNuxtConfig({
   compatibilityDate: '2026-08-09',
   devtools: { enabled: true },
   ssr: false,
+  nitro: {
+    // Explicit, so CI cannot auto-detect a deploy provider and build an output the
+    // Dockerfile's CMD refuses to start.
+    preset: 'node-server'
+  },
+  // Nitro sends no Cache-Control on the shell at all; `/_nuxt/**` repeats Nitro's own
+  // immutable because `/**` would otherwise override it. Held by tests/server/nitro.spec.ts.
+  routeRules: {
+    '/**': {
+      headers: {
+        'cache-control': 'no-store',
+        'x-content-type-options': 'nosniff'
+      }
+    },
+    '/_nuxt/**': {
+      headers: {
+        'cache-control': 'public, max-age=31536000, immutable',
+        'x-content-type-options': 'nosniff'
+      }
+    }
+  },
   modules: [
     '@nuxt/ui',
     '@vueuse/nuxt',

@@ -63,22 +63,28 @@ ui:
   replicaCount: 2
   podSecurityContext:
     runAsNonRoot: true
-    # The unprivileged nginx image runs as uid 101, not 10001 like the Java images.
-    runAsUser: 101
+    # The distroless :nonroot base runs as uid 65532, not 10001 like the Java images.
+    runAsUser: 65532
     seccompProfile:
       type: RuntimeDefault
   securityContext:
     allowPrivilegeEscalation: false
-    # nginx writes its cache and pid below /tmp and /var/cache; not read-only.
-    readOnlyRootFilesystem: false
+    # The Nitro server only reads from the image; it needs no writable path.
+    readOnlyRootFilesystem: true
     capabilities:
       drop: ["ALL"]
   resources:
     requests:
       cpu: 50m
-      memory: 64Mi
-    limits:
+      # Nitro renders the shell per request: ~63Mi idle, ~115Mi peak at concurrency 100 with
+      # the image's --max-old-space-size cap. The 64Mi/128Mi that fitted nginx would OOMKill.
       memory: 128Mi
+    limits:
+      memory: 256Mi
+  # Passed to the container verbatim. NUXT_PUBLIC_* reach the SPA at runtime because the image
+  # runs Nitro -- see ui/README.md, "Runtime configuration".
+  env: {}
+  envFrom: []
   podAnnotations: {}
   podLabels: {}
   nodeSelector: {}

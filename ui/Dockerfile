@@ -1,9 +1,11 @@
 # syntax=docker/dockerfile:1
+#
+# See ui/README.md, "Serving the built SPA", for why this image looks the way it does.
 
 ########################################
 # Stage 1: build the SPA
 ########################################
-# Version pinned to ui/.nvmrc (24); keep the two in sync.
+# Version pinned to ui/.nvmrc (24); keep both in sync with the runtime stage below.
 FROM node:24-bookworm-slim AS build
 
 RUN corepack enable
@@ -13,16 +15,28 @@ COPY ui/package.json ui/pnpm-lock.yaml ui/pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 
 COPY ui/ ./
-RUN pnpm generate
+# Not `pnpm generate`: that emits static files and no server for the CMD below to start.
+RUN pnpm build
 
 ########################################
 # Stage 2: serve it
 ########################################
-FROM nginxinc/nginx-unprivileged:1.29-alpine
+FROM gcr.io/distroless/nodejs24-debian12:nonroot
 
-# The unprivileged nginx image already runs as uid 101; it needs no writable root and
-# listens on 8080 rather than 80, which is why it is used instead of the stock image.
-COPY ui/nginx.conf /etc/nginx/conf.d/default.conf
-COPY --from=build /src/.output/public /usr/share/nginx/html
+WORKDIR /app
+COPY --from=build /src/.output ./.output
+
+# Already the default for the :nonroot tag; repeated because the chart's runAsUser must match.
+USER 65532:65532
+
+# Nitro would otherwise listen on 3000 and bind [::]; the chart says 8080 on an IPv4 cluster.
+ENV PORT=8080
+ENV HOST=0.0.0.0
+# Without a cap V8 sizes its heap from the host's RAM, not the cgroup limit. Kept in step with
+# ui.resources in the apus-platform chart.
+ENV NODE_OPTIONS=--max-old-space-size=64
 
 EXPOSE 8080
+
+# The distroless entrypoint is already ["/nodejs/bin/node"].
+CMD ["/app/.output/server/index.mjs"]

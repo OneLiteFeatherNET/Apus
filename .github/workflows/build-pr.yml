@@ -53,6 +53,9 @@ jobs:
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test
+      # Builds, then tests .output/server/index.mjs -- the container's CMD. Not part of
+      # `pnpm test` because it needs that build.
+      - run: pnpm test:server
 
   helm:
     runs-on: ubuntu-latest
