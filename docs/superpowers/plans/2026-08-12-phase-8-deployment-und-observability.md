@@ -1,65 +1,65 @@
-# Apus Phase 8 — Deployment und Observability: Implementierungsplan
+# Apus Phase 8 — Deployment and Observability: Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Apus lässt sich per GitOps in einen Cluster ausrollen, und wer es betreibt, sieht am Dashboard, was das System gerade tut — statt es aus `kubectl`-Ausgaben zusammenzureimen.
+**Goal:** Apus can be rolled out into a cluster via GitOps, and whoever operates it can see on the dashboard what the system is currently doing — instead of piecing it together from `kubectl` output.
 
-**Architecture:** Apus wird über zwei Helm Charts unter `deploy/charts/` ausgerollt
-(`apus-operator`, `apus-platform`) statt über eine Kustomize-Basis — siehe
-`docs/superpowers/plans/2026-08-13-helm-charts.md` und Design-Spec §9. Die sechs
-CRD-YAMLs werden eingecheckt statt nur generiert, damit ein Ausrollen keinen Gradle-Lauf
-voraussetzt; ein Test hält die eingecheckte Fassung mit dem Generator synchron. Metriken
-folgen dem im Repository bereits etablierten Muster: der Operator exponiert sie wie das
-`telemetry-addon` über den JDK-eigenen `HttpServer`, die API über Micronauts
-Micrometer-Integration.
+**Architecture:** Apus is rolled out via two Helm charts under `deploy/charts/`
+(`apus-operator`, `apus-platform`) instead of a Kustomize base — see
+`docs/superpowers/plans/2026-08-13-helm-charts.md` and design spec §9. The six
+CRD YAMLs are checked in instead of only generated, so that a rollout does not
+require a Gradle run; a test keeps the checked-in version in sync with the generator.
+Metrics follow the pattern already established in the repository: the operator
+exposes them like `telemetry-addon` does, via the JDK's own `HttpServer`, and the
+API via Micronaut's Micrometer integration.
 
-**Tech Stack:** Helm, Prometheus Operator (`PodMonitor`/`ServiceMonitor` aus dem im Cluster vorhandenen kube-prometheus-stack), Micrometer 1.15, JOSDK 5.5.1, Grafana, k3s via Testcontainers.
+**Tech Stack:** Helm, Prometheus Operator (`PodMonitor`/`ServiceMonitor` from the kube-prometheus-stack already present in the cluster), Micrometer 1.15, JOSDK 5.5.1, Grafana, k3s via Testcontainers.
 
 ## Global Constraints
 
-- **Voraussetzung: Phase 7 ist abgeschlossen.** Die Manifeste referenzieren die dort gebauten Images (`apus/operator`, `apus/api`, `apus/ui`); ohne sie ist dieser Plan nicht ausrollbar.
-- **Java-Toolchain 25**, Basispakete wie gehabt (`net.onelitefeather.apus.operator`, `...apus.api`).
-- **AGPL-Lizenzheader** über jede neue Java-Datei; Spotless erzwingt ihn.
-- **Neue Abhängigkeiten kommen in den Inline-Version-Catalog** in `settings.gradle.kts` — dieses Repository benutzt bewusst kein `libs.versions.toml`. Jede neue Version bekommt dort einen Kommentar, gegen was sie geprüft wurde, wie es die bestehenden Einträge tun.
-- **Der Operator arbeitet strikt namespace-lokal** (Design-Spec §10.1). Die RBAC-Regeln dieses Plans dürfen daran nichts aufweichen.
-- **Credentials erscheinen nie in Metriken, Labels oder Dashboards** (Design-Spec §12).
-- **Integrationstests bleiben aus dem PR-Build ausgeschlossen** — der k3s-Test aus Task 8 folgt der bestehenden `*IntegrationTest`-Konvention.
+- **Prerequisite: Phase 7 is complete.** The manifests reference the images built there (`apus/operator`, `apus/api`, `apus/ui`); without them this plan cannot be rolled out.
+- **Java toolchain 25**, base packages as before (`net.onelitefeather.apus.operator`, `...apus.api`).
+- **AGPL license header** on every new Java file; Spotless enforces it.
+- **New dependencies go into the inline version catalog** in `settings.gradle.kts` — this repository deliberately does not use a `libs.versions.toml`. Every new version gets a comment there stating what it was checked against, the way the existing entries do.
+- **The operator operates strictly namespace-local** (design spec §10.1). This plan's RBAC rules must not loosen that in any way.
+- **Credentials never appear in metrics, labels, or dashboards** (design spec §12).
+- **Integration tests stay excluded from the PR build** — the k3s test in Task 8 follows the existing `*IntegrationTest` convention.
 
 ---
 
-### Task 1: CRD-YAMLs einchecken und synchron halten
+### Task 1: Check in the CRD YAMLs and keep them in sync
 
-Heute erzeugt `./gradlew :operator:generateCrds` die sechs CRDs nach `operator/build/crds`. Wer Apus ausrollt, braucht sie aber vor dem ersten Operator-Start — und ein Cluster-Repository soll dafür kein Gradle ausführen müssen.
+Today `./gradlew :operator:generateCrds` generates the six CRDs into `operator/build/crds`. Whoever rolls out Apus needs them before the first operator start, though — and a cluster repository should not have to run Gradle for that.
 
-**Extension-Hinweis:** Der Generator schreibt seine Ausgabe mit der Endung `.yml`, nicht
-`.yaml`. `deploy/crds/` und die davon abgeleiteten `deploy/charts/apus-operator/files/crds/`
-benutzen durchgängig `.yaml` — dieser Plan macht `deploy/crds/` konsistent dazu, indem der
-Copy-Task in Schritt 4 beim Kopieren umbenennt, statt die Endung des Generators zu
-übernehmen. Grund für diese Wahl statt umgekehrt (alles auf `.yml` umzustellen): `deploy/crds/`
-existiert im Repository bereits mit sechs `.yaml`-Dateien (eingecheckt beim Bau der Helm
-Charts), und jede Glob-Regel, die darauf aufsetzt — im Chart-Template, in `sync-crds.sh`,
-in der Doku — erwartet `.yaml`. Auf `.yml` umzustellen hieße, all das nachträglich zu ändern,
-ohne einen Vorteil dafür zu bekommen.
+**Extension note:** The generator writes its output with the `.yml` extension, not
+`.yaml`. `deploy/crds/` and the `deploy/charts/apus-operator/files/crds/` derived from it
+both consistently use `.yaml` — this plan makes `deploy/crds/` consistent with that by
+having the copy task in Step 4 rename files during the copy, rather than adopting the
+generator's extension. Reason for this choice instead of the reverse (switching everything
+to `.yml`): `deploy/crds/` already exists in the repository with six `.yaml` files (checked
+in when the Helm charts were built), and every glob rule that builds on it — in the chart
+template, in `sync-crds.sh`, in the docs — expects `.yaml`. Switching to `.yml` would mean
+changing all of that after the fact, without gaining anything for it.
 
 **Files:**
 
-- Create: `deploy/crds/*.yaml` (sechs Dateien, Generator-Ausgabe)
+- Create: `deploy/crds/*.yaml` (six files, generator output)
 - Create: `operator/src/test/java/net/onelitefeather/apus/operator/CrdsInSyncTest.java`
-- Modify: `operator/build.gradle.kts` (Ausgabeverzeichnis des Generators zusätzlich nach `deploy/crds`)
+- Modify: `operator/build.gradle.kts` (generator's output directory additionally points to `deploy/crds`)
 
 **Interfaces:**
 
-- Consumes: `generateCrds` (JavaExec-Task, `operator/build.gradle.kts:62`), der nach `build/crds` schreibt.
-- Produces: `deploy/crds/` als eingecheckte Quelle für Task 2.
+- Consumes: `generateCrds` (JavaExec task, `operator/build.gradle.kts:62`), which writes to `build/crds`.
+- Produces: `deploy/crds/` as the checked-in source for Task 2.
 
-- [ ] **Schritt 1: CRDs erzeugen und Namen feststellen**
+- [ ] **Step 1: Generate the CRDs and note the names**
 
 Run: `./gradlew :operator:generateCrds && ls operator/build/crds/`
-Expected: sechs Dateien mit der Endung `.yml` (nicht `.yaml` — das ist die tatsächliche
-Ausgabe des Generators, unabhängig von diesem Plan). Die exakten Dateinamen notieren — sie
-werden in Schritt 3 gebraucht.
+Expected: six files with the `.yml` extension (not `.yaml` — that is the generator's actual
+output, independent of this plan). Note down the exact file names — they are
+needed in Step 3.
 
-- [ ] **Schritt 2: Failing test schreiben**
+- [ ] **Step 2: Write a failing test**
 
 ```java
 package net.onelitefeather.apus.operator;
@@ -133,14 +133,14 @@ class CrdsInSyncTest {
 }
 ```
 
-- [ ] **Schritt 3: Test laufen lassen und Fehlschlag bestätigen**
+- [ ] **Step 3: Run the test and confirm the failure**
 
 Run: `./gradlew :operator:test --tests '*CrdsInSyncTest*'`
-Expected: FAIL mit `../deploy/crds does not exist`.
+Expected: FAIL with `../deploy/crds does not exist`.
 
-- [ ] **Schritt 4: Generator zusätzlich nach `deploy/crds` schreiben lassen**
+- [ ] **Step 4: Have the generator additionally write to `deploy/crds`**
 
-In `operator/build.gradle.kts` nach der `generateCrds`-Registrierung:
+In `operator/build.gradle.kts`, after the `generateCrds` registration:
 
 ```kotlin
 val syncCrds by tasks.registering(Copy::class) {
@@ -153,17 +153,17 @@ val syncCrds by tasks.registering(Copy::class) {
 }
 ```
 
-- [ ] **Schritt 5: CRDs erzeugen und einchecken**
+- [ ] **Step 5: Generate the CRDs and check them in**
 
 Run: `./gradlew :operator:syncCrds && ls deploy/crds/`
-Expected: dieselben sechs Dateinamen wie in Schritt 1, jetzt mit der Endung `.yaml`.
+Expected: the same six file names as in Step 1, now with the `.yaml` extension.
 
-- [ ] **Schritt 6: Test läuft grün**
+- [ ] **Step 6: Test passes**
 
 Run: `./gradlew :operator:test --tests '*CrdsInSyncTest*'`
 Expected: PASS
 
-- [ ] **Schritt 7: Gegenprobe, dass der Test Drift wirklich erkennt**
+- [ ] **Step 7: Counter-check that the test actually detects drift**
 
 ```bash
 printf '\n# drift\n' >> deploy/crds/$(ls deploy/crds | head -1)
@@ -171,9 +171,9 @@ printf '\n# drift\n' >> deploy/crds/$(ls deploy/crds | head -1)
 git checkout deploy/crds
 ```
 
-Expected: `erkannt` — ein Test, der Drift nicht bemerkt, ist wertlos.
+Expected: `erkannt` — a test that does not notice drift is worthless.
 
-- [ ] **Schritt 8: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add deploy/crds operator/build.gradle.kts operator/src/test/java/net/onelitefeather/apus/operator/CrdsInSyncTest.java
@@ -182,25 +182,25 @@ git commit -m "feat: check in the generated CRDs and guard them against drift"
 
 ---
 
-### Task 2 und 3: ersetzt durch die Helm Charts
+### Task 2 and 3: replaced by the Helm charts
 
-Ursprünglich: Kustomize-Basis für Operator (Task 2), API und UI (Task 3). Diese beiden
-Tasks sind überholt. Statt einer Kustomize-Basis unter `deploy/base` rollt
-Apus über zwei Helm Charts unter `deploy/charts/` aus — `apus-operator` (die sechs CRDs
-als Templates, der Operator, cluster-weite RBAC) und `apus-platform` (API, UI, Ingress).
-Umsetzung und Design stehen in `docs/superpowers/plans/2026-08-13-helm-charts.md` und
-`docs/superpowers/specs/2026-08-13-helm-charts-design.md`; beide Charts sind abgeschlossen
-und in diesem Repository unter `deploy/charts/apus-operator` und `deploy/charts/apus-platform`
-eingecheckt. Die Werte, die diese beiden Tasks ursprünglich als Manifest-Inhalt vorsahen —
-`OperatorConfig`-Umgebungsvariablen, RBAC-Regeln, Health-Probes, Ingress-Pfade — finden sich
-1:1 in den `values.yaml`/`values.schema.json` der beiden Charts wieder; dieser Plan
-wiederholt sie nicht.
+Originally: Kustomize base for the operator (Task 2), API and UI (Task 3). Both of these
+tasks are superseded. Instead of a Kustomize base under `deploy/base`, Apus
+rolls out via two Helm charts under `deploy/charts/` — `apus-operator` (the six CRDs
+as templates, the operator, cluster-wide RBAC) and `apus-platform` (API, UI, ingress).
+Implementation and design are documented in `docs/superpowers/plans/2026-08-13-helm-charts.md` and
+`docs/superpowers/specs/2026-08-13-helm-charts-design.md`; both charts are complete
+and checked into this repository under `deploy/charts/apus-operator` and `deploy/charts/apus-platform`.
+The values these two tasks originally envisioned as manifest content —
+`OperatorConfig` environment variables, RBAC rules, health probes, ingress paths — show
+up 1:1 in the two charts' `values.yaml`/`values.schema.json`; this plan does not
+repeat them.
 
 ---
 
-### Task 4: Operator-Metriken
+### Task 4: Operator metrics
 
-Design-Spec §13.1 verlangt „Renders nach Phase, Ingest-Dauer, Quota-Auslastung je Mandant". Nichts davon existiert.
+Design spec §13.1 requires "renders by phase, ingest duration, quota utilization per tenant". None of that exists yet.
 
 **Files:**
 
@@ -233,11 +233,11 @@ Design-Spec §13.1 verlangt „Renders nach Phase, Ingest-Dauer, Quota-Auslastun
   }
   ```
 
-- Consumes: `JOSDK 5.5.1`s `Metrics`-Schnittstelle für die Reconciliation-Metriken.
+- Consumes: `JOSDK 5.5.1`'s `Metrics` interface for the reconciliation metrics.
 
-- [ ] **Schritt 1: Katalogeinträge ergänzen**
+- [ ] **Step 1: Add catalog entries**
 
-In `settings.gradle.kts` im `versionCatalogs`-Block:
+In `settings.gradle.kts`, in the `versionCatalogs` block:
 
 ```kotlin
 // Micrometer: the operator has no web framework to inherit a registry from, so it takes
@@ -252,7 +252,7 @@ library("micrometer.registry.prometheus", "io.micrometer", "micrometer-registry-
 library("josdk.micrometer", "io.javaoperatorsdk", "micrometer-support").versionRef("josdk")
 ```
 
-In `operator/build.gradle.kts` unter `dependencies`:
+In `operator/build.gradle.kts`, under `dependencies`:
 
 ```kotlin
 implementation(libs.micrometer.core)
@@ -260,7 +260,7 @@ implementation(libs.micrometer.registry.prometheus)
 implementation(libs.josdk.micrometer)
 ```
 
-- [ ] **Schritt 2: Failing test für die Metriken schreiben**
+- [ ] **Step 2: Write a failing test for the metrics**
 
 ```java
 package net.onelitefeather.apus.operator.metrics;
@@ -338,12 +338,12 @@ class ApusMetricsTest {
 }
 ```
 
-- [ ] **Schritt 3: Test laufen lassen und Fehlschlag bestätigen**
+- [ ] **Step 3: Run the test and confirm the failure**
 
 Run: `./gradlew :operator:test --tests '*ApusMetricsTest*'`
-Expected: FAIL, `ApusMetrics` existiert nicht.
+Expected: FAIL, `ApusMetrics` does not exist.
 
-- [ ] **Schritt 4: `ApusMetrics` implementieren**
+- [ ] **Step 4: Implement `ApusMetrics`**
 
 ```java
 package net.onelitefeather.apus.operator.metrics;
@@ -418,12 +418,12 @@ public final class ApusMetrics {
 }
 ```
 
-- [ ] **Schritt 5: Test läuft grün**
+- [ ] **Step 5: Test passes**
 
 Run: `./gradlew :operator:test --tests '*ApusMetricsTest*'`
 Expected: PASS
 
-- [ ] **Schritt 6: Failing test für den Metrics-Server**
+- [ ] **Step 6: Failing test for the metrics server**
 
 ```java
 package net.onelitefeather.apus.operator.metrics;
@@ -472,25 +472,25 @@ class MetricsServerTest {
 }
 ```
 
-- [ ] **Schritt 7: `MetricsServer` implementieren**
+- [ ] **Step 7: Implement `MetricsServer`**
 
-Nach dem Vorbild von `telemetry-addon/src/main/java/net/onelitefeather/apus/telemetry/TelemetryServer.java`: JDK-`HttpServer`, ein `HttpHandler` auf `/metrics`, `Executors.newVirtualThreadPerTaskExecutor()`, `port()`-Methode, die den effektiv gebundenen Port zurückgibt (nötig, weil der Test mit Port 0 bindet).
+Following the model of `telemetry-addon/src/main/java/net/onelitefeather/apus/telemetry/TelemetryServer.java`: JDK `HttpServer`, an `HttpHandler` on `/metrics`, `Executors.newVirtualThreadPerTaskExecutor()`, a `port()` method that returns the effectively bound port (needed because the test binds to port 0).
 
-- [ ] **Schritt 8: Test läuft grün**
+- [ ] **Step 8: Test passes**
 
 Run: `./gradlew :operator:test --tests '*MetricsServerTest*'`
 Expected: PASS
 
-- [ ] **Schritt 9: In `ApusOperator` verdrahten**
+- [ ] **Step 9: Wire it into `ApusOperator`**
 
-Im Start-Pfad eine `PrometheusMeterRegistry` anlegen, an `ApusMetrics` und an JOSDKs `MicrometerMetrics` übergeben (`Operator`-Konfiguration: `.withMetrics(MicrometerMetrics.newPerResourceCollectingMicrometerMetricsBuilder(registry).build())`), `MetricsServer` auf Port 8080 starten und beim Herunterfahren schließen. `ApusMetrics` an die Reconciler durchreichen, die die drei Ereignisse melden.
+In the startup path, create a `PrometheusMeterRegistry`, pass it to `ApusMetrics` and to JOSDK's `MicrometerMetrics` (`Operator` configuration: `.withMetrics(MicrometerMetrics.newPerResourceCollectingMicrometerMetricsBuilder(registry).build())`), start `MetricsServer` on port 8080 and close it on shutdown. Pass `ApusMetrics` through to the reconcilers that report the three events.
 
-- [ ] **Schritt 10: Gesamten Operator-Test-Lauf grün halten**
+- [ ] **Step 10: Keep the full operator test run green**
 
 Run: `./gradlew :operator:test`
 Expected: BUILD SUCCESSFUL
 
-- [ ] **Schritt 11: Commit**
+- [ ] **Step 11: Commit**
 
 ```bash
 git add settings.gradle.kts operator/
@@ -499,7 +499,7 @@ git commit -m "feat: export operator metrics for renders, ingests and tenant sto
 
 ---
 
-### Task 5: API-Metriken
+### Task 5: API metrics
 
 **Files:**
 
@@ -508,7 +508,7 @@ git commit -m "feat: export operator metrics for renders, ingests and tenant sto
 - Modify: `api/src/main/resources/application.yml`
 - Create: `api/src/test/java/net/onelitefeather/apus/api/MetricsEndpointTest.java`
 
-- [ ] **Schritt 1: Katalog und Abhängigkeiten**
+- [ ] **Step 1: Catalog and dependencies**
 
 ```kotlin
 // Micronaut Micrometer, per the OneLiteFeather observability baseline. Version taken from
@@ -533,7 +533,7 @@ implementation(libs.micronaut.micrometer.registry.prometheus)
 implementation(libs.micronaut.management)
 ```
 
-- [ ] **Schritt 2: Failing test schreiben**
+- [ ] **Step 2: Write a failing test**
 
 ```java
 package net.onelitefeather.apus.api;
@@ -578,12 +578,12 @@ class MetricsEndpointTest {
 }
 ```
 
-- [ ] **Schritt 3: Test laufen lassen und Fehlschlag bestätigen**
+- [ ] **Step 3: Run the test and confirm the failure**
 
 Run: `./gradlew :api:test --tests '*MetricsEndpointTest*'`
-Expected: FAIL — der Endpunkt existiert nicht (404 statt 401).
+Expected: FAIL — the endpoint does not exist (404 instead of 401).
 
-- [ ] **Schritt 4: `application.yml` ergänzen**
+- [ ] **Step 4: Extend `application.yml`**
 
 ```yaml
 endpoints:
@@ -607,14 +607,14 @@ micronaut:
       uptime.enabled: true
 ```
 
-`health` bleibt bewusst unauthentifiziert — Kubelet-Probes tragen kein Token. Details sind dabei unbedenklich, weil der Endpunkt nur innerhalb des Clusters erreichbar ist (kein Ingress-Pfad darauf).
+`health` deliberately stays unauthenticated — kubelet probes carry no token. Details are harmless there because the endpoint is only reachable within the cluster (no ingress path onto it).
 
-- [ ] **Schritt 5: Tests grün**
+- [ ] **Step 5: Tests pass**
 
 Run: `./gradlew :api:test`
 Expected: BUILD SUCCESSFUL
 
-- [ ] **Schritt 6: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add settings.gradle.kts api/
@@ -623,40 +623,40 @@ git commit -m "feat: expose Prometheus metrics and health endpoints from the API
 
 ---
 
-### Task 6: Scrape-Konfiguration für Render-Pods
+### Task 6: Scrape configuration for render pods
 
-Die beiden `ServiceMonitor`s für Operator und API aus der ursprünglichen Fassung dieses
-Tasks sind bereits Chart-Templates
+The two `ServiceMonitor`s for the operator and API from the original version of this
+task are already chart templates
 (`deploy/charts/apus-operator/templates/servicemonitor.yaml`,
-`deploy/charts/apus-platform/templates/api-servicemonitor.yaml`), zusammen mit den
-zugehörigen `Service`s (`deploy/charts/apus-operator/templates/service.yaml`,
-`deploy/charts/apus-platform/templates/api-service.yaml`). Beide `ServiceMonitor`s sind
-standardmäßig aus (`metrics.serviceMonitor.enabled: false` bzw.
-`api.metrics.serviceMonitor.enabled: false`), bis Task 4 bzw. Task 5 dieses Plans die
-Metriken tatsächlich exportieren — vorher würden sie nur einen leeren Endpunkt scrapen.
+`deploy/charts/apus-platform/templates/api-servicemonitor.yaml`), together with the
+corresponding `Service`s (`deploy/charts/apus-operator/templates/service.yaml`,
+`deploy/charts/apus-platform/templates/api-service.yaml`). Both `ServiceMonitor`s are
+off by default (`metrics.serviceMonitor.enabled: false` and
+`api.metrics.serviceMonitor.enabled: false` respectively) until Task 4 and Task 5 of this plan
+actually export the metrics — before that they would only scrape an empty endpoint.
 
-Offen bleibt nur der `PodMonitor` für die vom Operator erzeugten Render-Pods: Er selektiert
-Pods in Mandanten-Namespaces, die kein Chart kennt (Design-Spec §9), und ist deshalb kein
-Chart-Template, sondern ein eigenständiges Manifest außerhalb der Charts.
+What remains open is only the `PodMonitor` for the render pods created by the operator: it
+selects pods in tenant namespaces that no chart knows about (design spec §9), and is
+therefore not a chart template but a standalone manifest outside the charts.
 
 **Files:**
 
 - Create: `deploy/podmonitor-render.yaml`
 
-- [ ] **Schritt 1: Label prüfen, unter dem der Operator seine Render-Pods markiert**
+- [ ] **Step 1: Check the label under which the operator marks its render pods**
 
 Run: `grep -rn 'class Labels' -A 30 operator/src/main/java/net/onelitefeather/apus/operator/api/Labels.java`
-Expected: die Konstanten für die Pod-Labels. Der `PodMonitor` muss exakt darauf selektieren — geraten führt zu einem Monitor, der nie etwas findet und dabei keinen Fehler wirft.
+Expected: the constants for the pod labels. The `PodMonitor` must select exactly on these — guessing produces a monitor that never finds anything, without ever raising an error.
 
-- [ ] **Schritt 2: `PodMonitor` für Render-Pods**
+- [ ] **Step 2: `PodMonitor` for render pods**
 
 ```yaml
 apiVersion: monitoring.coreos.com/v1
 kind: PodMonitor
 metadata:
   name: apus-render
-  # Muss in demselben Namespace liegen wie die apus-operator-Chart-Installation, damit ein
-  # Prometheus, dessen podMonitorNamespaceSelector diesen Namespace einschließt, ihn findet.
+  # Must live in the same namespace as the apus-operator chart installation, so that a
+  # Prometheus whose podMonitorNamespaceSelector includes this namespace finds it.
   namespace: apus-system
   labels:
     app.kubernetes.io/part-of: apus
@@ -666,26 +666,26 @@ spec:
     any: true
   selector:
     matchLabels:
-      <die Labels aus Schritt 1>
+      <the labels from Step 1>
   podMetricsEndpoints:
     - port: telemetry
       path: /metrics
       interval: 15s
 ```
 
-Damit das greift, muss der Render-Job seinen Port benennen. Prüfen:
+For this to work, the render job must name its port. Check:
 
 Run: `grep -n 'containerPort\|withName' operator/src/main/java/net/onelitefeather/apus/operator/render/RenderJobBuilder.java`
-Expected: ein benannter Port `telemetry` auf 8099. Fehlt der Name, im selben Task ergänzen und den zugehörigen `RenderJobBuilderTest` erweitern.
+Expected: a named port `telemetry` on 8099. If the name is missing, add it within the same task and extend the corresponding `RenderJobBuilderTest`.
 
-- [ ] **Schritt 3: Validieren**
+- [ ] **Step 3: Validate**
 
 Run: `kubectl apply --dry-run=client -f deploy/podmonitor-render.yaml`
-Expected: keine Fehler. Der `PodMonitor` erfordert die CRDs des Prometheus-Operators; ist der
-lokal nicht vorhanden, schlägt `--dry-run=client` **nicht** fehl (es prüft nur Struktur) — für
-die echte Prüfung `--dry-run=server` gegen einen Cluster mit kube-prometheus-stack verwenden.
+Expected: no errors. The `PodMonitor` requires the Prometheus operator's CRDs; if those are
+not present locally, `--dry-run=client` does **not** fail (it only checks structure) — for
+the real check, use `--dry-run=server` against a cluster with kube-prometheus-stack.
 
-- [ ] **Schritt 4: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
 git add deploy/podmonitor-render.yaml
@@ -694,13 +694,13 @@ git commit -m "feat: add scrape configuration for render pods"
 
 ---
 
-### Task 7: Grafana-Dashboards
+### Task 7: Grafana dashboards
 
-Design-Spec §13.1: „ein Grafana-Dashboard je Ebene (Plattform, Mandant)". Die ConfigMap,
-die diese Dashboards für die Grafana-Sidecar-Erkennung bereitstellt, wandert gegenüber der
-ursprünglichen Fassung dieses Tasks als optionale `dashboards.enabled`-Ressource ins
-`apus-platform`-Chart, statt über `kustomization.yaml` in die Kustomize-Basis eingebunden zu
-werden (Design-Spec §9).
+Design spec §13.1: "a Grafana dashboard per layer (platform, tenant)". The ConfigMap
+that serves these dashboards for the Grafana sidecar's discovery moves, relative to the
+original version of this task, into the `apus-platform` chart as an optional
+`dashboards.enabled` resource, instead of being wired into the Kustomize base via
+`kustomization.yaml` (design spec §9).
 
 **Files:**
 
@@ -709,45 +709,45 @@ werden (Design-Spec §9).
 - Create: `deploy/charts/apus-platform/templates/dashboards-configmap.yaml`
 - Modify: `deploy/charts/apus-platform/values.yaml` (`dashboards.enabled`, `dashboards.labels`)
 - Modify: `deploy/charts/apus-platform/values.schema.json`
-- Modify: `deploy/charts/apus-platform/README.md` (Werte-Tabelle)
+- Modify: `deploy/charts/apus-platform/README.md` (values table)
 
-- [ ] **Schritt 1: Verfügbare Metriknamen zusammenstellen**
+- [ ] **Step 1: Assemble the available metric names**
 
-Aus Task 4 und 5 sowie dem bestehenden `telemetry-addon`:
+From Task 4 and 5, plus the existing `telemetry-addon`:
 
 Run: `grep -rn 'apus_' telemetry-addon/src/main/java/net/onelitefeather/apus/telemetry/PrometheusWriter.java operator/src/main/java/net/onelitefeather/apus/operator/metrics/ApusMetrics.java`
-Expected: die vollständige Liste. Jedes Panel darf ausschließlich diese Namen verwenden — ein Dashboard mit erfundenen Metriken sieht korrekt aus und bleibt dauerhaft leer.
+Expected: the complete list. Every panel may use only these names — a dashboard with made-up metrics looks correct and stays permanently empty.
 
-- [ ] **Schritt 2: Plattform-Dashboard bauen**
+- [ ] **Step 2: Build the platform dashboard**
 
-`deploy/charts/apus-platform/files/dashboards/apus-platform.json`, Panels:
+`deploy/charts/apus-platform/files/dashboards/apus-platform.json`, panels:
 
-1. **Renders nach Phase** (Zeitreihe): `sum by (phase) (rate(apus_renders_total[5m]))`
-2. **Fehlerquote** (Stat): `sum(rate(apus_renders_total{phase="Failed"}[1h])) / sum(rate(apus_renders_total[1h]))`
-3. **Speicherverbrauch je Mandant** (Balken): `apus_storage_used_bytes`
-4. **Ingest-Dauer, 95. Perzentil** (Zeitreihe): `histogram_quantile(0.95, sum by (le, tenant) (rate(apus_ingest_duration_seconds_bucket[30m])))`
-5. **Reconciliation-Fehler des Operators** (Zeitreihe, aus JOSDKs Micrometer-Support): `sum by (name) (rate(operator_sdk_reconciliations_failed_total[5m]))`
-6. **API-Latenz** (Zeitreihe): `histogram_quantile(0.95, sum by (le, uri) (rate(http_server_requests_seconds_bucket[5m])))`
+1. **Renders by phase** (time series): `sum by (phase) (rate(apus_renders_total[5m]))`
+2. **Error rate** (stat): `sum(rate(apus_renders_total{phase="Failed"}[1h])) / sum(rate(apus_renders_total[1h]))`
+3. **Storage used per tenant** (bar chart): `apus_storage_used_bytes`
+4. **Ingest duration, 95th percentile** (time series): `histogram_quantile(0.95, sum by (le, tenant) (rate(apus_ingest_duration_seconds_bucket[30m])))`
+5. **Operator reconciliation errors** (time series, from JOSDK's Micrometer support): `sum by (name) (rate(operator_sdk_reconciliations_failed_total[5m]))`
+6. **API latency** (time series): `histogram_quantile(0.95, sum by (le, uri) (rate(http_server_requests_seconds_bucket[5m])))`
 
-Als Template-Variable `datasource` vom Typ `prometheus`; keine fest verdrahtete Datenquellen-UID, sonst lässt sich das Dashboard in keinem zweiten Cluster importieren.
+As a template variable, `datasource` of type `prometheus`; no hardcoded datasource UID, otherwise the dashboard cannot be imported into any second cluster.
 
-- [ ] **Schritt 3: Mandanten-Dashboard bauen**
+- [ ] **Step 3: Build the tenant dashboard**
 
-`deploy/charts/apus-platform/files/dashboards/apus-tenant.json` mit derselben Datenquellen-Variable plus einer Variable `tenant` (`label_values(apus_storage_used_bytes, tenant)`). Panels: laufende Renders mit Fortschritt (`apus_render_progress_ratio` und `apus_render_eta_seconds` — die Namen, die `PrometheusWriter` im `telemetry-addon` tatsächlich schreibt), letzte Ingest-Dauer, Speicherverbrauch gegen Quota, Render-Historie nach Phase — alle mit `{tenant="$tenant"}` gefiltert.
+`deploy/charts/apus-platform/files/dashboards/apus-tenant.json` with the same datasource variable plus a `tenant` variable (`label_values(apus_storage_used_bytes, tenant)`). Panels: running renders with progress (`apus_render_progress_ratio` and `apus_render_eta_seconds` — the names `PrometheusWriter` in `telemetry-addon` actually writes), last ingest duration, storage used against quota, render history by phase — all filtered with `{tenant="$tenant"}`.
 
-Die Render-Metriken tragen allerdings **kein** `tenant`-Label: Das `telemetry-addon` läuft im Render-Pod und kennt nur `map`. Der Mandant kommt über die Pod-Labels herein, die der `PodMonitor` aus Task 6 anhängt — beim Bau der Panels ist zu prüfen, welches Label das ist (`grep` in `Labels.java`), und danach zu filtern. Wer stattdessen `{tenant="$tenant"}` auf `apus_render_progress_ratio` schreibt, bekommt ein dauerhaft leeres Panel.
+The render metrics, however, carry **no** `tenant` label: `telemetry-addon` runs in the render pod and only knows `map`. The tenant comes in via the pod labels that the `PodMonitor` from Task 6 attaches — when building the panels, check which label that is (`grep` in `Labels.java`), and filter on that instead. Anyone who writes `{tenant="$tenant"}` on `apus_render_progress_ratio` instead gets a permanently empty panel.
 
-- [ ] **Schritt 4: JSON validieren**
+- [ ] **Step 4: Validate the JSON**
 
 Run: `for f in deploy/charts/apus-platform/files/dashboards/*.json; do python3 -c "import json,sys;json.load(open('$f'));print('$f ok')"; done`
-Expected: beide `ok`.
+Expected: both `ok`.
 
-- [ ] **Schritt 5: Alle verwendeten Metriknamen gegen Schritt 1 gegenprüfen**
+- [ ] **Step 5: Cross-check all metric names used against Step 1**
 
-Nicht gegen den Quellcode greppen, sondern gegen einen echten Scrape — die Meter-Namen im Code und die gescrapten Namen unterscheiden sich (`apus_renders` im Code, `apus_renders_total` im Scrape; `apus_ingest_duration` im Code, `apus_ingest_duration_seconds*` im Scrape). Ein Abgleich gegen den Quellcode würde genau deshalb Fehlalarme produzieren.
+Don't grep against the source code — check against a real scrape instead. The meter names in the code and the scraped names differ (`apus_renders` in the code, `apus_renders_total` in the scrape; `apus_ingest_duration` in the code, `apus_ingest_duration_seconds*` in the scrape). Comparing against the source code would produce false alarms for exactly that reason.
 
 ```bash
-# Scrape einer laufenden Instanz als Referenz nehmen. Der Service-Name kommt aus
+# Take a scrape from a running instance as the reference. The service name comes from
 # deploy/charts/apus-operator/templates/service.yaml -- <release-name>-apus-operator-metrics.
 kubectl -n apus-system port-forward svc/apus-operator-metrics 8080:8080 &
 curl -s localhost:8080/metrics | grep -oE '^apus_[a-z_]+' | sort -u > /tmp/scraped.txt
@@ -755,16 +755,16 @@ grep -ohE 'apus_[a-z_]+' deploy/charts/apus-platform/files/dashboards/*.json | s
 comm -23 /tmp/used.txt /tmp/scraped.txt
 ```
 
-Expected: leere Ausgabe. Jeder Name, der hier erscheint, wird von keiner Instanz exportiert — entweder ein Tippfehler oder eine Metrik, die noch niemand schreibt. Beides muss vor dem Commit aufgelöst sein, denn ein Panel mit falschem Namen bleibt leer, ohne je einen Fehler zu zeigen.
+Expected: empty output. Every name that appears here is exported by no instance — either a typo or a metric that nobody writes yet. Both must be resolved before the commit, because a panel with the wrong name stays empty without ever showing an error.
 
-Metriken aus dem `telemetry-addon` (`apus_render_*`) erscheinen nicht im Operator-Scrape; für sie ist derselbe Abgleich gegen einen Render-Pod auf Port 8099 zu fahren.
+Metrics from `telemetry-addon` (`apus_render_*`) do not appear in the operator scrape; for those, run the same comparison against a render pod on port 8099.
 
-- [ ] **Schritt 6: ConfigMap als optionales Chart-Template**
+- [ ] **Step 6: ConfigMap as an optional chart template**
 
-`deploy/charts/apus-platform/templates/dashboards-configmap.yaml` — nach demselben Muster
-wie `deploy/charts/apus-operator/templates/crds.yaml` (das die CRDs aus `files/crds/*.yaml`
-liest): ein `.Files.Glob` über die im Chart mitgelieferten JSON-Dateien, kein Kopieren von
-Hand.
+`deploy/charts/apus-platform/templates/dashboards-configmap.yaml` — following the same
+pattern as `deploy/charts/apus-operator/templates/crds.yaml` (which reads the CRDs from
+`files/crds/*.yaml`): a `.Files.Glob` over the JSON files shipped in the chart, no manual
+copying.
 
 ```gotemplate
 {{- if .Values.dashboards.enabled }}
@@ -795,10 +795,10 @@ dashboards:
   enabled: false
 ```
 
-- [ ] **Schritt 7: Validieren und Commit**
+- [ ] **Step 7: Validate and commit**
 
 Run: `helm template t deploy/charts/apus-platform --set auth.issuer=https://id.example.net --set dashboards.enabled=true | grep -c 'kind: ConfigMap'`
-Expected: mindestens `1`.
+Expected: at least `1`.
 
 ```bash
 git add deploy/charts/apus-platform
@@ -807,80 +807,80 @@ git commit -m "feat(helm): add Grafana dashboards to the apus-platform chart"
 
 ---
 
-### Task 8: Ende-zu-Ende-Lauf auf k3s
+### Task 8: End-to-end run on k3s
 
-Design-Spec §13.2 sieht vor: „k3s + S3: kompletter Durchlauf Ingest → Render → Hosting mit Mini-Welt". Vorhanden sind `PushIngestEndToEndTest` (Ingest allein) und `RenderEndToEndTest` (Render allein) — der Durchlauf über alle drei Stufen fehlt, und Hosting ist in keinem E2E-Test enthalten.
+Design spec §13.2 calls for: "k3s + S3: complete pass ingest → render → hosting with a mini world". `PushIngestEndToEndTest` (ingest alone) and `RenderEndToEndTest` (render alone) already exist — the pass through all three stages is missing, and hosting is not covered in any E2E test.
 
 **Files:**
 
 - Create: `operator/src/test/java/net/onelitefeather/apus/operator/FullPipelineIntegrationTest.java`
-- Modify: `operator/build.gradle.kts` (nur falls der `integrationTest`-Task angepasst werden muss)
+- Modify: `operator/build.gradle.kts` (only if the `integrationTest` task needs adjusting)
 
 **Interfaces:**
 
-- Consumes: die bestehende k3s-Testcontainers-Infrastruktur der vorhandenen `*IntegrationTest`-Klassen sowie `testdata/mini-world`; die beiden Helm Charts unter `deploy/charts/`.
+- Consumes: the existing k3s Testcontainers infrastructure of the existing `*IntegrationTest` classes, plus `testdata/mini-world`; the two Helm charts under `deploy/charts/`.
 
-- [ ] **Schritt 1: Bestehende Integrationstest-Infrastruktur ansehen**
+- [ ] **Step 1: Look at the existing integration test infrastructure**
 
 Run: `ls operator/src/test/java/net/onelitefeather/apus/operator/*IntegrationTest.java && grep -n 'K3sContainer\|MinIOContainer\|LocallyRunOperatorExtension' operator/src/test/java/net/onelitefeather/apus/operator/OperatorIntegrationTest.java | head`
-Expected: das vorhandene Muster für k3s- und MinIO-Container. Der neue Test übernimmt es unverändert, statt eine zweite Variante zu erfinden.
+Expected: the existing pattern for the k3s and MinIO containers. The new test adopts it unchanged, instead of inventing a second variant.
 
-- [ ] **Schritt 2: Failing test schreiben**
+- [ ] **Step 2: Write a failing test**
 
-Der Test fährt in einer Methode:
+The test runs, in a single method:
 
-1. k3s starten, die sechs CRDs über `helm install apus-operator deploy/charts/apus-operator --set bundles.s3Endpoint=<minio-endpoint>` einspielen (statt einzelne CRD-Manifeste anzuwenden — das Chart installiert sie als Templates, siehe `deploy/charts/apus-operator/templates/crds.yaml`), den Operator-Reconciler zusätzlich über `LocallyRunOperatorExtension` gegen denselben Cluster laufen lassen.
-2. MinIO starten, `testdata/mini-world` als Push-Quelle in den Staging-Prefix legen.
-3. `Tenant` anlegen, auf `status.namespace` warten.
-4. `WorldSource` (Typ `push`) und `WorldIngest` anlegen, warten bis `status.phase == "Succeeded"` und `status.bundle.path` gesetzt ist.
-5. `BlueMapMap` anlegen, warten bis der erzeugte `BlueMapRender` auf `Succeeded` steht.
-6. `BlueMapHosting` anlegen, warten bis `status.ready == true` und `status.url` gesetzt ist.
-7. Prüfen, dass im Map-Bucket tatsächlich Kacheln liegen (`settings.json` und mindestens eine `.png`/`.prbm` unterhalb des Map-Prefix).
+1. Start k3s, install the six CRDs via `helm install apus-operator deploy/charts/apus-operator --set bundles.s3Endpoint=<minio-endpoint>` (instead of applying individual CRD manifests — the chart installs them as templates, see `deploy/charts/apus-operator/templates/crds.yaml`), and additionally run the operator reconciler against the same cluster via `LocallyRunOperatorExtension`.
+2. Start MinIO, place `testdata/mini-world` as a push source in the staging prefix.
+3. Create a `Tenant`, wait for `status.namespace`.
+4. Create a `WorldSource` (type `push`) and a `WorldIngest`, wait until `status.phase == "Succeeded"` and `status.bundle.path` is set.
+5. Create a `BlueMapMap`, wait until the resulting `BlueMapRender` reaches `Succeeded`.
+6. Create a `BlueMapHosting`, wait until `status.ready == true` and `status.url` is set.
+7. Verify that tiles actually exist in the map bucket (`settings.json` and at least one `.png`/`.prbm` beneath the map prefix).
 
-Timeouts großzügig (Render der Mini-Welt: bis zu 10 Minuten), jede Wartestufe mit eigener aussagekräftiger Fehlermeldung, damit ein Fehlschlag zeigt, *welche* Stufe hängen blieb.
+Generous timeouts (rendering the mini world: up to 10 minutes), each waiting stage with its own descriptive error message, so that a failure shows *which* stage got stuck.
 
-- [ ] **Schritt 3: Test laufen lassen und Fehlschlag bestätigen**
+- [ ] **Step 3: Run the test and confirm the failure**
 
 Run: `./gradlew :operator:integrationTest --tests '*FullPipelineIntegrationTest*'`
-Expected: FAIL. Der Fehlschlag muss aus einer der Wartestufen kommen, nicht aus einem Kompilierfehler.
+Expected: FAIL. The failure must come from one of the waiting stages, not from a compile error.
 
-- [ ] **Schritt 4: Test zum Laufen bringen**
+- [ ] **Step 4: Get the test passing**
 
-Was hier zu tun ist, hängt vom Fehlschlag ab. Erwartbare Stolpersteine, jeweils mit dem Ort, an dem sie zu beheben sind:
+What needs doing here depends on the failure. Expected stumbling blocks, each with where to fix it:
 
-- Der Operator im Test kennt die Image-Namen nicht → `OperatorConfig`-Umgebungsvariablen im Test setzen, so wie das `apus-operator`-Chart sie über seine `images.*`-Werte in das Deployment einsetzt (`deploy/charts/apus-operator/templates/deployment.yaml`).
-- Rook existiert im k3s-Testcluster nicht → der Test setzt `storage.bucketClaim` nicht auf `auto`, sondern legt Bucket und Secret direkt in MinIO an und referenziert sie; die Rook-Integration ist eigener Scope und in `OperatorIntegrationTest` bereits abgedeckt.
-- Der Hosting-Pod braucht einen Ingress-Controller → im Test gegen den `Service` prüfen statt gegen die Ingress-URL; `status.ready` ist das Signal, nicht die externe Erreichbarkeit.
+- The operator in the test doesn't know the image names → set `OperatorConfig` environment variables in the test, the same way the `apus-operator` chart injects them into the deployment via its `images.*` values (`deploy/charts/apus-operator/templates/deployment.yaml`).
+- Rook does not exist in the k3s test cluster → the test does not set `storage.bucketClaim` to `auto`, but instead creates the bucket and secret directly in MinIO and references them; the Rook integration is a separate scope and is already covered in `OperatorIntegrationTest`.
+- The hosting pod needs an ingress controller → in the test, check against the `Service` instead of the ingress URL; `status.ready` is the signal, not external reachability.
 
-- [ ] **Schritt 5: Test läuft grün, reproduzierbar**
+- [ ] **Step 5: Test passes, reproducibly**
 
-Run: `./gradlew :operator:integrationTest --tests '*FullPipelineIntegrationTest*'` (zweimal hintereinander)
-Expected: beide Male PASS. Ein E2E-Test, der nur beim ersten Lauf grün ist, hat Zustandsreste und ist nicht fertig.
+Run: `./gradlew :operator:integrationTest --tests '*FullPipelineIntegrationTest*'` (twice in a row)
+Expected: PASS both times. An E2E test that is only green on the first run has leftover state and is not done.
 
-- [ ] **Schritt 6: `helm upgrade` mit geändertem CRD-Schema prüfen**
+- [ ] **Step 6: Verify `helm upgrade` with a changed CRD schema**
 
-Grund für diesen Schritt: Er belegt die Eigenschaft, wegen der die CRDs in
-`deploy/charts/apus-operator/templates/crds.yaml` liegen und nicht in Helms `crds/`-Sonder-
-verzeichnis (Design-Spec §9, Task-2-Bericht der Helm Charts) — Letzteres installiert Helm
-einmalig und rührt es bei `helm upgrade` nie wieder an, ein geändertes Schema bliebe im
-Cluster hängen.
+Reason for this step: it demonstrates the property for which the CRDs live in
+`deploy/charts/apus-operator/templates/crds.yaml` instead of Helm's special `crds/`
+directory (design spec §9, Task 2 report of the Helm charts) — the latter is installed by
+Helm once and never touched again on `helm upgrade`, so a changed schema would stay stuck
+in the cluster.
 
-Gegen denselben k3s-Cluster aus Schritt 1:
+Against the same k3s cluster from Step 1:
 
-1. `helm install apus-operator deploy/charts/apus-operator --set bundles.s3Endpoint=<minio-endpoint>` mit dem Chart-Stand *vor* dieser Änderung (letzter Git-Tag bzw. letztes veröffentlichtes Chart-Archiv aus Harbor).
-2. Lokal ein Feld im generierten CRD-Schema ändern (z. B. eine neue optionale Property auf einer der `@Group`-annotierten Spec-Klassen), dann `./gradlew :operator:syncCrds` und `deploy/charts/apus-operator/sync-crds.sh` laufen lassen.
-3. `helm upgrade apus-operator deploy/charts/apus-operator --set bundles.s3Endpoint=<minio-endpoint>` mit dem geänderten Chart-Stand.
-4. `kubectl get crd bluemapmaps.bluemap.onelitefeather.net -o jsonpath='{.spec.versions[0].schema.openAPIV3Schema.properties.spec.properties}'` gegen das neue Feld prüfen.
+1. `helm install apus-operator deploy/charts/apus-operator --set bundles.s3Endpoint=<minio-endpoint>` with the chart state *before* this change (the last Git tag or the last published chart archive from Harbor).
+2. Locally change a field in the generated CRD schema (e.g. a new optional property on one of the `@Group`-annotated spec classes), then run `./gradlew :operator:syncCrds` and `deploy/charts/apus-operator/sync-crds.sh`.
+3. `helm upgrade apus-operator deploy/charts/apus-operator --set bundles.s3Endpoint=<minio-endpoint>` with the changed chart state.
+4. Check `kubectl get crd bluemapmaps.bluemap.onelitefeather.net -o jsonpath='{.spec.versions[0].schema.openAPIV3Schema.properties.spec.properties}'` against the new field.
 
-Run: das Vorstehende als Shell-Sequenz oder als eigener Testfall neben `FullPipelineIntegrationTest`.
-Expected: Das neue Feld erscheint im Cluster-Schema nach dem `helm upgrade`, ohne dass irgendjemand die CRD von Hand neu angewendet hat. Die Änderung am Schema danach wieder verwerfen (`git checkout` auf die betroffene Spec-Klasse), damit dieser Schritt keine echte CRD-Änderung hinterlässt.
+Run: the above as a shell sequence or as a separate test case alongside `FullPipelineIntegrationTest`.
+Expected: the new field appears in the cluster schema after the `helm upgrade`, without anyone having reapplied the CRD by hand. Afterward, discard the schema change again (`git checkout` on the affected spec class), so this step leaves no real CRD change behind.
 
-- [ ] **Schritt 7: Sicherstellen, dass er nicht im PR-Build landet**
+- [ ] **Step 7: Make sure it does not end up in the PR build**
 
 Run: `./gradlew :operator:test --tests '*FullPipeline*' 2>&1 | grep -c 'No tests found'`
-Expected: `1` — der Test greift die `*IntegrationTest`-Namenskonvention und ist damit aus `test` ausgeschlossen.
+Expected: `1` — the test matches the `*IntegrationTest` naming convention and is therefore excluded from `test`.
 
-- [ ] **Schritt 8: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add operator/src/test/java/net/onelitefeather/apus/operator/FullPipelineIntegrationTest.java
@@ -889,45 +889,45 @@ git commit -m "test: cover the full ingest, render and hosting pipeline on k3s"
 
 ---
 
-### Task 9: Design-Spec nachziehen
+### Task 9: Update the design spec
 
 **Files:**
 
 - Modify: `docs/superpowers/specs/2026-08-08-apus-design.md`
 
-- [ ] **Schritt 1: §13.1 als umgesetzt kennzeichnen**
+- [ ] **Step 1: Mark §13.1 as implemented**
 
-Der Abschnitt beschreibt Metriken, Logs und Dashboards im Futur. Umschreiben auf den
-Ist-Zustand, mit den echten Dateinamen (`deploy/charts/apus-operator/templates/servicemonitor.yaml`,
+The section describes metrics, logs, and dashboards in the future tense. Rewrite it to
+reflect the actual state, with the real file names (`deploy/charts/apus-operator/templates/servicemonitor.yaml`,
 `deploy/charts/apus-platform/templates/api-servicemonitor.yaml`,
 `deploy/podmonitor-render.yaml`, `deploy/charts/apus-platform/templates/dashboards-configmap.yaml`)
-und den tatsächlich exportierten Metriknamen.
+and the metric names actually exported.
 
-- [ ] **Schritt 2: §13.2, Zeile „E2E", auf den neuen Test verweisen**
+- [ ] **Step 2: Point §13.2, the "E2E" line, at the new test**
 
 <!-- markdownlint-disable-next-line MD038 -->
-Ersetzen durch: `k3s + S3: kompletter Durchlauf Ingest → Render → Hosting mit Mini-Welt (`FullPipelineIntegrationTest`, Teil von `./gradlew :operator:integrationTest`)`.
+Replace with: `k3s + S3: complete pass ingest → render → hosting with a mini world (`FullPipelineIntegrationTest`, part of `./gradlew :operator:integrationTest`)`.
 
-- [ ] **Schritt 3: §0 um den Deployment-Stand ergänzen**
+- [ ] **Step 3: Extend §0 with the deployment state**
 
-Ein Absatz zu Phase-8-§0 ist bereits durch die Helm-Charts-Arbeit vorhanden (siehe deren
-Task 9); dieser Schritt erweitert ihn um das, was diese Phase zusätzlich liefert, statt ihn
-zu ersetzen:
+A paragraph for phase 8 §0 already exists from the Helm charts work (see its
+Task 9); this step extends it with what this phase additionally delivers, rather than
+replacing it:
 
 ```markdown
-**Ausrollbar seit Phase 8.** Die beiden Helm Charts unter `deploy/charts/`
-(`apus-operator`, `apus-platform`) installieren CRDs, Operator, API, UI, RBAC und
-Scrape-Konfiguration; cluster-spezifische Werte kommen über `values:` aus der
-`HelmRelease` im Cluster-Repository. Operator und API exportieren Metriken, zwei
-Grafana-Dashboards liegen als optionale Ressource im `apus-platform`-Chart
-(`dashboards.enabled`). Was offen bleibt, sind die inhaltlichen Härtungen aus §15 — siehe
-den Plan zu Phase 9.
+**Deployable since phase 8.** The two Helm charts under `deploy/charts/`
+(`apus-operator`, `apus-platform`) install CRDs, operator, API, UI, RBAC, and
+scrape configuration; cluster-specific values come in via `values:` from the
+`HelmRelease` in the cluster repository. Operator and API export metrics, two
+Grafana dashboards ship as an optional resource in the `apus-platform` chart
+(`dashboards.enabled`). What remains open are the substantive hardenings from §15 — see
+the phase 9 plan.
 ```
 
-- [ ] **Schritt 4: Lint und Commit**
+- [ ] **Step 4: Lint and commit**
 
 Run: `npx markdownlint-cli2 docs/superpowers/specs/2026-08-08-apus-design.md`
-Expected: keine Fehler.
+Expected: no errors.
 
 ```bash
 git add docs/superpowers/specs/2026-08-08-apus-design.md
@@ -936,8 +936,8 @@ git commit -m "docs: record the phase 8 deployment and observability state"
 
 ---
 
-## Was dieser Plan bewusst nicht abdeckt
+## What this plan does not cover
 
-- **Das Flux-Overlay selbst** (`OCIRepository` plus `HelmRelease`). Es gehört ins Cluster-Repository (`Kubernetes-FLUX`), nicht hierher: Registry-Hostnamen, Rook-Namen, Domains und Secret-Referenzen sind Cluster-Eigenschaften, keine Projekt-Eigenschaften. Die beiden Helm Charts unter `deploy/charts/` sind so geschnitten, dass eine `HelmRelease` genau diese Werte per `values:` überschreiben kann; siehe Design-Spec §9 und `docs/superpowers/plans/2026-08-13-helm-charts.md`.
-- **Alerting-Regeln.** Sinnvoll, aber sie brauchen erst Betriebserfahrung mit den neuen Metriken — Schwellwerte ohne Datengrundlage erzeugen nur Rauschen.
-- **Die Härtungen aus §15** (Identity-Broker, RBAC-Verengung, Quota-Signal, Paper-Save-Fenster, `emptyDir`-Grenze) — eigener Plan (Phase 9).
+- **The Flux overlay itself** (`OCIRepository` plus `HelmRelease`). It belongs in the cluster repository (`Kubernetes-FLUX`), not here: registry hostnames, Rook names, domains, and secret references are cluster properties, not project properties. The two Helm charts under `deploy/charts/` are cut so that a `HelmRelease` can override exactly these values via `values:`; see design spec §9 and `docs/superpowers/plans/2026-08-13-helm-charts.md`.
+- **Alerting rules.** Sensible, but they first need operational experience with the new metrics — thresholds without a data basis just produce noise.
+- **The hardenings from §15** (identity broker, RBAC narrowing, quota signal, paper-save window, `emptyDir` limit) — separate plan (phase 9).
