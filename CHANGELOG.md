@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1](https://github.com/OneLiteFeatherNET/Apus/compare/apus-v0.4.0...apus-v0.4.1) (2026-08-15)
+
+
+### Bug Fixes
+
+* **observability:** load the operator and ingest logback configuration again ([#48](https://github.com/OneLiteFeatherNET/Apus/issues/48)) ([44f50ba](https://github.com/OneLiteFeatherNET/Apus/commit/44f50ba9b6b255f0001bcc48a9c9915400b0f7f1))
+
 ## [0.4.0](https://github.com/OneLiteFeatherNET/Apus/compare/apus-v0.3.1...apus-v0.4.0) (2026-08-15)
 
 
