@@ -39,11 +39,13 @@ import org.junit.jupiter.api.Test;
  * that all six reconcilers this operator ships actually end up registered.
  *
  * <p>{@link ApusOperator#main} is not exercised directly: it builds its own {@link
- * KubernetesClient} via {@code KubernetesClientBuilder} and calls {@link Operator#start()}, both
- * of which need a real (or at least reachable) cluster. {@link ApusOperator#registerReconcilers}
- * exists precisely to make the registration step reachable without one -- it is exercised here
- * against the fabric8 mock client the other reconciler tests already use, with the {@link
- * Operator} itself never started.
+ * KubernetesClient} via {@code KubernetesClientBuilder}, which needs a real (or at least
+ * reachable) cluster. {@link ApusOperator#registerReconcilers} exists precisely to make the
+ * registration step reachable without one -- it is exercised here against the fabric8 mock client
+ * the other reconciler tests already use, with the {@link Operator} itself never started.
+ *
+ * <p>Everything {@code main} does <em>after</em> registration -- starting the operator and then
+ * staying up until it is signalled -- is covered by {@code ApusOperatorRunTest} instead.
  */
 @EnableKubernetesMockClient(crud = true)
 class ApusOperatorTest {
