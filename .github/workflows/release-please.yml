@@ -97,7 +97,7 @@ jobs:
   build-context:
     needs: release-please
     if: needs.release-please.outputs.root-released == 'true'
-    uses: OneLiteFeatherNET/workflows/.github/workflows/gradle-docker-context.yml@v2.4.0
+    uses: OneLiteFeatherNET/workflows/.github/workflows/gradle-docker-context.yml@v2.8.1
     with:
       java-version: "25"
       version: ${{ needs.release-please.outputs.root-version }}
@@ -114,24 +114,19 @@ jobs:
       artifact-name: "docker-context"
     secrets: inherit
 
-  # The six publish-* jobs below are chained with `needs` on purpose -- do NOT "optimise"
-  # them back into parallel jobs. docker-publish.yml@v2.4.0 declares
-  #   concurrency: group: docker-publish-${{ github.workflow }}-${{ github.ref }}
-  # which every one of these six calls evaluates to the identical string, and a caller
-  # cannot override a callee's concurrency. Running them in parallel therefore puts all six
-  # in one concurrency group where they cancel each other. Serialising them keeps at most
-  # one of them pending at any time. (The proper fix is a `concurrency-suffix` input on the
-  # central docker-publish.yml; that is an upstream change.)
+  # The six publish-* jobs below run in parallel. They used to be chained with `needs`
+  # because docker-publish.yml put every call into one concurrency group keyed only on
+  # workflow and ref, where queuing one cancelled the others still pending. Since
+  # v2.8.1 that group also carries the image name, so calls pushing different images no
+  # longer collide -- two runs pushing the SAME image still serialise, which is what the
+  # group is for. Do not re-add the chain; it only cost wall-clock time.
   publish-runner:
     needs: [release-please, build-context]
-    # First link of the chain. The three jobs after it gate on build-context's own result
-    # rather than on their predecessor, so a single failing image does not silently skip
-    # the rest -- the chain exists for serialisation only, not to express a dependency.
     if: ${{ !cancelled() && needs.build-context.result == 'success' }}
     permissions:
       contents: read
       id-token: write
-    uses: OneLiteFeatherNET/workflows/.github/workflows/docker-publish.yml@v2.4.0
+    uses: OneLiteFeatherNET/workflows/.github/workflows/docker-publish.yml@v2.8.1
     with:
       image-name: "apus/runner"
       version: ${{ needs.release-please.outputs.root-version }}
@@ -141,12 +136,12 @@ jobs:
     secrets: inherit
 
   publish-ingest:
-    needs: [release-please, build-context, publish-runner]
+    needs: [release-please, build-context]
     if: ${{ !cancelled() && needs.build-context.result == 'success' }}
     permissions:
       contents: read
       id-token: write
-    uses: OneLiteFeatherNET/workflows/.github/workflows/docker-publish.yml@v2.4.0
+    uses: OneLiteFeatherNET/workflows/.github/workflows/docker-publish.yml@v2.8.1
     with:
       image-name: "apus/ingest"
       version: ${{ needs.release-please.outputs.root-version }}
@@ -156,16 +151,14 @@ jobs:
     secrets: inherit
 
   publish-hosting:
-    # publish-api is a chain link only (see the concurrency note above); hosting builds
-    # from the checked-out repo and needs no Gradle artifact, so `!cancelled()` keeps its
-    # gate standalone -- it publishes whenever a root release happened, even if one of the
-    # Gradle-based images failed.
-    needs: [release-please, publish-api]
+    # Builds from the checked-out repo and needs no Gradle artifact, so it gates on the
+    # root release alone -- it publishes even if one of the Gradle-based images failed.
+    needs: [release-please]
     if: ${{ !cancelled() && needs.release-please.outputs.root-released == 'true' }}
     permissions:
       contents: read
       id-token: write
-    uses: OneLiteFeatherNET/workflows/.github/workflows/docker-publish.yml@v2.4.0
+    uses: OneLiteFeatherNET/workflows/.github/workflows/docker-publish.yml@v2.8.1
     with:
       image-name: "apus/hosting"
       version: ${{ needs.release-please.outputs.root-version }}
@@ -174,12 +167,12 @@ jobs:
     secrets: inherit
 
   publish-operator:
-    needs: [release-please, build-context, publish-ingest]
+    needs: [release-please, build-context]
     if: ${{ !cancelled() && needs.build-context.result == 'success' }}
     permissions:
       contents: read
       id-token: write
-    uses: OneLiteFeatherNET/workflows/.github/workflows/docker-publish.yml@v2.4.0
+    uses: OneLiteFeatherNET/workflows/.github/workflows/docker-publish.yml@v2.8.1
     with:
       image-name: "apus/operator"
       version: ${{ needs.release-please.outputs.root-version }}
@@ -189,12 +182,12 @@ jobs:
     secrets: inherit
 
   publish-api:
-    needs: [release-please, build-context, publish-operator]
+    needs: [release-please, build-context]
     if: ${{ !cancelled() && needs.build-context.result == 'success' }}
     permissions:
       contents: read
       id-token: write
-    uses: OneLiteFeatherNET/workflows/.github/workflows/docker-publish.yml@v2.4.0
+    uses: OneLiteFeatherNET/workflows/.github/workflows/docker-publish.yml@v2.8.1
     with:
       image-name: "apus/api"
       version: ${{ needs.release-please.outputs.root-version }}
@@ -204,13 +197,13 @@ jobs:
     secrets: inherit
 
   publish-ui:
-    # Last chain link; same standalone gate as publish-hosting.
-    needs: [release-please, publish-hosting]
+    # Same standalone gate as publish-hosting: no Gradle artifact needed.
+    needs: [release-please]
     if: ${{ !cancelled() && needs.release-please.outputs.root-released == 'true' }}
     permissions:
       contents: read
       id-token: write
-    uses: OneLiteFeatherNET/workflows/.github/workflows/docker-publish.yml@v2.4.0
+    uses: OneLiteFeatherNET/workflows/.github/workflows/docker-publish.yml@v2.8.1
     with:
       image-name: "apus/ui"
       version: ${{ needs.release-please.outputs.root-version }}
@@ -219,9 +212,10 @@ jobs:
     secrets: inherit
 
   publish-charts:
-    needs: [release-please, publish-ui]
-    # Last link of the publish chain (see the concurrency note above). Charts go to the
-    # same registry as the images, so they share its serialisation constraint.
+    needs: [release-please, publish-runner, publish-ingest, publish-operator, publish-api, publish-hosting, publish-ui]
+    # Runs after all six images. Not a concurrency constraint any more -- just ordering:
+    # a chart names the image tags of this same release, so publishing it once those
+    # images exist keeps the registry consistent for anyone pulling mid-release.
     if: ${{ !cancelled() && needs.release-please.outputs.root-released == 'true' }}
     runs-on: ubuntu-latest
     permissions:
@@ -311,7 +305,7 @@ jobs:
           COSIGN_PASSWORD_REG: ${{ secrets.HARBOR_PASSWORD }}
         run: |
           # Keyless signing via the GitHub Actions OIDC identity (no key, no password) --
-          # the same mechanism docker-publish.yml@v2.4.0 applies to the images, so charts and
+          # the same mechanism docker-publish.yml@v2.8.1 applies to the images, so charts and
           # images end up verifiable against one and the same identity.
           # cosign does not read helm's --registry-config; it takes its own registry flags.
           while IFS= read -r ref; do
@@ -369,7 +363,7 @@ jobs:
     # Maven publish actually needs, matching the six Docker jobs.
     permissions:
       contents: read
-    uses: OneLiteFeatherNET/workflows/.github/workflows/gradle-publish.yml@v2.4.0
+    uses: OneLiteFeatherNET/workflows/.github/workflows/gradle-publish.yml@v2.8.1
     with:
       java-version: "25"
       java-distribution: "temurin"
@@ -382,7 +376,7 @@ jobs:
     if: needs.release-please.outputs.paper-released == 'true'
     permissions:
       contents: read
-    uses: OneLiteFeatherNET/workflows/.github/workflows/gradle-publish.yml@v2.4.0
+    uses: OneLiteFeatherNET/workflows/.github/workflows/gradle-publish.yml@v2.8.1
     with:
       java-version: "25"
       java-distribution: "temurin"

@@ -6,7 +6,7 @@ on:
 
 jobs:
   gradle:
-    uses: OneLiteFeatherNET/workflows/.github/workflows/gradle-build-pr.yml@v2.4.0
+    uses: OneLiteFeatherNET/workflows/.github/workflows/gradle-build-pr.yml@v2.8.1
     with:
       java-version: "25"
       java-distribution: "temurin"
