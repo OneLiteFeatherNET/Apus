@@ -1,35 +1,35 @@
-# Apus Helm Charts: Implementierungsplan
+# Apus Helm Charts: Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Apus lässt sich mit zwei `helm install`-Aufrufen ausrollen, und die Chart-Version bestimmt zwingend die Image-Version, die dabei zum Einsatz kommt.
+**Goal:** Apus can be rolled out with two `helm install` calls, and the chart version determines which image version gets used.
 
-**Architecture:** Zwei Charts unter `deploy/charts/`: `apus-operator` (die sechs CRDs, der Controller, cluster-weite RBAC) und `apus-platform` (API und Dashboard). Sie werden von Release Please im Root-Track mitversioniert und als OCI-Artefakte nach Harbor veröffentlicht. `runner`, `ingest` und `hosting` bekommen kein Chart — der Operator erzeugt sie aus Custom Resources; Helm reicht nur ihre Image-Referenzen durch.
+**Architecture:** Two charts under `deploy/charts/`: `apus-operator` (the six CRDs, the controller, cluster-wide RBAC) and `apus-platform` (API and dashboard). They are versioned together by Release Please in the root track and published as OCI artifacts to Harbor. `runner`, `ingest`, and `hosting` get no chart of their own — the operator creates them from custom resources; Helm only passes their image references through.
 
 **Tech Stack:** Helm 4, Kubernetes, Prometheus Operator (`ServiceMonitor`), GitHub Actions, Release Please.
 
 ## Global Constraints
 
-- **Das Design steht in `docs/superpowers/specs/2026-08-13-helm-charts-design.md`.** Bei Widersprüchen zwischen diesem Plan und der Spec gilt die Spec; melde den Widerspruch.
-- **Vorlage ist `helm/micronaut` im Cluster-Repository** (`OneLiteFeatherNET/Kubernetes-FLUX`, v0.5.2). Struktur, Label-Konventionen und `_helpers.tpl`-Aufbau werden von dort übernommen, damit die Charts sich vertraut anfühlen. Es ist **keine** Dependency — es liegt unpubliziert in einem anderen Repository.
-- **Standard-Labels** nach Kubernetes-Konvention: `app.kubernetes.io/name`, `/instance`, `/version`, `/component`, `/part-of: apus`, `/managed-by: {{ .Release.Service }}`.
-- **`image.tag` bleibt in allen Charts leer** und fällt auf `.Chart.AppVersion` zurück. Ein fest eingetragener Tag im Chart wäre genau der Drift, den dieses Design verhindern soll.
-- **Kein `crds/`-Verzeichnis.** CRDs sind Templates mit `helm.sh/resource-policy: keep`.
-- **Keine Mandanten, Quellen oder Karten** in den Charts (Spec §14, Design §10).
-- **Non-root:** Java-Container laufen als uid 10001, der nginx-basierte UI-Container als uid 101 — das entspricht den in Phase 7 gebauten Images.
-- Conventional Commits, keine Claude/AI-Attribution.
-- `helm` (v4.2.2) und `kubectl` sind auf der Maschine verfügbar.
+- **The design is in `docs/superpowers/specs/2026-08-13-helm-charts-design.md`.** Where this plan and the spec disagree, the spec wins; report the discrepancy.
+- **The template is `helm/micronaut` in the cluster repository** (`OneLiteFeatherNET/Kubernetes-FLUX`, v0.5.2). Structure, label conventions, and `_helpers.tpl` layout are taken from there, so the charts feel familiar. It is **not** a dependency — it lives unpublished in a different repository.
+- **Standard labels** following Kubernetes convention: `app.kubernetes.io/name`, `/instance`, `/version`, `/component`, `/part-of: apus`, `/managed-by: {{ .Release.Service }}`.
+- **`image.tag` stays empty in every chart** and falls back to `.Chart.AppVersion`. A hardcoded tag in the chart would be exactly the drift this design is meant to prevent.
+- **No `crds/` directory.** CRDs are templates with `helm.sh/resource-policy: keep`.
+- **No tenants, sources, or maps** in the charts (Spec §14, Design §10).
+- **Non-root:** Java containers run as uid 10001, the nginx-based UI container as uid 101 — matching the images built in phase 7.
+- Conventional Commits, no Claude/AI attribution.
+- `helm` (v4.2.2) and `kubectl` are available on the machine.
 
-### Was bereits existiert
+### What already exists
 
-- Sechs Container-Images aus Phase 7: `apus/operator`, `apus/api`, `apus/ui`, `apus/runner`, `apus/ingest`, `apus/hosting`.
-- `OperatorConfig` liest: `APUS_ROOK_NAMESPACE`, `APUS_CEPH_OBJECT_STORE`, `APUS_BUCKET_STORAGE_CLASS`, `APUS_RUNNER_IMAGE`, `APUS_INGEST_IMAGE`, `APUS_HOSTING_IMAGE`, `APUS_BUNDLE_BUCKET`, `APUS_BUNDLE_S3_ENDPOINT`, `APUS_BUNDLE_S3_REGION`, `APUS_BUNDLE_CREDENTIALS_SECRET`.
-- `.github/workflows/release-please.yml` mit den Outputs `release_created`/`version` (Root, **ohne** Präfix) und `telemetry-addon--release_created`/`paper-worldpush--release_created`.
-- **Noch nicht vorhanden:** `deploy/crds/` — das legt Phase 8 Task 1 an. Task 2 dieses Plans erzeugt es notfalls selbst; siehe dort.
+- Six container images from phase 7: `apus/operator`, `apus/api`, `apus/ui`, `apus/runner`, `apus/ingest`, `apus/hosting`.
+- `OperatorConfig` reads: `APUS_ROOK_NAMESPACE`, `APUS_CEPH_OBJECT_STORE`, `APUS_BUCKET_STORAGE_CLASS`, `APUS_RUNNER_IMAGE`, `APUS_INGEST_IMAGE`, `APUS_HOSTING_IMAGE`, `APUS_BUNDLE_BUCKET`, `APUS_BUNDLE_S3_ENDPOINT`, `APUS_BUNDLE_S3_REGION`, `APUS_BUNDLE_CREDENTIALS_SECRET`.
+- `.github/workflows/release-please.yml` with the outputs `release_created`/`version` (root, **without** a prefix) and `telemetry-addon--release_created`/`paper-worldpush--release_created`.
+- **Not yet present:** `deploy/crds/` — phase 8 Task 1 creates it. Task 2 of this plan creates it itself if needed; see there.
 
 ---
 
-### Task 1: Gerüst für `apus-operator`
+### Task 1: Scaffolding for `apus-operator`
 
 **Files:**
 
@@ -40,18 +40,18 @@
 
 **Interfaces:**
 
-- Produces: die Helper `apus-operator.name`, `apus-operator.fullname`, `apus-operator.labels`, `apus-operator.selectorLabels`, `apus-operator.serviceAccountName`, `apus-operator.image`. Alle folgenden Tasks dieses Charts benutzen sie.
+- Produces: the helpers `apus-operator.name`, `apus-operator.fullname`, `apus-operator.labels`, `apus-operator.selectorLabels`, `apus-operator.serviceAccountName`, `apus-operator.image`. Every later task on this chart uses them.
 
-- [ ] **Schritt 1: Vorlage lesen**
+- [ ] **Step 1: Read the template**
 
 ```bash
 gh api repos/OneLiteFeatherNET/Kubernetes-FLUX/contents/helm/micronaut/templates/_helpers.tpl --jq '.content' | base64 -d
 gh api repos/OneLiteFeatherNET/Kubernetes-FLUX/contents/helm/micronaut/.helmignore --jq '.content' | base64 -d
 ```
 
-Übernimm die Struktur, nicht den Inhalt eins zu eins — die Namen tragen `apus-operator` statt `micronaut`.
+Take over the structure, not the content verbatim — the names carry `apus-operator` instead of `micronaut`.
 
-- [ ] **Schritt 2: `Chart.yaml`**
+- [ ] **Step 2: `Chart.yaml`**
 
 ```yaml
 apiVersion: v2
@@ -74,11 +74,11 @@ keywords:
   - operator
 ```
 
-`"0.0.0"` ist der Bootstrap-Wert; Task 9 setzt ihn auf die aktuelle Release-Version und trägt die Marker in `release-please-config.json` ein.
+`"0.0.0"` is the bootstrap value; Task 9 sets it to the current release version and adds the markers to `release-please-config.json`.
 
-- [ ] **Schritt 3: `values.yaml`**
+- [ ] **Step 3: `values.yaml`**
 
-Genau die Oberfläche aus dem Design, §4:
+Exactly the surface from the design, §4:
 
 ```yaml
 image:
@@ -167,7 +167,7 @@ tolerations: []
 affinity: {}
 ```
 
-- [ ] **Schritt 4: `_helpers.tpl`**
+- [ ] **Step 4: `_helpers.tpl`**
 
 ```gotemplate
 {{- define "apus-operator.name" -}}
@@ -222,20 +222,20 @@ Usage: {{ include "apus-operator.image" (dict "image" .Values.image "ctx" .) }}
 {{- end }}
 ```
 
-- [ ] **Schritt 5: `helm lint` läuft**
+- [ ] **Step 5: `helm lint` passes**
 
 Run: `helm lint deploy/charts/apus-operator`
-Expected: `1 chart(s) linted, 0 chart(s) failed`. Ein Chart ohne Templates ist zulässig; die Warnung über fehlende Templates ist in Ordnung, ein Fehler nicht.
+Expected: `1 chart(s) linted, 0 chart(s) failed`. A chart without templates is allowed; the warning about missing templates is fine, an error is not.
 
-- [ ] **Schritt 6: Der Image-Helper tut, was er soll**
+- [ ] **Step 6: The image helper does what it should**
 
 ```bash
 helm template t deploy/charts/apus-operator --show-only templates/_helpers.tpl 2>/dev/null || true
 ```
 
-`_helpers.tpl` rendert nichts Eigenes — die eigentliche Prüfung folgt in Task 3, sobald das Deployment den Helper benutzt. Notiere das im Report, statt einen Scheinbeleg zu konstruieren.
+`_helpers.tpl` does not render anything on its own — the actual check follows in Task 3, once the deployment uses the helper. Note this in the report instead of manufacturing fake proof.
 
-- [ ] **Schritt 7: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add deploy/charts/apus-operator
@@ -244,24 +244,24 @@ git commit -m "feat(helm): scaffold the apus-operator chart"
 
 ---
 
-### Task 2: CRDs als Template
+### Task 2: CRDs as templates
 
 **Files:**
 
 - Create: `deploy/charts/apus-operator/templates/crds.yaml`
-- Modify: `operator/build.gradle.kts` — nur falls `deploy/crds/` noch nicht existiert, siehe Schritt 1
+- Modify: `operator/build.gradle.kts` — only if `deploy/crds/` does not exist yet, see step 1
 
 **Interfaces:**
 
-- Consumes: `deploy/crds/*.yaml`, die generierten CRD-Definitionen.
-- Produces: die sechs CRDs als Chart-Ressourcen mit `helm.sh/resource-policy: keep`.
+- Consumes: `deploy/crds/*.yaml`, the generated CRD definitions.
+- Produces: the six CRDs as chart resources with `helm.sh/resource-policy: keep`.
 
-- [ ] **Schritt 1: Prüfen, ob die CRDs eingecheckt sind**
+- [ ] **Step 1: Check whether the CRDs are checked in**
 
 Run: `ls deploy/crds/*.yaml 2>/dev/null | wc -l`
 
-- Ergebnis `6`: weiter mit Schritt 2.
-- Ergebnis `0`: Phase 8 Task 1 ist noch nicht gelaufen. Hole das hier nach, aber **nur** den Teil, den dieser Task braucht:
+- Result `6`: continue with step 2.
+- Result `0`: phase 8 Task 1 has not run yet. Catch up on it here, but **only** the part this task needs:
 
 ```bash
 ./gradlew :operator:generateCrds
@@ -269,14 +269,14 @@ mkdir -p deploy/crds
 cp operator/build/crds/*.yaml deploy/crds/
 ```
 
-Vermerke im Report, dass du das getan hast — Phase 8 Task 1 legt zusätzlich den `syncCrds`-Task und `CrdsInSyncTest` an, was hier bewusst **nicht** dupliziert wird.
+Note in the report that you did this — phase 8 Task 1 additionally sets up the `syncCrds` task and `CrdsInSyncTest`, which is deliberately **not** duplicated here.
 
-- [ ] **Schritt 2: Die tatsächlichen Dateinamen feststellen**
+- [ ] **Step 2: Determine the actual file names**
 
 Run: `ls deploy/crds/`
-Expected: sechs Dateien. Notiere die exakten Namen — Schritt 3 listet sie namentlich auf, ohne Glob, damit ein umbenanntes CRD auffällt statt still zu verschwinden.
+Expected: six files. Note the exact names — step 3 lists them by name, without a glob, so a renamed CRD stands out instead of silently vanishing.
 
-- [ ] **Schritt 3: `templates/crds.yaml`**
+- [ ] **Step 3: `templates/crds.yaml`**
 
 ```gotemplate
 {{- if .Values.crds.install }}
@@ -295,9 +295,9 @@ does not delete every Tenant, BlueMapMap and BlueMapHosting in the cluster.
 {{- end }}
 ```
 
-**Achtung:** `.Files.Glob` liest nur Dateien **innerhalb** des Chart-Verzeichnisses. `deploy/crds/` liegt außerhalb. Löse das so:
+**Careful:** `.Files.Glob` only reads files **inside** the chart directory. `deploy/crds/` lives outside it. Solve it like this:
 
-Der Chart bekommt ein eigenes `crds/`-Verzeichnis (nicht Helms Sonderverzeichnis auf oberster Ebene, sondern ein normales Datenverzeichnis), das beim Bau aus `deploy/crds/` befüllt wird. Da Helm den Namen `crds/` auf Chart-Ebene reserviert, verwende **`files/crds/`**:
+The chart gets its own `crds/` directory (not Helm's special top-level directory, but a plain data directory) that gets populated from `deploy/crds/` at build time. Because Helm reserves the name `crds/` at the chart level, use **`files/crds/`** instead:
 
 ```gotemplate
 {{- if .Values.crds.install }}
@@ -308,9 +308,9 @@ Der Chart bekommt ein eigenes `crds/`-Verzeichnis (nicht Helms Sonderverzeichnis
 {{- end }}
 ```
 
-und ergänze in jeder Datei die Annotation. Weil die generierten CRDs sie nicht mitbringen, patcht ein kleines Skript sie beim Kopieren ein — siehe Schritt 4.
+and add the annotation to every file. Because the generated CRDs don't come with it, a small script patches it in during copying — see step 4.
 
-- [ ] **Schritt 4: Kopier- und Patch-Skript**
+- [ ] **Step 4: Copy-and-patch script**
 
 `deploy/charts/apus-operator/sync-crds.sh`:
 
@@ -346,26 +346,26 @@ done
 echo "copied $(ls -1 "$dst"/*.yaml | wc -l) CRDs into the chart"
 ```
 
-- [ ] **Schritt 5: Skript ausführen und Ergebnis prüfen**
+- [ ] **Step 5: Run the script and check the result**
 
 Run: `chmod +x deploy/charts/apus-operator/sync-crds.sh && deploy/charts/apus-operator/sync-crds.sh`
 Expected: `copied 6 CRDs into the chart`
 
 Run: `grep -c 'helm.sh/resource-policy: keep' deploy/charts/apus-operator/files/crds/*.yaml`
-Expected: jede der sechs Dateien meldet `1`. Meldet eine `0`, hat das `awk`-Muster nicht gegriffen — dann liegt `metadata:` dort nicht am Zeilenanfang, und das Skript muss angepasst werden statt die Datei von Hand zu editieren.
+Expected: each of the six files reports `1`. If one reports `0`, the `awk` pattern didn't match — then `metadata:` isn't at the start of the line there, and the script needs to be adjusted rather than the file edited by hand.
 
-- [ ] **Schritt 6: Rendern und prüfen**
+- [ ] **Step 6: Render and check**
 
 Run: `helm template t deploy/charts/apus-operator | grep -c 'kind: CustomResourceDefinition'`
 Expected: `6`
 
 Run: `helm template t deploy/charts/apus-operator --set crds.install=false | grep -c 'kind: CustomResourceDefinition' || echo 0`
-Expected: `0` — der Schalter greift.
+Expected: `0` — the switch takes effect.
 
 Run: `helm template t deploy/charts/apus-operator | kubectl apply --dry-run=client -f - 2>&1 | grep -c 'created (dry run)'`
-Expected: mindestens `6` — die gerenderten CRDs sind gültige Kubernetes-Objekte.
+Expected: at least `6` — the rendered CRDs are valid Kubernetes objects.
 
-- [ ] **Schritt 7: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add deploy/charts/apus-operator
@@ -374,7 +374,7 @@ git commit -m "feat(helm): ship the CRDs as templates that upgrade cleanly"
 
 ---
 
-### Task 3: Operator-Deployment, ServiceAccount und RBAC
+### Task 3: Operator deployment, service account, and RBAC
 
 **Files:**
 
@@ -384,15 +384,15 @@ git commit -m "feat(helm): ship the CRDs as templates that upgrade cleanly"
 
 **Interfaces:**
 
-- Consumes: die Helper aus Task 1, die Umgebungsvariablen von `OperatorConfig`.
+- Consumes: the helpers from Task 1, the environment variables from `OperatorConfig`.
 
-- [ ] **Schritt 1: Die tatsächlich benötigten Rechte aus dem Code ableiten**
+- [ ] **Step 1: Derive the actually required permissions from the code**
 
 Run: `grep -rhoE '\b(Job|Deployment|Service|Ingress|ConfigMap|Secret|Namespace|ResourceQuota|LimitRange|NetworkPolicy|ObjectBucketClaim|CephObjectStoreUser|Pod|Event)\b' operator/src/main/java --include='*.java' | sort -u`
 
-Jeder Typ in der Ausgabe braucht eine Regel. Fehlt einer, äußert sich das zur Laufzeit als `Forbidden` mitten in einer Reconciliation — nicht beim Start.
+Every type in the output needs a rule. If one is missing, it shows up at runtime as `Forbidden` in the middle of a reconciliation — not at startup.
 
-- [ ] **Schritt 2: ServiceAccount**
+- [ ] **Step 2: ServiceAccount**
 
 ```gotemplate
 {{- if .Values.serviceAccount.create }}
@@ -410,13 +410,13 @@ metadata:
 {{- end }}
 ```
 
-- [ ] **Schritt 3: RBAC**
+- [ ] **Step 3: RBAC**
 
-`templates/rbac.yaml`, umschlossen von `{{- if .Values.rbac.create }}`. Der Regelsatz ist der aus dem Phase-8-Plan, Task 2, Schritt 2 — übernimm ihn vollständig: eigene Custom Resources samt `/status` und `/finalizers`; `namespaces`, `resourcequotas`, `limitranges`; `networkpolicies`; `jobs`; `deployments`; `services`, `configmaps`; `ingresses`; `pods` und `pods/log` **nur lesend**; `objectbucketclaims`; `cephobjectstoreusers`; `secrets` **nur `get`/`list`/`watch`**; `events` mit `create`/`patch`.
+`templates/rbac.yaml`, wrapped in `{{- if .Values.rbac.create }}`. The rule set is the one from the phase 8 plan, Task 2, step 2 — take it over in full: the project's own custom resources including `/status` and `/finalizers`; `namespaces`, `resourcequotas`, `limitranges`; `networkpolicies`; `jobs`; `deployments`; `services`, `configmaps`; `ingresses`; `pods` and `pods/log` **read-only**; `objectbucketclaims`; `cephobjectstoreusers`; `secrets` **only `get`/`list`/`watch`**; `events` with `create`/`patch`.
 
-Namen: `{{ include "apus-operator.fullname" . }}` für ClusterRole und ClusterRoleBinding, damit zwei Releases im selben Cluster nicht kollidieren.
+Names: `{{ include "apus-operator.fullname" . }}` for ClusterRole and ClusterRoleBinding, so that two releases in the same cluster don't collide.
 
-- [ ] **Schritt 4: Deployment**
+- [ ] **Step 4: Deployment**
 
 ```gotemplate
 apiVersion: apps/v1
@@ -508,24 +508,24 @@ spec:
       {{- end }}
 ```
 
-- [ ] **Schritt 5: Die Umgebungsvariablen gegen `OperatorConfig` gegenprüfen**
+- [ ] **Step 5: Cross-check the environment variables against `OperatorConfig`**
 
 Run: `grep -oE 'APUS_[A-Z_]+' operator/src/main/java/net/onelitefeather/apus/operator/OperatorConfig.java | sort -u`
 
-Vergleiche mit den zehn Variablen im Deployment. Eine im Code gelesene, im Chart fehlende Variable bekommt stillschweigend ihren Default — genau das soll das Chart verhindern. Eine im Chart gesetzte, im Code unbekannte Variable ist toter Ballast.
+Compare with the ten variables in the deployment. A variable read by the code but missing from the chart silently gets its default — which is exactly what the chart is meant to prevent. A variable set in the chart but unknown to the code is dead weight.
 
-- [ ] **Schritt 6: Rendern und prüfen**
+- [ ] **Step 6: Render and check**
 
 Run: `helm template t deploy/charts/apus-operator | kubectl apply --dry-run=client -f - 2>&1 | tail -5`
-Expected: keine Fehler.
+Expected: no errors.
 
 Run: `helm template t deploy/charts/apus-operator --set image.tag="" | grep 'image:'`
-Expected: Alle vier Image-Referenzen tragen die `appVersion` als Tag, nicht `:` allein und nicht `latest`.
+Expected: all four image references carry `appVersion` as the tag, neither `:` alone nor `latest`.
 
 Run: `helm template t deploy/charts/apus-operator --set images.runner.tag=1.2.3 | grep APUS_RUNNER_IMAGE -A1`
-Expected: `...apus/runner:1.2.3` — der Override greift, ohne die anderen zu beeinflussen.
+Expected: `...apus/runner:1.2.3` — the override takes effect without affecting the others.
 
-- [ ] **Schritt 7: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add deploy/charts/apus-operator
@@ -534,7 +534,7 @@ git commit -m "feat(helm): deploy the operator with its service account and RBAC
 
 ---
 
-### Task 4: Metrics-Service, ServiceMonitor, NOTES und Schema
+### Task 4: Metrics service, ServiceMonitor, NOTES, and schema
 
 **Files:**
 
@@ -544,15 +544,15 @@ git commit -m "feat(helm): deploy the operator with its service account and RBAC
 - Create: `deploy/charts/apus-operator/values.schema.json`
 - Create: `deploy/charts/apus-operator/README.md`
 
-- [ ] **Schritt 1: Service und ServiceMonitor**
+- [ ] **Step 1: Service and ServiceMonitor**
 
-Beide umschlossen von `{{- if .Values.metrics.enabled }}` bzw. zusätzlich `.Values.metrics.serviceMonitor.enabled`. Der Service ist `ClusterIP` mit dem einen Port `metrics`; der ServiceMonitor selektiert auf `apus-operator.selectorLabels` und scrapt Pfad `/metrics` im Intervall aus den Werten.
+Both wrapped in `{{- if .Values.metrics.enabled }}` and, additionally, `.Values.metrics.serviceMonitor.enabled`. The service is `ClusterIP` with the single `metrics` port; the ServiceMonitor selects on `apus-operator.selectorLabels` and scrapes path `/metrics` at the interval from the values.
 
-**Hinweis:** Der Operator exportiert seine Metriken erst nach Phase 8 Task 4. Bis dahin liefert der Endpunkt nichts — der ServiceMonitor ist deshalb per Default `false`. Schreibe das in den Kommentar über dem Template, damit niemand ihn einschaltet und sich über leere Panels wundert.
+**Note:** The operator only exports its metrics after phase 8 Task 4. Until then the endpoint returns nothing — that's why the ServiceMonitor defaults to `false`. Say so in the comment above the template, so nobody enables it and then wonders about empty panels.
 
-- [ ] **Schritt 2: `values.schema.json`**
+- [ ] **Step 2: `values.schema.json`**
 
-Erzwinge nur, was ohne sinnvollen Default nicht funktioniert:
+Only enforce what won't work without a sensible default:
 
 ```json
 {
@@ -590,31 +590,31 @@ Erzwinge nur, was ohne sinnvollen Default nicht funktioniert:
 }
 ```
 
-`replicaCount` ist auf genau `1` beschränkt: Zwei Operator-Instanzen würden dieselben Ressourcen gleichzeitig reconcilen.
+`replicaCount` is limited to exactly `1`: two operator instances would reconcile the same resources at the same time.
 
-- [ ] **Schritt 3: Das Schema greift wirklich**
+- [ ] **Step 3: Prove the schema actually takes effect**
 
 Run: `helm template t deploy/charts/apus-operator --set bundles.s3Endpoint="" 2>&1 | tail -3`
-Expected: FEHLER, der `s3Endpoint` nennt. Läuft es durch, ist das Schema wirkungslos und der Task nicht fertig.
+Expected: an ERROR naming `s3Endpoint`. If it goes through, the schema has no effect and the task is not done.
 
 Run: `helm template t deploy/charts/apus-operator --set replicaCount=2 2>&1 | tail -3`
-Expected: FEHLER wegen `maximum`.
+Expected: an ERROR because of `maximum`.
 
 Run: `helm template t deploy/charts/apus-operator --set bundles.s3Endpoint=http://rook-ceph-rgw.rook-ceph.svc >/dev/null && echo OK`
 Expected: `OK`
 
-- [ ] **Schritt 4: `NOTES.txt` und `README.md`**
+- [ ] **Step 4: `NOTES.txt` and `README.md`**
 
-`NOTES.txt` sagt nach der Installation, was als Nächstes zu tun ist: dass noch kein Mandant existiert und wie man einen anlegt (`kubectl apply` mit einem Minimal-`Tenant`), und dass `apus-platform` die Oberfläche nachliefert.
+`NOTES.txt` tells the operator, right after installation, what to do next: that no tenant exists yet and how to create one (`kubectl apply` with a minimal `Tenant`), and that `apus-platform` adds the UI on top.
 
-`README.md` dokumentiert die Werte-Tabelle. Erzeuge sie nicht von Hand aus dem Kopf, sondern aus `values.yaml`, damit sie vollständig ist.
+`README.md` documents the values table. Generate it, don't write it from memory by hand, from `values.yaml`, so it's complete.
 
-- [ ] **Schritt 5: `helm lint` mit Werten**
+- [ ] **Step 5: `helm lint` with values**
 
 Run: `helm lint deploy/charts/apus-operator --set bundles.s3Endpoint=http://example`
 Expected: 0 failed.
 
-- [ ] **Schritt 6: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add deploy/charts/apus-operator
@@ -623,7 +623,7 @@ git commit -m "feat(helm): add metrics wiring, values schema and operator chart 
 
 ---
 
-### Task 5: Chart `apus-platform` — Gerüst und API
+### Task 5: Chart `apus-platform` — scaffolding and API
 
 **Files:**
 
@@ -637,13 +637,13 @@ git commit -m "feat(helm): add metrics wiring, values schema and operator chart 
 
 **Interfaces:**
 
-- Produces: Helper analog zu Task 1, aber mit Komponenten-Suffix: `apus-platform.api.fullname`, `apus-platform.ui.fullname`, `apus-platform.labels`, `apus-platform.componentLabels` (nimmt den Komponentennamen als Argument).
+- Produces: helpers analogous to Task 1, but with a component suffix: `apus-platform.api.fullname`, `apus-platform.ui.fullname`, `apus-platform.labels`, `apus-platform.componentLabels` (takes the component name as an argument).
 
-- [ ] **Schritt 1: Gerüst analog zu Task 1**
+- [ ] **Step 1: Scaffolding analogous to Task 1**
 
-`Chart.yaml` wie dort, Name `apus-platform`, Beschreibung „The Apus REST API and dashboard". Beide Versionsmarker mit `"0.0.0"`.
+`Chart.yaml` as there, name `apus-platform`, description "The Apus REST API and dashboard". Both version markers set to `"0.0.0"`.
 
-Die Helper brauchen eine Erweiterung, weil dieses Chart **zwei** Workloads enthält:
+The helpers need an extension, because this chart contains **two** workloads:
 
 ```gotemplate
 {{- define "apus-platform.componentLabels" -}}
@@ -664,11 +664,11 @@ app.kubernetes.io/component: {{ .component }}
 {{- end }}
 ```
 
-Ohne `component` im Selector würden API- und UI-Deployment einander die Pods wegnehmen — beide hätten denselben Selector.
+Without `component` in the selector, the API and UI deployments would steal each other's pods — both would have the same selector.
 
-- [ ] **Schritt 2: `values.yaml`**
+- [ ] **Step 2: `values.yaml`**
 
-Zwei Blöcke `api:` und `ui:`, jeweils mit `image`, `replicaCount`, `resources`, `podSecurityContext`, `securityContext`, plus gemeinsam `ingress:` und `auth:`:
+Two blocks, `api:` and `ui:`, each with `image`, `replicaCount`, `resources`, `podSecurityContext`, `securityContext`, plus the shared `ingress:` and `auth:`:
 
 ```yaml
 auth:
@@ -742,9 +742,9 @@ ingress:
       kind: ClusterIssuer
 ```
 
-- [ ] **Schritt 3: API-Deployment**
+- [ ] **Step 3: API deployment**
 
-Wie das Operator-Deployment, aber mit `strategy: RollingUpdate` (die API ist zustandslos und darf parallel laufen), Port 8080, den Auth-Umgebungsvariablen und Probes:
+Like the operator deployment, but with `strategy: RollingUpdate` (the API is stateless and may run in parallel), port 8080, the auth environment variables, and probes:
 
 ```yaml
           readinessProbe:
@@ -759,30 +759,30 @@ Wie das Operator-Deployment, aber mit `strategy: RollingUpdate` (die API ist zus
             initialDelaySeconds: 30
 ```
 
-- [ ] **Schritt 4: Prüfen, dass die Health-Endpunkte existieren**
+- [ ] **Step 4: Check that the health endpoints exist**
 
 Run: `grep -rn 'micronaut-management' api/build.gradle.kts; grep -rn -A3 'endpoints:' api/src/main/resources/application.yml`
 
-Fehlt `micronaut-management` oder ist `/health` nicht aktiviert, laufen die Probes ins Leere und der Pod wird endlos neu gestartet. Ist das der Fall: Probes **weglassen**, im Report vermerken und auf Phase 8 Task 5 verweisen, der die Abhängigkeit einführt. Rate nicht.
+If `micronaut-management` is missing or `/health` is not enabled, the probes hit nothing and the pod restarts forever. If that's the case: **drop** the probes, note it in the report, and point to phase 8 Task 5, which introduces the dependency. Don't guess.
 
-- [ ] **Schritt 5: API-RBAC**
+- [ ] **Step 5: API RBAC**
 
-ClusterRole mit den Custom Resources und der Secret-Regel. Prüfe zuerst, welche der beiden Fassungen gilt:
+ClusterRole with the custom resources and the secret rule. First check which of the two versions applies:
 
 Run: `grep -n 'resolveNamespace' -A20 api/src/main/java/net/onelitefeather/apus/api/rest/push/FabricPushTokenRepository.java | head -30`
 
-- Sucht der Code weiterhin per Label über alle Namespaces: breite Regel (`secrets`, `get`/`list`) **mit** Kommentar, der auf Spec §15 Punkt 9 und Phase 9 Task 2 verweist.
-- Enumeriert er Tenants und liest ein Secret mit festem Namen: verengte Regel mit `resourceNames: ["apus-push-token"]`, `verbs: ["get"]`.
+- If the code still looks up by label across all namespaces: the broad rule (`secrets`, `get`/`list`) **with** a comment pointing to Spec §15 item 9 and phase 9 Task 2.
+- If it enumerates tenants and reads a secret with a fixed name: the narrowed rule with `resourceNames: ["apus-push-token"]`, `verbs: ["get"]`.
 
-- [ ] **Schritt 6: Rendern und prüfen**
+- [ ] **Step 6: Render and check**
 
 Run: `helm template t deploy/charts/apus-platform --set auth.issuer=https://id.example.net | kubectl apply --dry-run=client -f - 2>&1 | tail -3`
-Expected: keine Fehler.
+Expected: no errors.
 
 Run: `helm template t deploy/charts/apus-platform --set auth.issuer=https://id.example.net | grep -A3 'matchLabels'`
-Expected: Der Selector enthält `app.kubernetes.io/component`.
+Expected: the selector contains `app.kubernetes.io/component`.
 
-- [ ] **Schritt 7: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add deploy/charts/apus-platform
@@ -791,7 +791,7 @@ git commit -m "feat(helm): add the apus-platform chart with the API deployment"
 
 ---
 
-### Task 6: UI, Ingress, Schema und Doku für `apus-platform`
+### Task 6: UI, ingress, schema, and docs for `apus-platform`
 
 **Files:**
 
@@ -803,17 +803,17 @@ git commit -m "feat(helm): add the apus-platform chart with the API deployment"
 - Create: `deploy/charts/apus-platform/values.schema.json`
 - Create: `deploy/charts/apus-platform/README.md`
 
-- [ ] **Schritt 1: UI-Deployment und -Service**
+- [ ] **Step 1: UI deployment and service**
 
-Port 8080 (die unprivilegierte nginx-Basis lauscht dort), `runAsUser: 101`, `readOnlyRootFilesystem: false`. Readiness-Probe auf `/` — die UI ist statisch, ein 200 auf der Wurzel ist ein ausreichendes Signal.
+Port 8080 (the unprivileged nginx base listens there), `runAsUser: 101`, `readOnlyRootFilesystem: false`. Readiness probe on `/` — the UI is static, a 200 at the root is a sufficient signal.
 
-- [ ] **Schritt 2: Ingress**
+- [ ] **Step 2: Ingress**
 
-Ein Host, zwei Pfade: `/api` auf den API-Service, `/` auf den UI-Service. `pathType: Prefix`. Reihenfolge beachten — `/api` muss vor `/` stehen, sonst schluckt der Catch-all die API.
+One host, two paths: `/api` to the API service, `/` to the UI service. `pathType: Prefix`. Mind the order — `/api` must come before `/`, otherwise the catch-all swallows the API.
 
-TLS über `cert-manager`, wenn `ingress.tls.enabled`; dann die Annotation `cert-manager.io/cluster-issuer` aus `issuerRef`.
+TLS via `cert-manager` when `ingress.tls.enabled`; then the `cert-manager.io/cluster-issuer` annotation from `issuerRef`.
 
-- [ ] **Schritt 3: `values.schema.json` mit dem Pflicht-Issuer**
+- [ ] **Step 3: `values.schema.json` with the required issuer**
 
 ```json
 {
@@ -837,20 +837,20 @@ TLS über `cert-manager`, wenn `ingress.tls.enabled`; dann die Annotation `cert-
 }
 ```
 
-- [ ] **Schritt 4: Beweisen, dass der Issuer erzwungen wird**
+- [ ] **Step 4: Prove the issuer is enforced**
 
 Run: `helm template t deploy/charts/apus-platform 2>&1 | tail -3`
-Expected: FEHLER, der `issuer` nennt. **Läuft das durch, ist der wichtigste Sicherheitsaspekt dieses Charts wirkungslos** — dann ist der Task nicht fertig.
+Expected: an ERROR naming `issuer`. **If this goes through, the most important security aspect of this chart has no effect** — then the task is not done.
 
 Run: `helm template t deploy/charts/apus-platform --set auth.issuer=https://id.example.net >/dev/null && echo OK`
 Expected: `OK`
 
-- [ ] **Schritt 5: Ingress-Reihenfolge prüfen**
+- [ ] **Step 5: Check ingress ordering**
 
 Run: `helm template t deploy/charts/apus-platform --set auth.issuer=https://id.example.net --set ingress.enabled=true --set ingress.host=apus.example.net | grep -A2 'paths:'`
-Expected: `/api` erscheint vor `/`.
+Expected: `/api` appears before `/`.
 
-- [ ] **Schritt 6: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add deploy/charts/apus-platform
@@ -859,28 +859,28 @@ git commit -m "feat(helm): add the dashboard, ingress and values schema to apus-
 
 ---
 
-### Task 7: Versionierung und Veröffentlichung
+### Task 7: Versioning and publishing
 
 **Files:**
 
 - Modify: `release-please-config.json`
-- Modify: `deploy/charts/apus-operator/Chart.yaml` (Bootstrap-Version)
-- Modify: `deploy/charts/apus-platform/Chart.yaml` (Bootstrap-Version)
+- Modify: `deploy/charts/apus-operator/Chart.yaml` (bootstrap version)
+- Modify: `deploy/charts/apus-platform/Chart.yaml` (bootstrap version)
 - Modify: `.github/workflows/release-please.yml`
 
 **Interfaces:**
 
-- Consumes: die Outputs `release_created` und `version` des `release-please`-Jobs. **Ohne** `.--`-Präfix — das Root-Paket ist die Ausnahme von der Präfix-Regel.
+- Consumes: the outputs `release_created` and `version` of the `release-please` job. **Without** the `.--` prefix — the root package is the exception to the prefix rule.
 
-- [ ] **Schritt 1: Aktuelle Version feststellen**
+- [ ] **Step 1: Determine the current version**
 
 Run: `python3 -c "import json;print(json.load(open('.release-please-manifest.json'))['.'])"`
 
-Trage diesen Wert als `version` und `appVersion` in beide `Chart.yaml` ein, statt `"0.0.0"` stehen zu lassen — sonst bumpt Release Please von einer Version, die nie existiert hat.
+Enter this value as `version` and `appVersion` in both `Chart.yaml` files, instead of leaving `"0.0.0"` in place — otherwise Release Please would bump from a version that never existed.
 
-- [ ] **Schritt 2: `extra-files` ergänzen**
+- [ ] **Step 2: Add `extra-files`**
 
-Im Root-Paket von `release-please-config.json`:
+In the root package of `release-please-config.json`:
 
 ```json
 "extra-files": [
@@ -890,9 +890,9 @@ Im Root-Paket von `release-please-config.json`:
 ]
 ```
 
-Für das Root-Paket (`.`) werden die Pfade **nicht** mit dem Paketpfad präfixiert; sie gelten repo-relativ. Für die beiden Komponenten-Pakete wäre das anders — hier ist es korrekt so.
+For the root package (`.`), the paths are **not** prefixed with the package path; they are repo-relative. For the two component packages that would be different — here it is correct as is.
 
-- [ ] **Schritt 3: Publish-Job anhängen**
+- [ ] **Step 3: Attach the publish job**
 
 ```yaml
   publish-charts:
@@ -921,22 +921,22 @@ Für das Root-Paket (`.`) werden die Pfade **nicht** mit dem Paketpfad präfixie
           done
 ```
 
-- [ ] **Schritt 4: YAML und JSON validieren**
+- [ ] **Step 4: Validate YAML and JSON**
 
 Run: `python3 -c "import yaml,json; yaml.safe_load(open('.github/workflows/release-please.yml')); json.load(open('release-please-config.json')); print('ok')"`
 Expected: `ok`
 
-- [ ] **Schritt 5: Verpacken lokal beweisen**
+- [ ] **Step 5: Prove packaging locally**
 
 Run: `helm package deploy/charts/apus-operator -d /tmp && helm package deploy/charts/apus-platform -d /tmp && ls -la /tmp/apus-*.tgz`
-Expected: zwei Archive, deren Dateinamen die Version aus Schritt 1 tragen.
+Expected: two archives whose file names carry the version from step 1.
 
 Run: `helm show chart /tmp/apus-operator-*.tgz | grep -E '^(version|appVersion)'`
-Expected: beide gleich der Version aus Schritt 1.
+Expected: both equal to the version from step 1.
 
-**Der Push selbst ist hier nicht zu testen.** Die Registry lehnt derzeit auch Image-Pushes ab (`empty challenge header`, siehe Design §11 Punkt 1). Vermerke das im Report; ein fehlgeschlagener Push-Versuch ist kein Fehler dieses Tasks.
+**The push itself is not to be tested here.** The registry currently also rejects image pushes (`empty challenge header`, see Design §11 item 1). Note this in the report; a failed push attempt is not a failure of this task.
 
-- [ ] **Schritt 6: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add release-please-config.json deploy/charts .github/workflows/release-please.yml
@@ -945,13 +945,13 @@ git commit -m "feat(helm): version the charts with the release and publish them 
 
 ---
 
-### Task 8: Charts im PR-Build prüfen
+### Task 8: Check the charts in the PR build
 
 **Files:**
 
 - Modify: `.github/workflows/build-pr.yml`
 
-- [ ] **Schritt 1: Job ergänzen**
+- [ ] **Step 1: Add the job**
 
 ```yaml
   helm:
@@ -984,16 +984,16 @@ git commit -m "feat(helm): version the charts with the release and publish them 
           kubectl apply --dry-run=client -f /tmp/platform.yaml
 ```
 
-- [ ] **Schritt 2: Path-Filter erweitern**
+- [ ] **Step 2: Extend the path filter**
 
-Der `code`-Filter des Gradle-Jobs bleibt unberührt. Der neue `helm`-Job braucht keinen Filter — er läuft in Sekunden.
+The `code` filter of the Gradle job stays untouched. The new `helm` job needs no filter — it runs in seconds.
 
-- [ ] **Schritt 3: Die Schema-Gegenprobe lokal nachstellen**
+- [ ] **Step 3: Reproduce the schema counter-check locally**
 
 Run: `helm template t deploy/charts/apus-platform >/dev/null 2>&1; echo "exit=$?"`
-Expected: `exit=1` — genau die Bedingung, auf die der CI-Schritt prüft.
+Expected: `exit=1` — exactly the condition the CI step checks for.
 
-- [ ] **Schritt 4: YAML validieren und committen**
+- [ ] **Step 4: Validate YAML and commit**
 
 Run: `python3 -c "import yaml;yaml.safe_load(open('.github/workflows/build-pr.yml'));print('ok')"`
 
@@ -1004,35 +1004,35 @@ git commit -m "ci: lint, render and schema-check the Helm charts on pull request
 
 ---
 
-### Task 9: Phase-8-Plan und Design-Spec nachziehen
+### Task 9: Follow up in the phase 8 plan and the design spec
 
 **Files:**
 
 - Modify: `docs/superpowers/plans/2026-08-12-phase-8-deployment-und-observability.md`
 - Modify: `docs/superpowers/specs/2026-08-08-apus-design.md`
 
-- [ ] **Schritt 1: Phase-8-Plan anpassen**
+- [ ] **Step 1: Adjust the phase 8 plan**
 
-Nach Design §9:
+Per Design §9:
 
-- **Task 1** (CRDs einchecken) bleibt wortgleich — die Charts konsumieren `deploy/crds/`.
-- **Task 2 und 3** (Kustomize-Basis für Operator, API, UI) werden ersetzt durch einen Verweis auf `docs/superpowers/plans/2026-08-13-helm-charts.md`. Lösche die Task-Inhalte, ersetze sie durch einen kurzen Absatz, der erklärt, dass Helm den Kustomize-Ansatz abgelöst hat und wo die Arbeit jetzt steht. Nummeriere die verbleibenden Tasks **nicht** um — das würde alle Querverweise brechen.
-- **Task 6** (Scrape-Konfiguration): Die beiden `ServiceMonitor` sind jetzt Chart-Templates. Der `PodMonitor` für Render-Pods bleibt als eigenständige Aufgabe, weil er Pods in Mandanten-Namespaces selektiert, die kein Chart kennt.
-- **Task 7** (Dashboards): Die ConfigMap wandert als optionale `dashboards.enabled`-Ressource ins `apus-platform`-Chart.
-- **Task 8** (k3s-E2E): installiert künftig die Charts statt einzelner Manifeste; ergänze einen Schritt, der `helm upgrade` von der vorigen auf die aktuelle Chart-Version prüft, weil das die Eigenschaft belegt, wegen der die CRDs Templates sind.
-- **Global Constraints** des Phase-8-Plans: Der Satz zur Kustomize-Basis wird auf Helm umgeschrieben.
+- **Task 1** (check in CRDs) stays word for word — the charts consume `deploy/crds/`.
+- **Tasks 2 and 3** (Kustomize base for operator, API, UI) are replaced with a reference to `docs/superpowers/plans/2026-08-13-helm-charts.md`. Delete the task content, replace it with a short paragraph explaining that Helm has replaced the Kustomize approach and where the work now stands. Do **not** renumber the remaining tasks — that would break every cross-reference.
+- **Task 6** (scrape configuration): the two `ServiceMonitor` resources are now chart templates. The `PodMonitor` for render pods stays a standalone task, because it selects pods in tenant namespaces that no chart knows about.
+- **Task 7** (dashboards): the ConfigMap moves into the `apus-platform` chart as an optional `dashboards.enabled` resource.
+- **Task 8** (k3s E2E): will install the charts instead of individual manifests going forward; add a step that verifies `helm upgrade` from the previous chart version to the current one, because that's what proves the property the CRDs are templates for.
+- **Global Constraints** of the phase 8 plan: the sentence about the Kustomize base gets rewritten for Helm.
 
-- [ ] **Schritt 2: Design-Spec §0 ergänzen**
+- [ ] **Step 2: Add to design spec §0**
 
-Ein Absatz, dass Apus über zwei Helm Charts ausgerollt wird, mit Verweis auf
-`docs/superpowers/specs/2026-08-13-helm-charts-design.md`. Keine Wiederholung der Details.
+A paragraph stating that Apus is rolled out via two Helm charts, with a reference to
+`docs/superpowers/specs/2026-08-13-helm-charts-design.md`. No repetition of the details.
 
-- [ ] **Schritt 3: Markdown-Lint**
+- [ ] **Step 3: Markdown lint**
 
 Run: `npx markdownlint-cli2 docs/superpowers/plans/2026-08-12-phase-8-deployment-und-observability.md docs/superpowers/specs/2026-08-08-apus-design.md`
 Expected: 0 issues.
 
-- [ ] **Schritt 4: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
 git add docs/
@@ -1041,8 +1041,8 @@ git commit -m "docs: replace the Kustomize tasks in the phase 8 plan with the He
 
 ---
 
-## Was dieser Plan nicht abdeckt
+## What this plan does not cover
 
-- **Die Einbindung ins Cluster-Repository** (`OCIRepository` plus `HelmRelease` unter `apps/base/apus/`). Sie gehört ins Cluster-Repository, nicht hierher, und setzt voraus, dass die Charts einmal veröffentlicht wurden. Design §7 beschreibt das Zielbild.
-- **Die Harbor-Authentifizierung.** Der Chart-Push wird scheitern, solange der Image-Push mit `empty challenge header` scheitert. Das ist ein Betriebsproblem, kein Chart-Problem.
-- **Ein Umbrella-Chart** über beide — bewusst nicht, siehe Design §10.
+- **Integration into the cluster repository** (`OCIRepository` plus `HelmRelease` under `apps/base/apus/`). That belongs in the cluster repository, not here, and requires the charts to have been published once. Design §7 describes the target state.
+- **Harbor authentication.** The chart push will fail as long as the image push fails with `empty challenge header`. That's an operational problem, not a chart problem.
+- **An umbrella chart** over both — deliberately not, see Design §10.
