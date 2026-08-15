@@ -170,7 +170,10 @@ git commit -m "feat: give the runner a dedicated exit code for exhausted storage
 
 - Modify: `api/src/main/java/net/onelitefeather/apus/api/rest/push/FabricPushTokenRepository.java`
 - Modify: `api/src/test/java/net/onelitefeather/apus/api/rest/push/FabricPushTokenRepositoryTest.java`
-- Modify: `deploy/base/api-rbac.yaml` (from Phase 8, Task 3)
+- Modify: `deploy/charts/apus-platform/templates/api-rbac.yaml` — the Kustomize overlay
+  `deploy/base/api-rbac.yaml` from the original phase 8 plan is no longer created; since the
+  Helm charts, the API's RBAC lives only in this template, whose comment points explicitly
+  at "phase 9 task 2".
 
 **Interfaces:**
 
@@ -285,7 +288,7 @@ Expected: PASS, without any pre-existing test needing adjustment. If an adjustme
 
 - [ ] **Step 6: Narrow the RBAC**
 
-In `deploy/base/api-rbac.yaml`, replace the broad secrets rule:
+In `deploy/charts/apus-platform/templates/api-rbac.yaml`, replace the broad secrets rule:
 
 ```yaml
   # Service-token lookup, narrowed in phase 9: the API only ever reads the one Secret
@@ -318,7 +321,7 @@ Expected: the value matches `resourceNames` exactly. If it differs, the API can 
 - [ ] **Step 9: Commit**
 
 ```bash
-git add api/ deploy/base/api-rbac.yaml docs/superpowers/specs/2026-08-08-apus-design.md
+git add api/ deploy/charts/apus-platform/templates/api-rbac.yaml docs/superpowers/specs/2026-08-08-apus-design.md
 git commit -m "fix: read only the fixed-name push token secret instead of listing all secrets"
 ```
 

@@ -32,8 +32,13 @@ via `render-threads` — see §14, phase 4, for the full rationale.
 (`runner`, `ingest`, `hosting`, `operator`, `api`, `ui`); `telemetry-addon` and
 `paper-worldpush` are published to Maven. Versions and changelogs are produced
 by Release Please from Conventional Commits; `telemetry-addon` and `paper-worldpush`
-carry their own release tracks in the process, as §4 foresaw. What is still missing are the
-cluster manifests and the observability wiring — see the plan for phase 8.
+carry their own release tracks in the process, as §4 foresaw. What is still missing is the
+observability wiring (metrics, dashboards) — see the plan for phase 8.
+
+**Rollout happens through Helm.** Apus is rolled out through two Helm charts under
+`deploy/charts/` (`apus-operator`, `apus-platform`); they supersede the Kustomize base
+originally planned for phase 8. Details:
+`docs/superpowers/specs/2026-08-13-helm-charts-design.md`.
 
 **Points deliberately left open** (details in §15):
 
