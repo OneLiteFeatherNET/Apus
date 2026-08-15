@@ -208,12 +208,29 @@ jobs:
       image-name: "apus/ui"
       version: ${{ needs.release-please.outputs.root-version }}
       context: "."
-      dockerfile: "ui/Dockerfile"
+      dockerfile: "ui/Dockerfile.app"
+    secrets: inherit
+
+  publish-console:
+    # The management console, the second application in the ui/ workspace. Same standalone gate
+    # as publish-ui: no Gradle artifact needed. Kept a separate job rather than a matrix so a
+    # failure names which of the two images did not publish.
+    needs: [release-please]
+    if: ${{ !cancelled() && needs.release-please.outputs.root-released == 'true' }}
+    permissions:
+      contents: read
+      id-token: write
+    uses: OneLiteFeatherNET/workflows/.github/workflows/docker-publish.yml@v2.8.1
+    with:
+      image-name: "apus/console"
+      version: ${{ needs.release-please.outputs.root-version }}
+      context: "."
+      dockerfile: "ui/Dockerfile.console"
     secrets: inherit
 
   publish-charts:
-    needs: [release-please, publish-runner, publish-ingest, publish-operator, publish-api, publish-hosting, publish-ui]
-    # Runs after all six images. Not a concurrency constraint any more -- just ordering:
+    needs: [release-please, publish-runner, publish-ingest, publish-operator, publish-api, publish-hosting, publish-ui, publish-console]
+    # Runs after all seven images. Not a concurrency constraint any more -- just ordering:
     # a chart names the image tags of this same release, so publishing it once those
     # images exist keeps the registry consistent for anyone pulling mid-release.
     if: ${{ !cancelled() && needs.release-please.outputs.root-released == 'true' }}
