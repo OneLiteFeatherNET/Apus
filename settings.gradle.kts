@@ -164,6 +164,39 @@ dependencyResolutionManagement {
             version("paper-api", "26.2.build.111-stable")
             library("paper.api", "io.papermc.paper", "paper-api").versionRef("paper-api")
 
+            // Observability. Versions verified against Maven Central on 2026-08-15.
+            //
+            // Logging is SLF4J over Logback in every service. Logback writes a readable line to
+            // the console -- that is what `kubectl logs` shows -- while the OpenTelemetry appender
+            // ships the same event through OTLP. Nothing scrapes stdout for ingestion; the console
+            // is for humans, OTLP is for the pipeline.
+            version("slf4j", "2.0.17")
+            version("logback", "1.5.18")
+            library("slf4j.api", "org.slf4j", "slf4j-api").versionRef("slf4j")
+            library("logback.classic", "ch.qos.logback", "logback-classic").versionRef("logback")
+
+            // The stable OTel BOM covers the API, SDK, autoconfigure and the OTLP exporter.
+            version("opentelemetry", "1.51.0")
+            library("opentelemetry.bom", "io.opentelemetry", "opentelemetry-bom").versionRef("opentelemetry")
+            library("opentelemetry.api", "io.opentelemetry", "opentelemetry-api").withoutVersion()
+            library("opentelemetry.sdk", "io.opentelemetry", "opentelemetry-sdk").withoutVersion()
+            library("opentelemetry.exporter.otlp", "io.opentelemetry", "opentelemetry-exporter-otlp")
+                .withoutVersion()
+            // Reads OTEL_* environment variables and builds the SDK from them, so which collector
+            // receives the data is a deployment decision, never a code change. Without an endpoint
+            // configured the SDK is a no-op, which is what makes this safe to ship enabled.
+            library("opentelemetry.sdk.autoconfigure", "io.opentelemetry",
+                "opentelemetry-sdk-extension-autoconfigure").withoutVersion()
+
+            // The Logback appender lives in the instrumentation project, which versions separately
+            // from the core BOM and carries an -alpha suffix by that project's convention -- the
+            // appender API itself has been stable for several releases.
+            version("opentelemetry-instrumentation", "2.16.0-alpha")
+            library("opentelemetry.instrumentation.bom", "io.opentelemetry.instrumentation",
+                "opentelemetry-instrumentation-bom-alpha").versionRef("opentelemetry-instrumentation")
+            library("opentelemetry.logback.appender", "io.opentelemetry.instrumentation",
+                "opentelemetry-logback-appender-1.0").withoutVersion()
+
             plugin("spotless", "com.diffplug.spotless").versionRef("spotless")
             plugin("shadow", "com.gradleup.shadow").versionRef("shadow")
         }
