@@ -11,6 +11,10 @@ import { defineConfig } from 'vitest/config'
 export default defineConfig({
   resolve: {
     alias: {
+      // Both spellings resolve here. `#core` is the alias this layer publishes to the apps that
+      // extend it (see nuxt.config.ts) and is what the layer's own non-test code uses; `~` is
+      // kept because the specs were written against it and it costs nothing to honour.
+      '#core': fileURLToPath(new URL('./app', import.meta.url)),
       '~': fileURLToPath(new URL('./app', import.meta.url))
     }
   },

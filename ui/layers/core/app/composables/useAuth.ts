@@ -1,7 +1,7 @@
 import { InMemoryWebStorage, UserManager, WebStorageStateStore, type User } from 'oidc-client-ts'
-import { decodeJwtPayload } from '~/utils/jwt'
-import { buildOidcRedirectUris } from '~/utils/oidc'
-import { parsePrincipal, type ApusUiPrincipal } from '~/utils/role'
+import { decodeJwtPayload } from '#core/utils/jwt'
+import { buildOidcRedirectUris } from '#core/utils/oidc'
+import { parsePrincipal, type ApusUiPrincipal } from '#core/utils/role'
 
 /**
  * Client-only OIDC session (Authorization Code + PKCE, public client -- design spec §10.3,

@@ -1,0 +1,16 @@
+{
+  "name": "@apus/ui-design",
+  "version": "0.1.0",
+  "description": "Apus UI design layer -- design tokens, the stylesheet, and the shared presentational components. Knows nothing about Apus's domain.",
+  "private": true,
+  "type": "module",
+  "main": "./nuxt.config.ts",
+  "scripts": {
+    "typecheck": "echo 'typechecked through the apps that extend this layer'"
+  },
+  "dependencies": {
+    "@nuxt/ui": "4.10.0",
+    "@vueuse/nuxt": "14.4.0",
+    "tailwindcss": "4.3.3"
+  }
+}

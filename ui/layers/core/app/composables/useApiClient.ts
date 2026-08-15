@@ -1,4 +1,4 @@
-import { createApusApiClient, type ApusApiClient } from '~/utils/apiClient'
+import { createApusApiClient, type ApusApiClient } from '#core/utils/apiClient'
 
 /**
  * Nuxt-facing entry point to the api module client. Thin on purpose -- all the actual logic
