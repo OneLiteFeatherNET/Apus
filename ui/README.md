@@ -441,13 +441,19 @@ plus each app's Nuxt-context component tests. Covered, per the "what carries log
   slash-normalisation cases (missing trailing slash, empty base, trailing slash on the origin,
   a nested prefix).
 
-Two things do get a real Nuxt context, because nothing else catches them:
-`apps/app/tests/nuxt/defaultLayout.nuxt.spec.ts` (a component referenced under its bare filename
-rather than the directory-prefixed name Nuxt registers renders as an empty custom element —
-invisible to `vue-tsc` and to `nuxt build`) and `appHeaderConsoleLink.nuxt.spec.ts`, which mocks
-`useAuth` with a `platform-admin` principal. That mock is not incidental: both the removed
-`/platform` link and the new console link are role-gated, so without a signed-in principal
-neither renders and the assertions would pass for entirely the wrong reason.
+Some things do get a real Nuxt context, because nothing else catches them. Each app has a
+`tests/nuxt/defaultLayout.nuxt.spec.ts`: a component referenced under its bare filename rather
+than the directory-prefixed name Nuxt registers (`<AppHeader />` where only `LayoutAppHeader`
+exists) compiles fine, renders as an empty custom element, and is invisible to both `vue-tsc`
+and `nuxt build`. The tenant app shipped exactly that bug once.
+
+`apps/app/tests/nuxt/appHeaderConsoleLink.nuxt.spec.ts` additionally mocks `useAuth` with a
+`platform-admin` principal. That mock is not incidental: both the removed `/platform` link and
+the new console link are role-gated, so without a signed-in principal neither renders and the
+assertions would pass for entirely the wrong reason.
+
+`pnpm test:server` builds each app and runs its Nitro spec — 7 cases for the tenant app, 8 for
+the console (the extra one pins the bare root's `302`).
 
 Not tested, per the same standard ("pure presentation needs no tests"): the remaining `.vue`
 files and the two thin composables (`useAuth`/`useApiClient`), whose own logic content is close
