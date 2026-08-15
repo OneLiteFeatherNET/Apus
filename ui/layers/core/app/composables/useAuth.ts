@@ -1,5 +1,6 @@
 import { InMemoryWebStorage, UserManager, WebStorageStateStore, type User } from 'oidc-client-ts'
 import { decodeJwtPayload } from '~/utils/jwt'
+import { buildOidcRedirectUris } from '~/utils/oidc'
 import { parsePrincipal, type ApusUiPrincipal } from '~/utils/role'
 
 /**
@@ -27,13 +28,15 @@ function getUserManager(): UserManager {
   if (manager) return manager
 
   const config = useRuntimeConfig()
-  const origin = window.location.origin
+  // Not `window.location.origin` alone: the two applications sharing this layer do not share a
+  // base path, and the console's callback lives under its prefix -- see utils/oidc.ts.
+  const uris = buildOidcRedirectUris(window.location.origin, config.app.baseURL)
   manager = new UserManager({
     authority: config.public.oidcIssuer,
     client_id: config.public.oidcClientId,
-    redirect_uri: `${origin}/auth/callback`,
-    silent_redirect_uri: `${origin}/auth/silent-renew`,
-    post_logout_redirect_uri: origin,
+    redirect_uri: uris.redirectUri,
+    silent_redirect_uri: uris.silentRedirectUri,
+    post_logout_redirect_uri: uris.postLogoutRedirectUri,
     response_type: 'code',
     scope: 'openid profile email',
     automaticSilentRenew: true,
