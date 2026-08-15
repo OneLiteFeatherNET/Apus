@@ -8,7 +8,7 @@ on:
 
 jobs:
   lint:
-    uses: OneLiteFeatherNET/workflows/.github/workflows/markdown-lint.yml@v2.4.0
+    uses: OneLiteFeatherNET/workflows/.github/workflows/markdown-lint.yml@v2.8.1
     with:
       # The central default is `.markdownlint.json`, which this repo does not have --
       # markdownlint-cli2 then throws and the job is always red.
