@@ -62,17 +62,24 @@ jobs:
           INPUT_VERSION: ${{ inputs.version }}
         run: |
           if [ "${EVENT_NAME}" = "workflow_dispatch" ]; then
-            version="${INPUT_VERSION}"
-            if [ -z "${version}" ]; then
-              # The manifest is release-please's own record of the current version, so the
-              # default re-publishes exactly what the last release produced.
-              version="$(jq -er '."."' .release-please-manifest.json)"
-            fi
-            # A leading "v" or a tag name would be accepted everywhere downstream and quietly
-            # produce wrong artifacts: docker/metadata-action's semver patterns would yield
-            # nothing usable and the chart would be packaged under a name no one pulls.
+            # actions/checkout resolved github.ref, so the jars, Dockerfiles and chart
+            # templates this run is about to build are whatever *that ref* holds. The
+            # manifest of that tree is therefore the only authority on which version this
+            # content actually is -- the input cannot override it, it can only confirm it.
+            # Dispatching from main (0.3.0) with version 0.2.1 would otherwise rebuild HEAD,
+            # push it over the released 0.2.1 images and charts, and then sign the result,
+            # which is precisely what would make the wrong artifact look authoritative.
+            tree_version="$(jq -er '."."' .release-please-manifest.json)"
+            # An empty input means "publish whatever this tree says it is".
+            version="${INPUT_VERSION:-${tree_version}}"
+            # Shape first, so a leading "v" gets its own precise message instead of a
+            # mismatch complaint against a value it superficially resembles.
             if ! printf '%s' "${version}" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)*$'; then
-              echo "::error::'${version}' is not a bare semver version (expected e.g. 0.3.0, no leading 'v')" >&2
+              echo "::error::'${version}' is not a bare semver version (expected e.g. ${tree_version}, no leading 'v')" >&2
+              exit 1
+            fi
+            if [ "${version}" != "${tree_version}" ]; then
+              echo "::error::version '${version}' does not match the checked-out tree, which is at '${tree_version}'. Re-run this workflow from the tag whose version you want to publish (ref 'apus-v${version}'), or leave the version input empty to publish '${tree_version}'." >&2
               exit 1
             fi
             # The dispatch itself is the publish signal; there is no release-please run to ask.
@@ -325,7 +332,14 @@ jobs:
           # The identity is this workflow's own path at its ref, because publish-charts runs
           # here rather than through `uses:` -- for a reusable workflow the certificate SAN
           # would name the callee's path instead, and this regexp would never match.
-          identity="^https://github\.com/${GITHUB_REPOSITORY}/\.github/workflows/release-please\.yml@refs/"
+          # GITHUB_REPOSITORY is interpolated into a regexp, so every character that is not
+          # plainly literal is escaped first: a '.' in an org or repo name would otherwise be
+          # a wildcard and accept identities from repositories nobody vetted.
+          repo_re="$(printf '%s' "${GITHUB_REPOSITORY}" | sed 's/[^A-Za-z0-9/_-]/\\&/g')"
+          # Anchored at both ends and restricted to the only two refs allowed to publish:
+          # main (the push path) and a root release tag (the dispatch path). An unanchored
+          # '@refs/' tail would accept a certificate issued to any branch of this repository.
+          identity="^https://github\.com/${repo_re}/\.github/workflows/release-please\.yml@refs/(heads/main|tags/apus-v.*)\$"
           while IFS= read -r ref; do
             [ -n "${ref}" ] || continue
             cosign verify \
