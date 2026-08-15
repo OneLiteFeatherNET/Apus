@@ -24,10 +24,14 @@ import io.fabric8.kubernetes.client.Watcher;
 import jakarta.inject.Singleton;
 import java.util.Optional;
 import net.onelitefeather.apus.operator.api.BlueMapRender;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /** Thin {@link RenderRepository} adapter over the fabric8 {@link KubernetesClient}. */
 @Singleton
 final class Fabric8RenderRepository implements RenderRepository {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(Fabric8RenderRepository.class);
 
     private final KubernetesClient client;
 
@@ -43,6 +47,7 @@ final class Fabric8RenderRepository implements RenderRepository {
 
     @Override
     public Watch watch(String namespace, String name, String resourceVersion, Watcher<BlueMapRender> watcher) {
+        LOGGER.debug("watching BlueMapRender '{}' in namespace '{}' from resourceVersion {}", name, namespace, resourceVersion);
         return client.resources(BlueMapRender.class)
                 .inNamespace(namespace)
                 .withName(name)

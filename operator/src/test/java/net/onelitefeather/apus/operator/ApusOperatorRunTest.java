@@ -23,6 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.server.mock.EnableKubernetesMockClient;
+import io.opentelemetry.sdk.OpenTelemetrySdk;
 import java.time.Duration;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -46,6 +47,12 @@ import org.junit.jupiter.api.Timeout;
  * it the way a {@code SIGTERM} would and assert that it actually releases the wait -- a hook that
  * stops the operator but leaves {@code main} parked forever would still get the pod
  * {@code SIGKILL}ed at the end of its grace period.
+ *
+ * <p>The OpenTelemetry SDK handed to {@code run} is a plain, exporter-less one built here rather
+ * than the autoconfigured one {@code main} builds: this test is about the process lifetime, and
+ * the SDK's only role in it is being closed by the very same hook. That it <em>is</em> closed
+ * there, instead of by a second hook of its own, is what {@link
+ * ApusOperator#initTelemetry()} disables autoconfiguration's shutdown hook for.
  */
 @EnableKubernetesMockClient(crud = true)
 class ApusOperatorRunTest {
@@ -68,9 +75,10 @@ class ApusOperatorRunTest {
         CountDownLatch shutdownSignal = new CountDownLatch(1);
         AtomicReference<Thread> shutdownHook = new AtomicReference<>();
         AtomicReference<Throwable> failure = new AtomicReference<>();
+        OpenTelemetrySdk telemetry = OpenTelemetrySdk.builder().build();
 
         Thread operatorThread = new Thread(
-                () -> ApusOperator.run(client, OperatorConfig.defaults(), shutdownSignal, shutdownHook::set),
+                () -> ApusOperator.run(client, OperatorConfig.defaults(), telemetry, shutdownSignal, shutdownHook::set),
                 "apus-operator-main");
         operatorThread.setUncaughtExceptionHandler((thread, thrown) -> failure.set(thrown));
         operatorThread.start();

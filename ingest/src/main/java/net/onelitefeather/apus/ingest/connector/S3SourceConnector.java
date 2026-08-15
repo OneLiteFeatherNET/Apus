@@ -26,6 +26,8 @@ import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;
 import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
@@ -47,6 +49,14 @@ import software.amazon.awssdk.services.s3.model.S3Object;
  * written as a single file.
  */
 public final class S3SourceConnector implements WorldSourceConnector {
+
+    /**
+     * The access key and secret in this connector's config are credentials and never appear in a
+     * log line, a span attribute or an exception message -- see {@code
+     * docs/logging-and-tracing.md}. Endpoint, bucket and object key are not secrets and are what
+     * makes a failed fetch diagnosable, so those are logged.
+     */
+    private static final Logger LOGGER = LoggerFactory.getLogger(S3SourceConnector.class);
 
     public static final String CONFIG_ENDPOINT = "endpoint";
     public static final String CONFIG_BUCKET = "bucket";
@@ -96,6 +106,7 @@ public final class S3SourceConnector implements WorldSourceConnector {
             String id = key.substring(prefix.length());
             versions.add(new SourceVersion(id, id, object.lastModified(), object.size()));
         }
+        LOGGER.info("discovered {} version(s) under s3://{}/{}", versions.size(), bucket, prefix);
         return versions;
     }
 
@@ -107,11 +118,13 @@ public final class S3SourceConnector implements WorldSourceConnector {
 
         GetObjectRequest request =
                 GetObjectRequest.builder().bucket(bucket).key(key).build();
+        LOGGER.info("fetching s3://{}/{} into {}", bucket, key, workDir);
         try (ResponseInputStream<GetObjectResponse> object = client.getObject(request)) {
             if (Archives.isArchive(key)) {
                 Archives.extract(key, object, workDir, Archives.limitsFrom(config));
             } else {
                 Path target = workDir.resolve(fileNameOf(key));
+                LOGGER.debug("{} is not a recognised archive; copying it verbatim", key);
                 Files.copy(object, target, StandardCopyOption.REPLACE_EXISTING);
             }
         } catch (IOException e) {

@@ -28,6 +28,8 @@ import java.util.Map;
 import java.util.Optional;
 import net.onelitefeather.apus.operator.tenant.PushTokenSecrets;
 import net.onelitefeather.apus.operator.tenant.TenantReconciler;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * {@link PushTokenRepository} backed by Kubernetes {@link Secret}s -- specifically, the ones
@@ -96,6 +98,8 @@ import net.onelitefeather.apus.operator.tenant.TenantReconciler;
 @Singleton
 public class FabricPushTokenRepository implements PushTokenRepository {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger(FabricPushTokenRepository.class);
+
     /** See the class Javadoc's "Expected shape" for the full Secret contract this key is part of. */
     public static final String SERVICE_TOKEN_LABEL_KEY = PushTokenSecrets.LABEL_KEY;
 
@@ -126,6 +130,12 @@ public class FabricPushTokenRepository implements PushTokenRepository {
         // Scans every candidate and never returns on the first match -- see the class Javadoc's
         // "Constant-time, exhaustive comparison" for why an early return would itself be a
         // (narrower, but still real) timing side-channel.
+        // Deliberately outside the comparison loop, and deliberately about the candidate set
+        // rather than any candidate: a log call inside the loop would both leak Secret content
+        // into the log and add data-dependent work to a comparison whose whole point is that it
+        // takes the same time regardless of what was supplied.
+        LOGGER.debug("resolving a service token against {} candidate secret(s)", candidates.size());
+
         String matchedNamespace = null;
         for (Secret candidate : candidates) {
             byte[] stored = decodedToken(candidate);

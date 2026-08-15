@@ -32,6 +32,8 @@ import net.onelitefeather.apus.api.security.ApusPrincipal;
 import net.onelitefeather.apus.api.security.ForbiddenException;
 import net.onelitefeather.apus.api.security.TenantResolver;
 import net.onelitefeather.apus.api.support.PrincipalResolver;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * {@code POST /api/uploads} and {@code POST /api/uploads/{uploadId}/complete} -- the caller's own
@@ -48,6 +50,8 @@ import net.onelitefeather.apus.api.support.PrincipalResolver;
 @Controller("/api/uploads")
 @Secured(SecurityRule.IS_AUTHENTICATED)
 public class UploadController {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(UploadController.class);
 
     private static final String TYPE_UPLOAD = "upload";
 
@@ -80,6 +84,14 @@ public class UploadController {
 
         CreateUploadResponse response =
                 uploadService.createUpload(namespace, request.sourceName(), request.fileName(), request.sizeBytes());
+        // The upload id and declared size only -- never the presigned URLs, which carry a
+        // signature that grants write access to the staging bucket.
+        LOGGER.info(
+                "multipart upload '{}' started for source '{}' in namespace '{}' ({} declared bytes)",
+                response.uploadId(),
+                request.sourceName(),
+                namespace,
+                request.sizeBytes());
         return HttpResponse.created(response);
     }
 
@@ -97,6 +109,11 @@ public class UploadController {
 
         CompleteUploadResponse response = uploadService.completeUpload(
                 namespace, request.sourceName(), request.version(), request.fileName(), uploadId);
+        LOGGER.info(
+                "multipart upload '{}' completed for source '{}' in namespace '{}'",
+                uploadId,
+                request.sourceName(),
+                namespace);
         return HttpResponse.ok(response);
     }
 
@@ -120,6 +137,7 @@ public class UploadController {
 
     private void requireWrite(ApusPrincipal principal) {
         if (!principal.canWrite()) {
+            LOGGER.warn("principal '{}' denied write access to /api/uploads", principal.subject());
             throw new ForbiddenException("principal '" + principal.subject() + "' is not tenant-owner/tenant-operator");
         }
     }

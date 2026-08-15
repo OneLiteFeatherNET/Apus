@@ -25,6 +25,7 @@ import io.javaoperatorsdk.operator.api.reconciler.Context;
 import io.javaoperatorsdk.operator.api.reconciler.ControllerConfiguration;
 import io.javaoperatorsdk.operator.api.reconciler.Reconciler;
 import io.javaoperatorsdk.operator.api.reconciler.UpdateControl;
+import io.opentelemetry.api.common.Attributes;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -48,6 +49,9 @@ import net.onelitefeather.apus.operator.api.Conditions;
 import net.onelitefeather.apus.operator.api.Labels;
 import net.onelitefeather.apus.operator.api.WorldIngest;
 import net.onelitefeather.apus.operator.api.WorldSource;
+import net.onelitefeather.apus.operator.telemetry.Tracing;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Evaluates {@code WorldSource.spec.poll} against {@code status.lastSeenVersion} and, when the
@@ -82,6 +86,8 @@ import net.onelitefeather.apus.operator.api.WorldSource;
  */
 @ControllerConfiguration
 public class WorldSourceReconciler implements Reconciler<WorldSource> {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(WorldSourceReconciler.class);
 
     /** Reason set on the {@code Ready} condition for a source with no {@code spec.poll} (or an unpollable type). */
     public static final String MANUAL_ONLY_REASON = "ManualOnly";
@@ -131,6 +137,14 @@ public class WorldSourceReconciler implements Reconciler<WorldSource> {
 
     @Override
     public UpdateControl<WorldSource> reconcile(WorldSource source, Context<WorldSource> context) {
+        return Tracing.reconcile("WorldSource", Tracing.SOURCE, source, () -> doReconcile(source));
+    }
+
+    /**
+     * The reconciliation itself, split out of {@link #reconcile} so the span wrapping it stays a
+     * single readable line rather than an extra level of indentation over the whole method.
+     */
+    private UpdateControl<WorldSource> doReconcile(WorldSource source) {
         String type = source.getSpec().getType();
         String poll = source.getSpec().getPoll();
 
@@ -158,10 +172,23 @@ public class WorldSourceReconciler implements Reconciler<WorldSource> {
         WorldSourceConnector connector = connectorResolver.resolve(type);
         Map<String, String> config = sourceConfig(source);
 
+        // Its own span: the single place in this operator that talks to something outside the
+        // cluster (an S3 endpoint, a Pterodactyl panel). It is the step that is slow when a
+        // source poll is slow, and the one that fails on its own.
         List<SourceVersion> versions;
         try {
-            versions = connector.discover(config);
+            versions = Tracing.step(
+                    "discover source versions",
+                    Attributes.of(Tracing.SOURCE, source.getMetadata().getName(), Tracing.SOURCE_TYPE, type),
+                    () -> connector.discover(config));
         } catch (RuntimeException e) {
+            // The exception's type only -- its message may embed request details, and a
+            // credential must never reach a log line any more than a span attribute (§12).
+            LOGGER.warn(
+                    "source '{}' ({}): listing versions at the source failed with {}",
+                    source.getMetadata().getName(),
+                    type,
+                    e.getClass().getSimpleName());
             // Never let a connection/credential problem surface with its raw message here --
             // it may embed request details; discover() implementations already keep secrets
             // out of exception messages, but this is the one place in the operator that talks
@@ -192,8 +219,20 @@ public class WorldSourceReconciler implements Reconciler<WorldSource> {
             return UpdateControl.patchStatus(source).rescheduleAfter(schedule.timeToNext(now));
         }
 
-        boolean conflict = triggerIngests(source, latestId);
+        // Its own span: one create call per configured world, each of which can fail or
+        // collide independently of the discovery that found the version.
+        boolean conflict = Tracing.step(
+                "trigger world ingests",
+                Attributes.of(Tracing.SOURCE, source.getMetadata().getName()),
+                () -> triggerIngests(source, latestId));
         source.getStatus().setLastSeenVersion(latestId);
+        if (conflict) {
+            LOGGER.warn(
+                    "source '{}': an ingest name for version '{}' collided with a resource this source does"
+                            + " not own -- that world was skipped",
+                    source.getMetadata().getName(),
+                    latestId);
+        }
         Conditions.set(
                 source.getStatus().getConditions(),
                 conflict
@@ -240,6 +279,12 @@ public class WorldSourceReconciler implements Reconciler<WorldSource> {
             ingest.getSpec().setSourceVersion(latestVersion);
             ingest.getSpec().setWorldName(selector.getName());
             client.resources(WorldIngest.class).inNamespace(namespace).resource(ingest).create();
+            LOGGER.info(
+                    "source '{}': triggered ingest '{}' for world '{}' at version '{}'",
+                    sourceName,
+                    ingestName,
+                    selector.getName(),
+                    latestVersion);
         }
         return conflict;
     }
@@ -378,12 +423,14 @@ public class WorldSourceReconciler implements Reconciler<WorldSource> {
     }
 
     private static UpdateControl<WorldSource> terminalCondition(WorldSource source, String reason, String message) {
+        LOGGER.warn("source '{}' is not usable ({}): {}", source.getMetadata().getName(), reason, message);
         Conditions.set(source.getStatus().getConditions(), Conditions.ready(false, reason, message));
         return UpdateControl.patchStatus(source);
     }
 
     private static UpdateControl<WorldSource> pending(
             WorldSource source, String reason, String message, CronSchedule schedule, ZonedDateTime now) {
+        LOGGER.debug("source '{}' is pending ({}): {}", source.getMetadata().getName(), reason, message);
         Conditions.set(source.getStatus().getConditions(), Conditions.ready(false, reason, message));
         return UpdateControl.patchStatus(source).rescheduleAfter(schedule.timeToNext(now));
     }

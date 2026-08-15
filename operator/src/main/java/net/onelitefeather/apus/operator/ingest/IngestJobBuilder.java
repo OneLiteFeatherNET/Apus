@@ -28,14 +28,20 @@ import io.fabric8.kubernetes.api.model.ResourceRequirements;
 import io.fabric8.kubernetes.api.model.ResourceRequirementsBuilder;
 import io.fabric8.kubernetes.api.model.batch.v1.Job;
 import io.fabric8.kubernetes.api.model.batch.v1.JobBuilder;
+import io.opentelemetry.api.trace.propagation.W3CTraceContextPropagator;
+import io.opentelemetry.context.Context;
+import io.opentelemetry.context.propagation.TextMapSetter;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import net.onelitefeather.apus.operator.OperatorConfig;
 import net.onelitefeather.apus.operator.api.Labels;
 import net.onelitefeather.apus.operator.api.WorldIngest;
 import net.onelitefeather.apus.operator.api.WorldSource;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Turns a {@link WorldIngest} plus the {@link WorldSource} it targets into the Kubernetes {@link
@@ -72,6 +78,8 @@ import net.onelitefeather.apus.operator.api.WorldSource;
  * check, not instead of it.
  */
 public final class IngestJobBuilder {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(IngestJobBuilder.class);
 
     /** API group + version the owning {@link WorldIngest} is served under. */
     private static final String OWNER_API_VERSION = "bluemap.onelitefeather.net/v1alpha1";
@@ -128,6 +136,12 @@ public final class IngestJobBuilder {
      */
     public static Job build(WorldIngest ingest, WorldSource source, OperatorConfig config) {
         String namespace = ingest.getMetadata().getNamespace();
+        LOGGER.debug(
+                "building ingest job '{}' in namespace '{}' for source '{}' from image '{}'",
+                ingest.getMetadata().getName(),
+                namespace,
+                source.getMetadata().getName(),
+                config.ingestImage());
         Map<String, String> labels = labels(ingest, source);
 
         Container container = new ContainerBuilder()
@@ -254,6 +268,65 @@ public final class IngestJobBuilder {
                 // the two disagree about which types are pollable/ingestible.
             }
         }
+
+        env.addAll(telemetryEnv(namespace, worldName));
+
+        return env;
+    }
+
+    /**
+     * Passes this operator's OpenTelemetry configuration into the ingest job, plus the current
+     * trace context.
+     *
+     * <p>Without this the ingest image would build an SDK with no endpoint and its spans would
+     * go nowhere -- the instrumentation would be dead weight. Passing the endpoint through means
+     * the job reports to the same collector the operator does, without anyone configuring the
+     * job separately.
+     *
+     * <p>The {@code traceparent} entry is what makes the job's run a child of the reconciliation
+     * that created it rather than an unrelated trace: the ingest image reads it through the
+     * standard W3C propagator, so "why did this take forty minutes" is one trace from the
+     * operator's reconcile down to the dimension being written.
+     *
+     * <p>Only variables that are actually set are forwarded, so an operator running without a
+     * collector produces a job without one either.
+     */
+    private static List<EnvVar> telemetryEnv(String namespace, String worldName) {
+        List<EnvVar> env = new ArrayList<>();
+
+        for (String name : List.of(
+                "OTEL_EXPORTER_OTLP_ENDPOINT",
+                "OTEL_EXPORTER_OTLP_PROTOCOL",
+                "OTEL_EXPORTER_OTLP_HEADERS",
+                "OTEL_TRACES_SAMPLER",
+                "OTEL_TRACES_SAMPLER_ARG")) {
+            String value = System.getenv(name);
+            if (value != null && !value.isBlank()) {
+                env.add(literal(name, value));
+            }
+        }
+
+        // Named per job rather than inherited, so a trace shows "apus-ingest" doing the work
+        // rather than the operator that asked for it.
+        if (System.getenv("OTEL_EXPORTER_OTLP_ENDPOINT") != null) {
+            env.add(literal("OTEL_SERVICE_NAME", "apus-ingest"));
+            env.add(literal(
+                    "OTEL_RESOURCE_ATTRIBUTES",
+                    "k8s.namespace.name=" + namespace + ",apus.world.name=" + worldName));
+        }
+
+        // W3C directly rather than through GlobalOpenTelemetry's propagators: the ingest image
+        // reads the standard traceparent header, and going via the global instance would make
+        // this silently produce nothing whenever that has not been registered -- which is
+        // exactly the kind of failure nobody notices until a trace is missing.
+        Map<String, String> carrier = new LinkedHashMap<>();
+        W3CTraceContextPropagator.getInstance()
+                .inject(Context.current(), carrier, (TextMapSetter<Map<String, String>>) (map, key, value) -> {
+                    if (map != null) {
+                        map.put(key, value);
+                    }
+                });
+        carrier.forEach((key, value) -> env.add(literal(key.toUpperCase(Locale.ROOT).replace('-', '_'), value)));
 
         return env;
     }

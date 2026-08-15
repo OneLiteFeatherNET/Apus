@@ -33,6 +33,8 @@ import net.onelitefeather.apus.api.security.ApusPrincipal;
 import net.onelitefeather.apus.api.security.ForbiddenException;
 import net.onelitefeather.apus.api.security.TenantResolver;
 import net.onelitefeather.apus.api.support.PrincipalResolver;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * {@code GET /api/renders} and {@code GET /api/renders/{id}} -- read-only, the caller's own
@@ -53,6 +55,8 @@ import net.onelitefeather.apus.api.support.PrincipalResolver;
 @Controller("/api/renders")
 @Secured(SecurityRule.IS_AUTHENTICATED)
 public class BlueMapRenderController {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(BlueMapRenderController.class);
 
     private final BlueMapRenderRepository repository;
     private final PrincipalResolver principalResolver;
@@ -96,6 +100,7 @@ public class BlueMapRenderController {
     public HttpResponse<List<ClusterRenderResponse>> listCluster(Authentication authentication) {
         ApusPrincipal principal = principalResolver.resolve(authentication);
         if (!principal.isPlatformAdmin()) {
+            LOGGER.warn("principal '{}' denied the cluster-wide render view", principal.subject());
             throw new ForbiddenException("principal '" + principal.subject() + "' is not a platform-admin");
         }
 
@@ -119,14 +124,18 @@ public class BlueMapRenderController {
         requireRead(principal);
         String namespace = tenantResolver.namespaceFor(principal);
 
-        var render = repository
-                .find(namespace, id)
-                .orElseThrow(() -> new NotFoundException("no render '" + id + "' in namespace '" + namespace + "'"));
+        var render = repository.find(namespace, id).orElseThrow(() -> {
+            // An ordinary 404, identical for "does not exist" and "another tenant's" -- see the
+            // class Javadoc. Nothing failed, so this is not logged as an error.
+            LOGGER.debug("no render '{}' in namespace '{}'", id, namespace);
+            return new NotFoundException("no render '" + id + "' in namespace '" + namespace + "'");
+        });
         return HttpResponse.ok(BlueMapRenderResponse.from(render));
     }
 
     private void requireRead(ApusPrincipal principal) {
         if (!TenantAccess.canRead(principal)) {
+            LOGGER.warn("principal '{}' denied read access to /api/renders: no tenant role", principal.subject());
             throw new ForbiddenException("principal '" + principal.subject() + "' has no tenant role");
         }
     }

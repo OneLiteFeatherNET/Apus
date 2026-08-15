@@ -21,6 +21,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import net.onelitefeather.apus.operator.api.BlueMapMap;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Generates the complete BlueMap configuration for a map.
@@ -49,6 +51,8 @@ import net.onelitefeather.apus.operator.api.BlueMapMap;
  * a comment in the generated file.
  */
 public final class BlueMapConfigBuilder {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(BlueMapConfigBuilder.class);
 
     private BlueMapConfigBuilder() {}
 
@@ -140,6 +144,7 @@ public final class BlueMapConfigBuilder {
         Map<String, String> files = new LinkedHashMap<>();
 
         files.put("webserver.conf", webserverConfig(webserverPort));
+        LOGGER.debug("generating a hosting configuration for {} map(s)", maps.size());
 
         for (int i = 0; i < maps.size(); i++) {
             BlueMapMap map = maps.get(i);

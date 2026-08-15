@@ -85,6 +85,16 @@ ui:
   tolerations: []
   affinity: {}
 
+# OpenTelemetry for the API. The SDK is a no-op with no endpoint set, so leaving this empty
+# ships the instrumentation without turning it on. HTTP server spans come from Micronaut's
+# own instrumentation; the API adds spans only where the work is not already one request.
+otel:
+  # e.g. http://alloy-receiver.monitoring.svc:4317
+  endpoint: ""
+  serviceName: ""
+  logsExporter: otlp
+  extraEnv: {}
+
 ingress:
   enabled: false
   className: nginx

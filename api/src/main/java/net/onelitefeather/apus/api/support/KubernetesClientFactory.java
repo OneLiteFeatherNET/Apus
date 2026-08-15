@@ -21,6 +21,8 @@ import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.KubernetesClientBuilder;
 import io.micronaut.context.annotation.Factory;
 import jakarta.inject.Singleton;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * The single {@link KubernetesClient} bean for this module, shared by every repository under
@@ -44,8 +46,14 @@ import jakarta.inject.Singleton;
 @Factory
 public class KubernetesClientFactory {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger(KubernetesClientFactory.class);
+
     @Singleton
     public KubernetesClient kubernetesClient() {
-        return new KubernetesClientBuilder().build();
+        KubernetesClient client = new KubernetesClientBuilder().build();
+        // The master URL only. The ServiceAccount token the client authenticates with is never
+        // touched here and must never be logged.
+        LOGGER.info("Kubernetes client configured for {}", client.getMasterUrl());
+        return client;
     }
 }

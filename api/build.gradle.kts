@@ -50,6 +50,28 @@ dependencies {
     implementation(platform(libs.aws.sdk.bom))
     implementation(libs.aws.sdk.s3)
 
+    // Observability -- see docs/logging-and-tracing.md for the contract all three services share.
+    //
+    // SLF4J is the API every class in this module logs through; Logback is the implementation
+    // behind it and reads src/main/resources/logback.xml. Logback is `implementation` rather than
+    // `runtimeOnly` because OpenTelemetryFactory compiles against OpenTelemetryAppender, which is
+    // itself a Logback appender class.
+    implementation(libs.slf4j.api)
+    implementation(libs.logback.classic)
+
+    implementation(platform(libs.opentelemetry.bom))
+    implementation(libs.opentelemetry.api)
+    implementation(libs.opentelemetry.sdk)
+    // Reads the standard OTEL_* environment variables, so which collector receives the data (or
+    // whether one exists at all) stays a deployment decision -- see OpenTelemetryFactory.
+    implementation(libs.opentelemetry.sdk.autoconfigure)
+    // Only ever loaded through autoconfigure's ServiceLoader lookup, never referenced from code;
+    // shadowJar's mergeServiceFiles() above keeps that SPI registration intact in the fat jar.
+    runtimeOnly(libs.opentelemetry.exporter.otlp)
+
+    implementation(platform(libs.opentelemetry.instrumentation.bom))
+    implementation(libs.opentelemetry.logback.appender)
+
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
     testRuntimeOnly(libs.junit.platform.launcher)

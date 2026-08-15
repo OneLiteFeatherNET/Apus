@@ -22,6 +22,8 @@ import io.micronaut.context.annotation.Factory;
 import io.micronaut.context.annotation.Value;
 import jakarta.inject.Singleton;
 import java.net.URI;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Picks the {@link LogSource} implementation once at startup: {@link LokiLogSource} if
@@ -48,6 +50,8 @@ import java.net.URI;
 @Factory
 class LogSourceFactory {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger(LogSourceFactory.class);
+
     @Singleton
     LogSource logSource(@Value("${apus.loki.url:}") String lokiUrl, KubernetesClient client) {
         return select(lokiUrl, client);
@@ -56,8 +60,15 @@ class LogSourceFactory {
     /** Extracted for {@code LogSourceFactoryTest} to exercise without a Micronaut context. */
     static LogSource select(String lokiUrl, KubernetesClient client) {
         if (lokiUrl != null && !lokiUrl.isBlank()) {
+            // Deliberately not the URL itself: a base URI may legitimately carry userinfo
+            // credentials, and this is the one line every deployment would paste into a ticket.
+            LOGGER.info("render logs will be read from Loki");
             return new LokiLogSource(URI.create(lokiUrl));
         }
+        // A fallback, and one that costs a wider ServiceAccount grant than the design spec's
+        // Loki-only path -- exactly the "recoverable but unexpected" case warn exists for.
+        LOGGER.warn("apus.loki.url is not set; falling back to reading pod logs through the "
+                + "Kubernetes API, which needs get/list on pods and get on pods/log");
         return new KubernetesPodLogSource(client);
     }
 }

@@ -29,6 +29,7 @@ import io.javaoperatorsdk.operator.api.reconciler.Context;
 import io.javaoperatorsdk.operator.api.reconciler.ControllerConfiguration;
 import io.javaoperatorsdk.operator.api.reconciler.Reconciler;
 import io.javaoperatorsdk.operator.api.reconciler.UpdateControl;
+import io.opentelemetry.api.common.Attributes;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -44,6 +45,9 @@ import net.onelitefeather.apus.operator.api.Conditions;
 import net.onelitefeather.apus.operator.api.Labels;
 import net.onelitefeather.apus.operator.api.WorldIngest;
 import net.onelitefeather.apus.operator.api.WorldSource;
+import net.onelitefeather.apus.operator.telemetry.Tracing;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.regions.Region;
@@ -79,6 +83,8 @@ import software.amazon.awssdk.regions.Region;
  */
 @ControllerConfiguration
 public class WorldIngestReconciler implements Reconciler<WorldIngest> {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(WorldIngestReconciler.class);
 
     /** Reason set on the {@code Ready} condition while the referenced source does not exist. */
     public static final String SOURCE_NOT_FOUND_REASON = "SourceNotFound";
@@ -158,6 +164,14 @@ public class WorldIngestReconciler implements Reconciler<WorldIngest> {
 
     @Override
     public UpdateControl<WorldIngest> reconcile(WorldIngest ingest, Context<WorldIngest> context) {
+        return Tracing.reconcile("WorldIngest", Tracing.INGEST, ingest, () -> doReconcile(ingest));
+    }
+
+    /**
+     * The reconciliation itself, split out of {@link #reconcile} so the span wrapping it stays a
+     * single readable line rather than an extra level of indentation over the whole method.
+     */
+    private UpdateControl<WorldIngest> doReconcile(WorldIngest ingest) {
         String currentPhase = ingest.getStatus().getPhase();
         if (currentPhase != null && TERMINAL_PHASES.contains(currentPhase)) {
             return UpdateControl.noUpdate();
@@ -199,8 +213,28 @@ public class WorldIngestReconciler implements Reconciler<WorldIngest> {
                     "another ingest for source '" + sourceName + "' is already active");
         }
 
-        Job job = IngestJobBuilder.build(ingest, source, config);
-        client.batch().v1().jobs().inNamespace(namespace).resource(job).createOr(NonDeletingOperation::update);
+        // Its own span: building the job is cheap, submitting it is an API server write that
+        // can be rejected or be slow, and it is the moment an ingest starts costing resources.
+        Tracing.run(
+                "create ingest job",
+                Attributes.of(
+                        Tracing.INGEST, ingestName, Tracing.SOURCE, sourceName, Tracing.K8S_NAMESPACE_NAME, namespace),
+                () -> {
+                    Job job = IngestJobBuilder.build(ingest, source, config);
+                    client.batch()
+                            .v1()
+                            .jobs()
+                            .inNamespace(namespace)
+                            .resource(job)
+                            .createOr(NonDeletingOperation::update);
+                });
+        LOGGER.info(
+                "submitted ingest job '{}' for source '{}' in namespace '{}' (world '{}', version '{}')",
+                ingestName,
+                sourceName,
+                namespace,
+                ingest.getSpec().getWorldName(),
+                ingest.getSpec().getSourceVersion());
 
         ingest.getStatus().setJobName(ingestName);
         ingest.getStatus().setPhase(EXTRACTING_PHASE);
@@ -220,6 +254,10 @@ public class WorldIngestReconciler implements Reconciler<WorldIngest> {
             return onJobSucceeded(ingest, source, namespace, progress);
         }
         if (isJobFailed(job)) {
+            LOGGER.error(
+                    "ingest '{}' in namespace '{}' failed: the ingest job exhausted its retries",
+                    ingestName,
+                    namespace);
             ingest.getStatus().setPhase(FAILED_PHASE);
             ingest.getStatus().setCompletionTime(Instant.now().toString());
             Conditions.set(
@@ -269,7 +307,12 @@ public class WorldIngestReconciler implements Reconciler<WorldIngest> {
             throw e;
         }
 
-        applyRetention(source, tenant, sourceName, worldId, bundlePath);
+        // Its own span: listing and deleting objects in an S3 bucket, i.e. the one part of a
+        // successful ingest that leaves the cluster and can be slow enough to notice.
+        Tracing.run(
+                "apply bundle retention",
+                Attributes.of(Tracing.SOURCE, sourceName, Tracing.WORLD, worldId),
+                () -> applyRetention(source, tenant, sourceName, worldId, bundlePath));
 
         BundleRef ingestBundle = ingest.getStatus().getBundle();
         ingestBundle.setPath(bundlePath);
@@ -277,6 +320,12 @@ public class WorldIngestReconciler implements Reconciler<WorldIngest> {
         ingestBundle.setDimensions(dimensions);
         ingest.getStatus().setPhase(SUCCEEDED_PHASE);
         ingest.getStatus().setCompletionTime(Instant.now().toString());
+        LOGGER.info(
+                "ingest '{}' completed: world '{}' of source '{}' is now bundle '{}'",
+                ingest.getMetadata().getName(),
+                worldId,
+                sourceName,
+                bundlePath);
         Conditions.set(
                 ingest.getStatus().getConditions(),
                 Conditions.ready(true, SUCCEEDED_REASON, "ingest completed, bundle at " + bundlePath));
@@ -334,7 +383,15 @@ public class WorldIngestReconciler implements Reconciler<WorldIngest> {
                 store.deleteVersion(tenant, sourceName, worldId, version, config.bundleBucket());
             }
         } catch (RuntimeException e) {
-            // See method Javadoc: pruning failures must not block the ingest run itself.
+            // See method Javadoc: pruning failures must not block the ingest run itself. The
+            // exception's type only, never its message -- it comes from an S3 client whose
+            // messages can carry request details (§12).
+            LOGGER.warn(
+                    "source '{}': pruning old bundle versions of world '{}' failed with {}; the ingest itself"
+                            + " is unaffected and pruning is retried after the next successful run",
+                    sourceName,
+                    worldId,
+                    e.getClass().getSimpleName());
         }
     }
 
@@ -580,12 +637,18 @@ public class WorldIngestReconciler implements Reconciler<WorldIngest> {
     }
 
     private static UpdateControl<WorldIngest> pending(WorldIngest ingest, String reason, String message) {
+        LOGGER.debug("ingest '{}' is pending ({}): {}", ingest.getMetadata().getName(), reason, message);
         ingest.getStatus().setPhase(PENDING_PHASE);
         Conditions.set(ingest.getStatus().getConditions(), Conditions.ready(false, reason, message));
         return UpdateControl.patchStatus(ingest).rescheduleAfter(RECHECK_INTERVAL);
     }
 
     private static UpdateControl<WorldIngest> conflict(WorldIngest ingest, String resourceKind, String resourceName) {
+        LOGGER.warn(
+                "ingest '{}': existing {} '{}' is not owned by this ingest -- refusing to adopt it",
+                ingest.getMetadata().getName(),
+                resourceKind,
+                resourceName);
         ingest.getStatus().setPhase(PENDING_PHASE);
         Conditions.set(
                 ingest.getStatus().getConditions(),

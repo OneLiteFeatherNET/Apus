@@ -22,10 +22,14 @@ import jakarta.inject.Singleton;
 import java.util.List;
 import java.util.Optional;
 import net.onelitefeather.apus.operator.api.BlueMapMap;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /** {@link BlueMapMapRepository} backed by a real {@link KubernetesClient}. */
 @Singleton
 public class FabricBlueMapMapRepository implements BlueMapMapRepository {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(FabricBlueMapMapRepository.class);
 
     private final KubernetesClient client;
 
@@ -35,6 +39,7 @@ public class FabricBlueMapMapRepository implements BlueMapMapRepository {
 
     @Override
     public List<BlueMapMap> list(String namespace) {
+        LOGGER.debug("listing BlueMapMaps in namespace '{}'", namespace);
         return client.resources(BlueMapMap.class).inNamespace(namespace).list().getItems();
     }
 

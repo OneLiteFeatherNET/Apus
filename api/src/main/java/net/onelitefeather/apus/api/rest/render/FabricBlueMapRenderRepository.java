@@ -22,10 +22,14 @@ import jakarta.inject.Singleton;
 import java.util.List;
 import java.util.Optional;
 import net.onelitefeather.apus.operator.api.BlueMapRender;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /** {@link BlueMapRenderRepository} backed by a real {@link KubernetesClient}. */
 @Singleton
 public class FabricBlueMapRenderRepository implements BlueMapRenderRepository {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(FabricBlueMapRenderRepository.class);
 
     private final KubernetesClient client;
 
@@ -46,6 +50,7 @@ public class FabricBlueMapRenderRepository implements BlueMapRenderRepository {
 
     @Override
     public BlueMapRender create(String namespace, BlueMapRender render) {
+        LOGGER.debug("creating BlueMapRender in namespace '{}'", namespace);
         return client.resources(BlueMapRender.class).inNamespace(namespace).resource(render).create();
     }
 }

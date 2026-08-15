@@ -25,6 +25,8 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Fallback {@link LogSource}: reads a render job's pod logs directly through the Kubernetes
@@ -43,6 +45,8 @@ import java.util.List;
  */
 final class KubernetesPodLogSource implements LogSource {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger(KubernetesPodLogSource.class);
+
     /** Set by Kubernetes itself on every Pod a Job creates -- not an Apus-specific label. */
     private static final String JOB_NAME_LABEL = "job-name";
 
@@ -60,11 +64,13 @@ final class KubernetesPodLogSource implements LogSource {
                 .list()
                 .getItems();
         if (pods.isEmpty()) {
+            LOGGER.warn("no pod found for render job '{}' in namespace '{}'", jobName, namespace);
             sink.error(new IllegalStateException("no pod found for render job '" + jobName + "'"));
             return () -> {};
         }
 
         String podName = pods.get(0).getMetadata().getName();
+        LOGGER.debug("tailing pod '{}' in namespace '{}' for job '{}'", podName, namespace, jobName);
         LogWatch logWatch = client.pods().inNamespace(namespace).withName(podName).watchLog();
         Thread reader = Thread.ofVirtual().name("render-log-tail-" + jobName).start(() -> readLines(logWatch, sink));
 

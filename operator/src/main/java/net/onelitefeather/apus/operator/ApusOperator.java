@@ -20,14 +20,23 @@ package net.onelitefeather.apus.operator;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.KubernetesClientBuilder;
 import io.javaoperatorsdk.operator.Operator;
+import io.opentelemetry.instrumentation.logback.appender.v1_0.OpenTelemetryAppender;
+import io.opentelemetry.sdk.OpenTelemetrySdk;
+import io.opentelemetry.sdk.autoconfigure.AutoConfiguredOpenTelemetrySdk;
+import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.function.Consumer;
+import java.util.function.Function;
+import java.util.stream.Stream;
 import net.onelitefeather.apus.operator.hosting.BlueMapHostingReconciler;
 import net.onelitefeather.apus.operator.ingest.WorldIngestReconciler;
 import net.onelitefeather.apus.operator.ingest.WorldSourceReconciler;
 import net.onelitefeather.apus.operator.map.BlueMapMapReconciler;
 import net.onelitefeather.apus.operator.render.BlueMapRenderReconciler;
+import net.onelitefeather.apus.operator.telemetry.Tracing;
 import net.onelitefeather.apus.operator.tenant.TenantReconciler;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * The operator's process entry point: builds a Kubernetes client and {@link OperatorConfig} from
@@ -52,31 +61,115 @@ import net.onelitefeather.apus.operator.tenant.TenantReconciler;
  * sitting out the termination grace period and being {@code SIGKILL}ed.
  *
  * <p><b>Startup failure:</b> a cluster connection problem, or any other error surfacing while
- * registering reconcilers or starting the operator, is reported to stderr and ends the process
- * with a non-zero exit code -- never silently.
+ * registering reconcilers or starting the operator, is logged at {@code error} and ends the
+ * process with a non-zero exit code -- never silently.
+ *
+ * <p><b>Observability:</b> {@link #initTelemetry()} builds the OpenTelemetry SDK from the
+ * environment and hands it both to the Logback OTLP appender and to {@link Tracing}, before the
+ * first log line is written. With no {@code OTEL_EXPORTER_OTLP_ENDPOINT} set -- how every
+ * developer machine and every test runs -- no exporter is attached at all (see {@link
+ * #exporterDefaults}), so both are inert and startup behaves exactly as it did before. See
+ * {@code docs/logging-and-tracing.md}.
  */
 public final class ApusOperator {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(ApusOperator.class);
 
     private ApusOperator() {}
 
     public static void main(String[] args) {
+        OpenTelemetrySdk telemetry = initTelemetry();
         OperatorConfig config = OperatorConfig.fromEnvironment(System::getenv);
 
         KubernetesClient client;
         try {
             client = new KubernetesClientBuilder().build();
         } catch (RuntimeException e) {
-            System.err.println("[apus-operator] failed to build a Kubernetes client: " + e.getMessage());
+            LOGGER.error("failed to build a Kubernetes client", e);
+            telemetry.close();
             System.exit(1);
             return;
         }
 
         try {
-            run(client, config, new CountDownLatch(1), Runtime.getRuntime()::addShutdownHook);
+            run(client, config, telemetry, new CountDownLatch(1), Runtime.getRuntime()::addShutdownHook);
         } catch (RuntimeException e) {
-            System.err.println("[apus-operator] failed to start: " + e.getMessage());
+            LOGGER.error("failed to start", e);
+            telemetry.close();
             System.exit(1);
         }
+    }
+
+    /**
+     * Builds the OpenTelemetry SDK from the standard {@code OTEL_*} environment variables and
+     * wires it into the two things that consume it: the Logback appender that ships log records
+     * over OTLP, and {@link Tracing}, through which every span in this module is created.
+     *
+     * <p>Called before the first log line on purpose -- the appender buffers only a small number
+     * of records emitted before {@code install()}, and anything beyond that would simply never
+     * reach the collector.
+     *
+     * <p>Autoconfiguration's own JVM shutdown hook is disabled ({@code disableShutdownHook()}):
+     * this process already registers exactly one hook, in {@link #run}, and folding the SDK's
+     * {@code close()} into that same path keeps flush ordering explicit -- the operator is
+     * stopped and the client is closed <em>before</em> the exporters are shut down, so the log
+     * records and spans produced while shutting down are still exported rather than dropped by an
+     * exporter that a second, independently-ordered hook had already closed.
+     *
+     * <p>The result is deliberately not registered as {@link
+     * io.opentelemetry.api.GlobalOpenTelemetry} -- see {@link Tracing}'s class Javadoc for why.
+     */
+    static OpenTelemetrySdk initTelemetry() {
+        return initTelemetry(System::getenv);
+    }
+
+    /** {@link #initTelemetry()} against a supplied environment, so a test does not have to mutate the real one. */
+    static OpenTelemetrySdk initTelemetry(Function<String, String> env) {
+        OpenTelemetrySdk telemetry = AutoConfiguredOpenTelemetrySdk.builder()
+                .disableShutdownHook()
+                .addPropertiesSupplier(() -> exporterDefaults(env))
+                .build()
+                .getOpenTelemetrySdk();
+        OpenTelemetryAppender.install(telemetry);
+        Tracing.use(telemetry);
+        return telemetry;
+    }
+
+    /**
+     * Makes "no {@code OTEL_EXPORTER_OTLP_ENDPOINT} set means the SDK is a no-op" ({@code
+     * docs/logging-and-tracing.md}) actually true.
+     *
+     * <p>Autoconfiguration on its own does <b>not</b> behave that way: with no endpoint
+     * configured it still defaults every signal's exporter to {@code otlp} and points it at
+     * {@code localhost:4317}, so a developer machine or a test run -- neither of which has a
+     * collector -- would spend the process's lifetime retrying a connection that can never
+     * succeed and logging the failures. Defaulting the three exporters to {@code none} instead,
+     * <em>only</em> while no endpoint is configured, removes that entirely.
+     *
+     * <p>This does not move configuration into code: values from {@code addPropertiesSupplier}
+     * are the lowest-precedence layer autoconfiguration knows, so a deployment that sets {@code
+     * OTEL_TRACES_EXPORTER} or {@code OTEL_LOGS_EXPORTER} explicitly still wins, and setting an
+     * endpoint at all switches the defaults back off.
+     */
+    static Map<String, String> exporterDefaults(Function<String, String> env) {
+        if (endpointConfigured(env)) {
+            return Map.of();
+        }
+        return Map.of(
+                "otel.traces.exporter", "none",
+                "otel.logs.exporter", "none",
+                "otel.metrics.exporter", "none");
+    }
+
+    /** Whether any OTLP endpoint -- the shared one or a per-signal override -- is configured. */
+    private static boolean endpointConfigured(Function<String, String> env) {
+        return Stream.of(
+                        "OTEL_EXPORTER_OTLP_ENDPOINT",
+                        "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
+                        "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT",
+                        "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT")
+                .map(env)
+                .anyMatch(value -> value != null && !value.isBlank());
     }
 
     /**
@@ -87,21 +180,25 @@ public final class ApusOperator {
      * <p>Extracted from {@link #main} so a test can drive the whole run -- start, block, shut
      * down -- against a mock {@link KubernetesClient} and a hook it triggers itself, instead of a
      * real cluster and a real {@code SIGTERM}.
+     *
+     * <p>{@code telemetry} is closed by the same shutdown hook that stops the operator, rather
+     * than by a second hook of its own -- see {@link #initTelemetry()}.
      */
     static void run(
             KubernetesClient client,
             OperatorConfig config,
+            OpenTelemetrySdk telemetry,
             CountDownLatch shutdownSignal,
             Consumer<Thread> shutdownHookRegistrar) {
         Operator operator = new Operator(o -> o.withKubernetesClient(client));
         shutdownHookRegistrar.accept(
-                new Thread(() -> shutdown(operator, client, shutdownSignal), "apus-operator-shutdown"));
+                new Thread(() -> shutdown(operator, client, telemetry, shutdownSignal), "apus-operator-shutdown"));
 
         registerReconcilers(operator, client, config);
         operator.start();
 
-        System.out.println("[apus-operator] started, watching Tenant/BlueMapMap/BlueMapRender/WorldSource/"
-                + "WorldIngest/BlueMapHosting resources");
+        LOGGER.info("started, watching Tenant/BlueMapMap/BlueMapRender/WorldSource/WorldIngest/BlueMapHosting"
+                + " resources");
 
         awaitShutdown(shutdownSignal);
     }
@@ -143,17 +240,24 @@ public final class ApusOperator {
     }
 
     /**
-     * Stops {@code operator} and closes {@code client}, in that order, swallowing (but logging)
-     * any failure from {@code stop()} so the client is still closed even if stopping the
-     * controllers did not go cleanly.
+     * Stops {@code operator}, closes {@code client} and shuts the OpenTelemetry SDK down, in that
+     * order, swallowing (but logging) any failure from {@code stop()} so the client is still
+     * closed even if stopping the controllers did not go cleanly.
+     *
+     * <p>The SDK goes last deliberately: every line above may still emit a log record, and
+     * flushing the exporters before those records exist would drop exactly the output someone
+     * investigating a bad shutdown would want.
      */
-    private static void shutdown(Operator operator, KubernetesClient client, CountDownLatch shutdownSignal) {
+    private static void shutdown(
+            Operator operator, KubernetesClient client, OpenTelemetrySdk telemetry, CountDownLatch shutdownSignal) {
+        LOGGER.info("shutting down");
         try {
             operator.stop();
         } catch (RuntimeException e) {
-            System.err.println("[apus-operator] error while stopping: " + e.getMessage());
+            LOGGER.error("error while stopping the operator", e);
         } finally {
             client.close();
+            telemetry.close();
             shutdownSignal.countDown();
         }
     }

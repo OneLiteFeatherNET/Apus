@@ -26,6 +26,8 @@ import java.util.List;
 import java.util.UUID;
 import java.util.regex.Pattern;
 import net.onelitefeather.apus.api.rest.support.BadRequestException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.AbortMultipartUploadRequest;
 import software.amazon.awssdk.services.s3.model.CompleteMultipartUploadRequest;
@@ -96,6 +98,8 @@ import software.amazon.awssdk.services.s3.presigner.model.UploadPartPresignReque
  */
 @Singleton
 public class MultipartUploadService {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(MultipartUploadService.class);
 
     /** Hard defensive ceiling on issued part URLs, well under S3's own 10 000-part protocol limit. */
     private static final int MAX_PARTS = 2000;
@@ -170,6 +174,12 @@ public class MultipartUploadService {
                     .key(key)
                     .uploadId(uploadId)
                     .build());
+            LOGGER.warn(
+                    "aborted a multipart upload for source '{}' in namespace '{}': {} declared bytes would need more than {} parts",
+                    sourceName,
+                    namespace,
+                    declaredSizeBytes,
+                    MAX_PARTS);
             throw new BadRequestException("sizeBytes would require more than " + MAX_PARTS + " parts");
         }
 
@@ -238,6 +248,16 @@ public class MultipartUploadService {
                     .key(key)
                     .uploadId(uploadId)
                     .build());
+            // The real enforcement point firing -- a caller declared one size and uploaded
+            // another. Recoverable (the upload was aborted, nothing was published) but always
+            // worth seeing.
+            LOGGER.warn(
+                    "aborted multipart upload '{}' for source '{}' in namespace '{}': {} actual bytes exceed the {}-byte maximum",
+                    uploadId,
+                    sourceName,
+                    namespace,
+                    totalBytes,
+                    maxUploadBytes);
             throw new BadRequestException(
                     "upload's actual total size (" + totalBytes + " bytes) exceeds the maximum allowed ("
                             + maxUploadBytes + " bytes); the upload was aborted");
@@ -257,6 +277,13 @@ public class MultipartUploadService {
                 .multipartUpload(CompletedMultipartUpload.builder().parts(completedParts).build())
                 .build());
 
+        LOGGER.debug(
+                "completed multipart upload '{}' for source '{}' in namespace '{}': {} parts, {} bytes",
+                uploadId,
+                sourceName,
+                namespace,
+                allParts.size(),
+                totalBytes);
         return new CompleteUploadResponse(key, version, totalBytes, allParts.size());
     }
 

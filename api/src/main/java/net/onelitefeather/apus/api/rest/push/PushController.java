@@ -34,6 +34,8 @@ import net.onelitefeather.apus.api.rest.support.NotFoundException;
 import net.onelitefeather.apus.api.rest.worldsource.WorldSourceRepository;
 import net.onelitefeather.apus.operator.api.WorldIngest;
 import net.onelitefeather.apus.operator.api.WorldSource;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * {@code POST /api/push/{token}} -- the completion report a {@code push}-type {@code
@@ -69,6 +71,8 @@ import net.onelitefeather.apus.operator.api.WorldSource;
 @Secured(SecurityRule.IS_ANONYMOUS)
 public class PushController {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger(PushController.class);
+
     private static final String TYPE_PUSH = "push";
 
     private final PushTokenRepository tokenRepository;
@@ -89,9 +93,14 @@ public class PushController {
             @PathVariable String token, @Nullable @Body PushReportRequest request) {
         // Resolved before the request body is even inspected: an invalid token must fail
         // identically regardless of what (if anything) the body contains.
-        String namespace = tokenRepository
-                .resolveNamespace(token)
-                .orElseThrow(() -> new NotFoundException("no push source authorized for this token"));
+        // The token itself never reaches a log line, a span attribute or an exception message
+        // -- not even truncated or hashed. It is a bearer credential the Paper plugin also
+        // holds; anything derived from it in a log would narrow a brute-force search
+        // (docs/logging-and-tracing.md, "Attributes and secrets").
+        String namespace = tokenRepository.resolveNamespace(token).orElseThrow(() -> {
+            LOGGER.warn("push report rejected: the presented service token matched no tenant");
+            return new NotFoundException("no push source authorized for this token");
+        });
 
         if (request == null || isBlank(request.sourceName()) || isBlank(request.version())) {
             throw new BadRequestException("sourceName and version are both required");
@@ -122,6 +131,12 @@ public class PushController {
             created.add(result.getMetadata().getName());
         }
 
+        LOGGER.info(
+                "push report from source '{}' in namespace '{}' created {} ingest(s) for version '{}'",
+                request.sourceName(),
+                namespace,
+                created.size(),
+                request.version());
         return HttpResponse.created(new PushReportResponse(created));
     }
 

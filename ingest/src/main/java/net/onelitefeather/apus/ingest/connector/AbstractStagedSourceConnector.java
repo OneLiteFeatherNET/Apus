@@ -26,6 +26,8 @@ import java.nio.file.StandardCopyOption;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;
 import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
@@ -59,6 +61,13 @@ import software.amazon.awssdk.services.s3.model.GetObjectResponse;
  */
 abstract class AbstractStagedSourceConnector implements WorldSourceConnector {
 
+    /**
+     * The staging credentials in this connector's config are secrets and never reach a log line, a
+     * span attribute or an exception message; bucket, prefix and object key are not and do reach
+     * one -- see {@code docs/logging-and-tracing.md}.
+     */
+    private static final Logger LOGGER = LoggerFactory.getLogger(AbstractStagedSourceConnector.class);
+
     public static final String CONFIG_ENDPOINT = "endpoint";
     public static final String CONFIG_BUCKET = "bucket";
     public static final String CONFIG_PREFIX = "prefix";
@@ -88,6 +97,7 @@ abstract class AbstractStagedSourceConnector implements WorldSourceConnector {
 
         GetObjectRequest request =
                 GetObjectRequest.builder().bucket(bucket).key(key).build();
+        LOGGER.info("fetching staged object s3://{}/{} into {}", bucket, key, workDir);
         try (ResponseInputStream<GetObjectResponse> object = client.getObject(request)) {
             if (Archives.isArchive(key)) {
                 Archives.extract(key, object, workDir, Archives.limitsFrom(config));

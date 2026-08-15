@@ -28,6 +28,8 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Detects how a Minecraft world's files are laid out on disk and resolves each dimension to its
@@ -52,6 +54,8 @@ import java.util.stream.Stream;
  * thing standing between a hostile archive and reading/writing arbitrary files on the host.
  */
 public final class LayoutDetector {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(LayoutDetector.class);
 
     private static final String KIND_VANILLA = "vanilla";
     private static final String KIND_BUKKIT = "bukkit";
@@ -125,11 +129,20 @@ public final class LayoutDetector {
 
         Optional<WorldLayout> match = select(vanilla, bukkit, forcedLayout);
         if (match.isPresent()) {
+            LOGGER.debug(
+                    "recognized a {} layout for world '{}' under {}",
+                    match.get().kind(),
+                    worldName,
+                    searchRoot);
             return match.get();
         }
 
         Optional<Path> nestedChild = singleSubdirectory(realRoot, searchRoot);
         if (nestedChild.isPresent()) {
+            // The extra top-level folder a ZIP upload commonly adds -- worth a line, because it is
+            // the one case where the path that was searched is not the path that was configured.
+            LOGGER.debug("no known layout directly under {}; descending into its single subdirectory {}",
+                    searchRoot, nestedChild.get());
             return detect(nestedChild.get(), originalRoot, realRoot, worldName, forcedLayout);
         }
 

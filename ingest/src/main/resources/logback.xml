@@ -1,0 +1,32 @@
+<configuration>
+  <!-- Console: for a human reading `kubectl logs`. No JSON here on purpose -- nothing
+       parses this stream for ingestion, so it can stay legible. The operator does read a few
+       stable substrings back out of it (phase=..., progress: NN.N% (done/total bytes),
+       dimensions=[...] -- see IngestLogProgress), which is why IngestMain's message text is a
+       contract even though its formatting here is not. -->
+  <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+    <encoder>
+      <pattern>%d{HH:mm:ss.SSS} %-5level %logger{36} - %msg%n</pattern>
+    </encoder>
+  </appender>
+
+  <!-- OTLP: the export path. Captures MDC and the code attributes so a log record can be
+       correlated with the span it occurred in. With no OTEL_EXPORTER_OTLP_ENDPOINT set,
+       the SDK is a no-op and this appender costs nothing. -->
+  <appender name="OTEL" class="io.opentelemetry.instrumentation.logback.appender.v1_0.OpenTelemetryAppender">
+    <captureExperimentalAttributes>false</captureExperimentalAttributes>
+    <captureCodeAttributes>true</captureCodeAttributes>
+    <captureMdcAttributes>*</captureMdcAttributes>
+  </appender>
+
+  <root level="INFO">
+    <appender-ref ref="CONSOLE"/>
+    <appender-ref ref="OTEL"/>
+  </root>
+
+  <!-- Our own code at DEBUG is useful while troubleshooting and cheap; the AWS SDK at DEBUG is a
+       firehose (this module's equivalent of the Kubernetes client in operator/api -- ingest talks
+       to S3, not to the API server). -->
+  <logger name="net.onelitefeather.apus" level="INFO"/>
+  <logger name="software.amazon.awssdk" level="WARN"/>
+</configuration>

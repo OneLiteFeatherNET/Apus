@@ -22,10 +22,14 @@ import jakarta.inject.Singleton;
 import java.util.List;
 import java.util.Optional;
 import net.onelitefeather.apus.operator.api.Tenant;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /** {@link TenantRepository} backed by a real {@link KubernetesClient}. */
 @Singleton
 public class FabricTenantRepository implements TenantRepository {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(FabricTenantRepository.class);
 
     private final KubernetesClient client;
 
@@ -45,11 +49,13 @@ public class FabricTenantRepository implements TenantRepository {
 
     @Override
     public Tenant create(Tenant tenant) {
+        LOGGER.debug("creating Tenant '{}'", tenant.getMetadata().getName());
         return client.resource(tenant).create();
     }
 
     @Override
     public Tenant update(Tenant tenant) {
+        LOGGER.debug("updating Tenant '{}'", tenant.getMetadata().getName());
         return client.resource(tenant).update();
     }
 }

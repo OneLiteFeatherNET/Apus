@@ -36,6 +36,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.zip.GZIPInputStream;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * A pull source backed by a <a href="https://pterodactyl.io">Pterodactyl</a> game panel's Client
@@ -77,6 +79,17 @@ import java.util.zip.GZIPInputStream;
  * ever disagrees with this envelope, treat that as the fact and this comment as stale.
  */
 public final class PterodactylConnector implements WorldSourceConnector {
+
+    /**
+     * <b>Nothing logged here may carry a credential.</b> This connector holds two: the panel API
+     * key (a {@code ptlc_} token sent as a bearer header) and the short-lived signed download URL,
+     * whose query string <em>is</em> the authorisation to download the whole backup. Neither the
+     * key, the signed URL, nor any response body that could contain the signed URL goes into a log
+     * line, a span attribute or an exception message -- see {@code docs/logging-and-tracing.md}
+     * and the design spec's §12 rule for CR status and events. The panel host and the backup UUID
+     * are enough to diagnose every failure this class can produce.
+     */
+    private static final Logger LOGGER = LoggerFactory.getLogger(PterodactylConnector.class);
 
     public static final String CONFIG_PANEL_URL = "panelUrl";
     public static final String CONFIG_SERVER_ID = "serverId";
@@ -122,6 +135,7 @@ public final class PterodactylConnector implements WorldSourceConnector {
         String apiKey = require(config, CONFIG_API_KEY);
 
         URI uri = URI.create(trimTrailingSlash(panelUrl) + "/api/client/servers/" + serverId + "/backups?per_page=50");
+        LOGGER.debug("listing backups of Pterodactyl server {} on {}", serverId, uri.getHost());
         HttpResponse<String> response = sendForString(authorizedRequest(uri, apiKey));
         requireSuccess(response, "list backups");
 
@@ -133,6 +147,7 @@ public final class PterodactylConnector implements WorldSourceConnector {
             JsonNode attributes = item.path("attributes");
             if (!attributes.path("is_successful").asBoolean(false)) {
                 // A backup still running or that failed has nothing fetchable yet.
+                LOGGER.debug("skipping backup {}: not successful (yet)", attributes.path("uuid").asText("<unknown>"));
                 continue;
             }
             String uuid = attributes.path("uuid").asText(null);
@@ -141,6 +156,7 @@ public final class PterodactylConnector implements WorldSourceConnector {
             long bytes = attributes.path("bytes").asLong();
             versions.add(new SourceVersion(uuid, name, OffsetDateTime.parse(createdAt).toInstant(), bytes));
         }
+        LOGGER.info("discovered {} fetchable backup(s) on Pterodactyl server {}", versions.size(), serverId);
         return versions;
     }
 
@@ -153,12 +169,20 @@ public final class PterodactylConnector implements WorldSourceConnector {
 
         URI downloadUri = URI.create(trimTrailingSlash(panelUrl) + "/api/client/servers/" + serverId + "/backups/"
                 + version.id() + "/download");
+        LOGGER.info("fetching backup {} of Pterodactyl server {}", version.id(), serverId);
         HttpResponse<String> signed = sendForString(authorizedRequest(downloadUri, apiKey));
-        requireSuccess(signed, "request signed backup download url");
+        // Deliberately body-free, unlike the list call below: this endpoint's body is where the
+        // signed URL lives, and an unexpected shape is precisely the case where it would end up in
+        // the message.
+        requireSuccessWithoutBody(signed, "request signed backup download url");
 
-        JsonNode urlNode = parseJson(signed.body()).path("attributes").path("url");
+        JsonNode urlNode = parseJsonWithoutBody(signed.body(), "signed backup download url")
+                .path("attributes")
+                .path("url");
         if (!urlNode.isTextual()) {
-            throw new IllegalStateException("Pterodactyl signed_url response had no attributes.url: " + signed.body());
+            throw new IllegalStateException(
+                    "Pterodactyl signed_url response had no textual attributes.url (body withheld: it may contain the"
+                            + " signed URL itself)");
         }
         String signedUrl = urlNode.asText();
 
@@ -169,6 +193,8 @@ public final class PterodactylConnector implements WorldSourceConnector {
         URI signedUri = URI.create(signedUrl);
         HttpRequest downloadRequest =
                 HttpRequest.newBuilder(signedUri).timeout(REQUEST_TIMEOUT).GET().build();
+        // The host, never the URI: everything after it is the signature.
+        LOGGER.info("streaming backup {} from host {} into {}", version.id(), signedUri.getHost(), workDir);
         try {
             HttpResponse<InputStream> archive =
                     httpClient.send(downloadRequest, HttpResponse.BodyHandlers.ofInputStream());
@@ -212,6 +238,21 @@ public final class PterodactylConnector implements WorldSourceConnector {
         }
     }
 
+    /**
+     * Same as {@link #parseJson}, for a response whose body may contain a credential -- the
+     * signed-URL endpoint's does. {@code action} names the call instead.
+     */
+    private static JsonNode parseJsonWithoutBody(String body, String action) {
+        try {
+            return MAPPER.readTree(body);
+        } catch (JsonProcessingException e) {
+            throw new UncheckedIOException(
+                    "failed to parse the Pterodactyl " + action + " response as JSON (body withheld: it may contain a"
+                            + " credential)",
+                    e);
+        }
+    }
+
     private static HttpRequest authorizedRequest(URI uri, String apiKey) {
         return HttpRequest.newBuilder(uri)
                 .header("Authorization", "Bearer " + apiKey)
@@ -225,6 +266,17 @@ public final class PterodactylConnector implements WorldSourceConnector {
         if (response.statusCode() / 100 != 2) {
             throw new IllegalStateException("Pterodactyl API call to " + action + " failed with HTTP "
                     + response.statusCode() + ": " + response.body());
+        }
+    }
+
+    /**
+     * Same as {@link #requireSuccess}, minus the body -- for the signed-URL endpoint, whose
+     * responses are the one place a Pterodactyl body can carry a credential.
+     */
+    private static void requireSuccessWithoutBody(HttpResponse<String> response, String action) {
+        if (response.statusCode() / 100 != 2) {
+            throw new IllegalStateException(
+                    "Pterodactyl API call to " + action + " failed with HTTP " + response.statusCode());
         }
     }
 

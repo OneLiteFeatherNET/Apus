@@ -21,6 +21,8 @@ import io.micronaut.context.annotation.Factory;
 import io.micronaut.context.annotation.Value;
 import jakarta.inject.Singleton;
 import java.net.URI;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;
 import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
@@ -50,7 +52,23 @@ import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 @Factory
 class StagingS3ClientFactory {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger(StagingS3ClientFactory.class);
+
     private static final String DEFAULT_REGION = "us-east-1";
+
+    /**
+     * Logs how the staging client is addressed, never what it authenticates with: an access key
+     * id and a secret access key are both credentials, and neither appears in any log line or
+     * exception message this class can produce (docs/logging-and-tracing.md).
+     */
+    private static void logConfiguration(String what, String endpoint, String region, boolean staticCredentials) {
+        LOGGER.info(
+                "staging S3 {} configured (endpoint={}, region={}, credentials={})",
+                what,
+                (endpoint == null || endpoint.isBlank()) ? "aws-default" : endpoint,
+                region,
+                staticCredentials ? "static" : "default-provider-chain");
+    }
 
     @Singleton
     S3Client stagingS3Client(
@@ -58,6 +76,7 @@ class StagingS3ClientFactory {
             @Value("${apus.staging.region:" + DEFAULT_REGION + "}") String region,
             @Value("${apus.staging.access-key-id:}") String accessKeyId,
             @Value("${apus.staging.secret-access-key:}") String secretAccessKey) {
+        logConfiguration("client", endpoint, region, hasStaticCredentials(accessKeyId, secretAccessKey));
         var builder = S3Client.builder().region(Region.of(region)).credentialsProvider(credentials(accessKeyId, secretAccessKey));
         if (endpoint != null && !endpoint.isBlank()) {
             // S3-compatible stores (Rook/Ceph, MinIO, ...) need an endpoint override and
@@ -74,6 +93,7 @@ class StagingS3ClientFactory {
             @Value("${apus.staging.region:" + DEFAULT_REGION + "}") String region,
             @Value("${apus.staging.access-key-id:}") String accessKeyId,
             @Value("${apus.staging.secret-access-key:}") String secretAccessKey) {
+        logConfiguration("presigner", endpoint, region, hasStaticCredentials(accessKeyId, secretAccessKey));
         var builder =
                 S3Presigner.builder().region(Region.of(region)).credentialsProvider(credentials(accessKeyId, secretAccessKey));
         if (endpoint != null && !endpoint.isBlank()) {
@@ -94,8 +114,12 @@ class StagingS3ClientFactory {
         return builder.build();
     }
 
+    private static boolean hasStaticCredentials(String accessKeyId, String secretAccessKey) {
+        return accessKeyId != null && !accessKeyId.isBlank() && secretAccessKey != null && !secretAccessKey.isBlank();
+    }
+
     private static AwsCredentialsProvider credentials(String accessKeyId, String secretAccessKey) {
-        if (accessKeyId != null && !accessKeyId.isBlank() && secretAccessKey != null && !secretAccessKey.isBlank()) {
+        if (hasStaticCredentials(accessKeyId, secretAccessKey)) {
             return StaticCredentialsProvider.create(AwsBasicCredentials.create(accessKeyId, secretAccessKey));
         }
         return DefaultCredentialsProvider.builder().build();
