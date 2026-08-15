@@ -1,8 +1,11 @@
 <script setup lang="ts">
-// Which links are shown is a UX convenience, not access control -- see
+// Which links are shown is a UX convenience, not access control -- see layers/core,
 // app/utils/role.ts's module Javadoc.
+//
+// There is no "Platform" entry any more: that area is a separate application (design doc
+// 2026-08-15, §2), reachable through the header's own link. A <ULink to="/platform"> here would
+// resolve to nothing in this app's router.
 const { principal } = useAuth()
-const showPlatformLink = computed(() => isPlatformAdmin(principal.value))
 const showTenantLink = computed(() => canReadTenant(principal.value))
 </script>
 
@@ -17,13 +20,6 @@ const showTenantLink = computed(() => canReadTenant(principal.value))
       class="text-sm font-medium"
     >
       Tenant
-    </ULink>
-    <ULink
-      v-if="showPlatformLink"
-      to="/platform"
-      class="text-sm font-medium"
-    >
-      Platform
     </ULink>
   </nav>
 </template>
