@@ -1,10 +1,19 @@
 # Applies to every image built from this repo root (build context is always `.`).
 #
-# ui/ (Nuxt) keeps build output and dependencies on disk even though they are gitignored (see
-# .gitignore). Without this file, `COPY ui/ ./` in ui/Dockerfile would copy the host's
-# node_modules/.output/.nuxt over the ones the build stage just produced -- pnpm aborts rather
-# than silently overwrite a foreign node_modules, and even if it didn't, stale local build
-# output could end up shipped in the image.
+# ui/ (a pnpm workspace) keeps build output and dependencies on disk even though they are
+# gitignored (see .gitignore). Without this file, `COPY ui/ ./` in ui/Dockerfile.app and
+# ui/Dockerfile.console would copy the host's node_modules/.output/.nuxt over the ones the build
+# stage just produced -- pnpm aborts rather than silently overwrite a foreign node_modules, and
+# even if it didn't, stale local build output could end up shipped in the image.
+#
+# The patterns are unanchored for the same reason as in .gitignore: every workspace package
+# (apps/*, layers/*) has its own node_modules, .nuxt and .output, and `ui/node_modules/` matches
+# none of them.
+ui/**/node_modules/
+ui/**/.nuxt/
+ui/**/.output/
+ui/**/dist/
+ui/**/coverage/
 ui/node_modules/
 ui/.nuxt/
 ui/.output/
