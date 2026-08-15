@@ -1,0 +1,27 @@
+# Patterns to ignore when building packages.
+# This supports shell glob matching, relative path matching, and
+# negation (prefixed with !). Only one pattern per line.
+.DS_Store
+# Common VCS dirs
+.git/
+.gitignore
+.bzr/
+.bzrignore
+.hg/
+.hgignore
+.svn/
+# Common backup files
+*.swp
+*.bak
+*.tmp
+*.orig
+*~
+# Various IDEs
+.project
+.idea/
+*.tmproj
+.vscode/
+# Developer tooling: sync-crds.sh copies the generated CRDs from deploy/crds/ into
+# files/crds/ and only ever runs in this repository. It has no purpose inside the packaged
+# chart -- the CRDs it produces are already there.
+sync-crds.sh

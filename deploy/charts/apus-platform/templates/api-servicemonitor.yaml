@@ -1,0 +1,26 @@
+{{- /*
+The API does not export Prometheus metrics yet -- Phase 8 Task 5 adds micronaut-management
+and micronaut-micrometer, exposing /prometheus on the same port as the app. Until then that
+path 404s, so api.metrics.serviceMonitor.enabled defaults to false; turning it on before then
+just wires Prometheus up to a 404, leaving empty Grafana panels with no indication why.
+*/ -}}
+{{- if .Values.api.metrics.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "apus-platform.api.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "apus-platform.componentLabels" (dict "ctx" . "component" "api") | nindent 4 }}
+    {{- with .Values.api.metrics.serviceMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "apus-platform.componentSelectorLabels" (dict "ctx" . "component" "api") | nindent 6 }}
+  endpoints:
+    - port: http
+      path: /prometheus
+      interval: {{ .Values.api.metrics.serviceMonitor.interval }}
+{{- end }}

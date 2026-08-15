@@ -11,7 +11,9 @@
       "package-name": "apus",
       "changelog-path": "CHANGELOG.md",
       "extra-files": [
-        { "type": "generic", "path": "build.gradle.kts" }
+        { "type": "generic", "path": "build.gradle.kts" },
+        { "type": "generic", "path": "deploy/charts/apus-operator/Chart.yaml" },
+        { "type": "generic", "path": "deploy/charts/apus-platform/Chart.yaml" }
       ]
     },
     "telemetry-addon": {

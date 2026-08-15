@@ -1,0 +1,75 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "apus-platform.ui.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "apus-platform.componentLabels" (dict "ctx" . "component" "ui") | nindent 4 }}
+spec:
+  replicas: {{ .Values.ui.replicaCount }}
+  strategy:
+    # The UI is a stateless static SPA served by nginx -- no local state to lose by running
+    # old and new pods side by side.
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      {{- include "apus-platform.componentSelectorLabels" (dict "ctx" . "component" "ui") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "apus-platform.componentLabels" (dict "ctx" . "component" "ui") | nindent 8 }}
+        {{- with .Values.ui.podLabels }}{{- toYaml . | nindent 8 }}{{- end }}
+      {{- with .Values.ui.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.ui.podSecurityContext | nindent 8 }}
+      containers:
+        - name: ui
+          image: {{ include "apus-platform.image" (dict "image" .Values.ui.image "ctx" .) }}
+          imagePullPolicy: {{ .Values.ui.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.ui.securityContext | nindent 12 }}
+          ports:
+            # The unprivileged nginx base image (nginxinc/nginx-unprivileged) listens on
+            # 8080 and runs as uid 101, not 80/root like the stock image.
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          # The UI is a prebuilt static SPA: config (API base URL, OIDC issuer/client) is
+          # baked in at build time, not read from the environment at runtime -- there is
+          # nothing to inject here.
+          readinessProbe:
+            # Static SPA: a 200 on the root is a sufficient signal, no management endpoint
+            # needed like the API.
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            {{- toYaml .Values.ui.resources | nindent 12 }}
+      {{- with .Values.ui.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.ui.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.ui.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

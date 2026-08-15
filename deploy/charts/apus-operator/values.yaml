@@ -1,0 +1,84 @@
+image:
+  repository: harbor.onelitefeather.dev/apus/operator
+  # Empty on purpose: falls back to .Chart.AppVersion so the chart version and the
+  # image version cannot drift apart. Override only to pin a hotfix image.
+  tag: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+# The images the operator uses for the workloads it creates itself (renders, ingests,
+# hosting). They are not deployed by this chart -- the operator builds Jobs and
+# Deployments from custom resources and needs to know which image to reference.
+images:
+  runner:
+    repository: harbor.onelitefeather.dev/apus/runner
+    tag: ""
+  ingest:
+    repository: harbor.onelitefeather.dev/apus/ingest
+    tag: ""
+  hosting:
+    repository: harbor.onelitefeather.dev/apus/hosting
+    tag: ""
+
+crds:
+  # The six CRDs ship as templates so that `helm upgrade` actually updates them.
+  # Set to false only if your organisation manages CRDs separately.
+  install: true
+
+rook:
+  namespace: rook-ceph
+  cephObjectStore: ceph-objectstore
+  bucketStorageClass: ceph-bucket
+
+bundles:
+  bucket: apus-bundles
+  s3Endpoint: ""
+  s3Region: us-east-1
+  credentialsSecret: apus-bundle-credentials
+
+metrics:
+  enabled: true
+  port: 8080
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+    labels: {}
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+rbac:
+  create: true
+
+replicaCount: 1
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    memory: 512Mi
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

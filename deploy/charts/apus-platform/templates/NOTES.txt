@@ -1,0 +1,41 @@
+The apus-platform chart (REST API and dashboard) is installed.
+
+1. Check that both workloads came up:
+
+   kubectl get deployment {{ include "apus-platform.api.fullname" . }} -n {{ .Release.Namespace }}
+   kubectl get deployment {{ include "apus-platform.ui.fullname" . }} -n {{ .Release.Namespace }}
+
+{{- if .Values.ingress.enabled }}
+
+2. The dashboard and API are reachable through the ingress:
+
+   http{{ if .Values.ingress.tls.enabled }}s{{ end }}://{{ .Values.ingress.host }}/       (dashboard)
+   http{{ if .Values.ingress.tls.enabled }}s{{ end }}://{{ .Values.ingress.host }}/api    (API)
+{{- else }}
+
+2. ingress.enabled is false -- reach the workloads from inside the cluster only:
+
+   kubectl port-forward svc/{{ include "apus-platform.ui.fullname" . }} 8080:80 -n {{ .Release.Namespace }}
+   kubectl port-forward svc/{{ include "apus-platform.api.fullname" . }} 8081:80 -n {{ .Release.Namespace }}
+{{- end }}
+
+3. This chart assumes an installed apus-operator: the CRDs the API reads (Tenant,
+   WorldSource, WorldIngest, BlueMapMap, BlueMapRender, BlueMapHosting) must already exist,
+   or every dashboard page that lists them will error.
+
+4. The API validates every token against auth.issuer ({{ .Values.auth.issuer }}). If your
+   identity broker's issuer or JWKS URI changes, upgrade with the new auth.issuer/
+   auth.jwksUri -- there is no default, so a stale value fails closed rather than silently.
+
+{{- if .Values.api.metrics.serviceMonitor.enabled }}
+
+5. api.metrics.serviceMonitor.enabled is set, but the API does not export metrics yet (that
+   lands in Phase 8 Task 5). The ServiceMonitor is installed, but /prometheus does not exist
+   on this image yet, so Prometheus will only see failed scrapes until that phase ships.
+{{- else }}
+
+5. Metrics are not scraped (api.metrics.serviceMonitor.enabled is false by default) -- the
+   API does not export Prometheus metrics yet, so there is nothing to scrape until Phase 8
+   Task 5 ships. Once it does, /prometheus is Basic-Auth protected; a ServiceMonitor turned
+   on before that endpoint carries credentials will fail to scrape.
+{{- end }}

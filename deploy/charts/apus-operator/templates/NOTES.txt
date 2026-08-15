@@ -1,0 +1,44 @@
+The apus-operator is installed.
+
+1. Check that the controller came up:
+
+   kubectl get deployment {{ include "apus-operator.fullname" . }} -n {{ .Release.Namespace }}
+
+2. No tenant exists yet. The operator does nothing until a Tenant custom resource is
+   created -- it is what provisions a namespace with a ResourceQuota, a LimitRange and the
+   `apus-push-token` Secret (design spec §8.1; the per-tenant NetworkPolicy described there
+   is not implemented yet). Create a minimal one:
+
+   cat <<EOF | kubectl apply -f -
+   apiVersion: bluemap.onelitefeather.net/v1alpha1
+   kind: Tenant
+   metadata:
+     name: example
+   spec:
+     displayName: Example
+   EOF
+
+   Then watch it reconcile:
+
+   kubectl get tenant example -o wide
+   kubectl describe tenant example
+
+{{- if .Values.metrics.enabled }}
+{{- if .Values.metrics.serviceMonitor.enabled }}
+
+3. metrics.serviceMonitor.enabled is set, but the operator does not export metrics yet
+   (that lands in Phase 8 Task 4). There is no HTTP server in the operator at all so far:
+   Prometheus will scrape port {{ .Values.metrics.port }} and get a connection refused on
+   every attempt until that phase ships.
+{{- else }}
+
+3. The "metrics" Service port ({{ .Values.metrics.port }}) is declared, but nothing listens
+   on it yet -- the operator has no HTTP server and exports no metrics until Phase 8 Task 4
+   ships. No ServiceMonitor is installed either (metrics.serviceMonitor.enabled is false by
+   default), which is why nothing is scraping the dead port.
+{{- end }}
+{{- end }}
+
+This chart only installs the operator: the CRDs, the controller and its RBAC. It has no
+user interface. The `apus-platform` chart installs the REST API and the dashboard that let
+you manage tenants, worlds and renders without talking to the Kubernetes API directly.

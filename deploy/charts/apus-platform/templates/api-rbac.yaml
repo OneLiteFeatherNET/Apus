@@ -1,0 +1,78 @@
+{{- if .Values.api.serviceAccount.create }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "apus-platform.api.serviceAccountName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "apus-platform.componentLabels" (dict "ctx" . "component" "api") | nindent 4 }}
+  {{- with .Values.api.serviceAccount.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- end }}
+{{- if .Values.api.rbac.create }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "apus-platform.api.fullname" . }}
+  labels:
+    {{- include "apus-platform.componentLabels" (dict "ctx" . "component" "api") | nindent 4 }}
+rules:
+  # The dashboard's own writes: create tenants and let admins re-save them, create world
+  # sources and renders through the UI's forms, kick off ingests. Everything else the API
+  # reads is created and owned by the operator (design spec §8-§11), never by the API.
+  - apiGroups: ["bluemap.onelitefeather.net"]
+    resources: ["tenants"]
+    verbs: ["get", "list", "create", "update"]
+  - apiGroups: ["bluemap.onelitefeather.net"]
+    resources: ["worldsources"]
+    verbs: ["get", "list", "create"]
+  - apiGroups: ["bluemap.onelitefeather.net"]
+    resources: ["worldingests"]
+    verbs: ["create"]
+  - apiGroups: ["bluemap.onelitefeather.net"]
+    resources: ["bluemapmaps"]
+    verbs: ["get", "list"]
+  # get/watch back the SSE render-progress stream (design spec §11.1); create starts a render.
+  - apiGroups: ["bluemap.onelitefeather.net"]
+    resources: ["bluemaprenders"]
+    verbs: ["get", "list", "watch", "create"]
+  - apiGroups: ["bluemap.onelitefeather.net"]
+    resources: ["bluemaphostings"]
+    verbs: ["get", "list"]
+  # Fallback log source when no Loki is configured (design spec §11.1): finds a render job's
+  # pod by its job-name label and tails its log directly. The Loki path avoids this entirely.
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+  # RBAC for the push-token lookup broader than ideal (design spec §15 point 9, tracked as
+  # phase 9 task 2). FabricPushTokenRepository#resolveNamespace still searches by label across
+  # every namespace -- RBAC cannot restrict a grant by a Secret's label or content, only by
+  # resource type/verb/name, so the narrowest grant that makes today's lookup work is still
+  # get/list on every Secret in the cluster. Narrow this to
+  # resourceNames: ["apus-push-token"] once phase 9 task 2 switches resolveNamespace to
+  # enumerating Tenants and getting the fixed-name Secret in each namespace instead.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "apus-platform.api.fullname" . }}
+  labels:
+    {{- include "apus-platform.componentLabels" (dict "ctx" . "component" "api") | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "apus-platform.api.fullname" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "apus-platform.api.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}
