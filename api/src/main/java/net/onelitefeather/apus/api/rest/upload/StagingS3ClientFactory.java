@@ -34,11 +34,11 @@ import software.amazon.awssdk.services.s3.presigner.S3Presigner;
  * The {@link S3Client}/{@link S3Presigner} pair {@link MultipartUploadService} uses against the
  * platform-wide staging bucket -- one shared bucket, tenant isolation coming entirely from the
  * key prefix each presigned URL is scoped to (see that class's Javadoc), the same "one bucket,
- * many mandant-scoped prefixes" reading of design spec §11.1 the task brief's "auf das
- * Staging-Präfix genau dieses Mandanten" language implies. Credentials are therefore
+ * many tenant-scoped prefixes" reading of design spec §11.1 the task brief's "to the staging
+ * prefix of exactly this tenant" language implies. Credentials are therefore
  * platform-wide, not per-tenant -- mirroring how design spec §10.2 already describes the RGW
- * admin-ops credentials used for quota polling ("Die Zugangsdaten dafür sind plattformweit, nicht
- * mandantengebunden").
+ * admin-ops credentials used for quota polling ("the credentials for that are platform-wide, not
+ * tenant-bound").
  *
  * <p>{@code @Value} injection directly into {@code @Factory} methods, not a {@code
  * @ConfigurationProperties} class -- matches this module's existing convention (see {@code

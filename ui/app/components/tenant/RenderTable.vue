@@ -3,8 +3,8 @@ import type { BlueMapRenderResponse } from '~/utils/apiTypes'
 import { isRenderTerminal, type RenderProgressSnapshot } from '~/utils/renderProgress'
 import { formatTimestamp } from '~/utils/formatTimestamp'
 
-// Design spec §11.2: "Renders: Verlauf mit Zustand, und für den laufenden Render Fortschritt in
-// Prozent mit geschätzter Restzeit, live." The history itself comes from one GET (a snapshot);
+// Design spec §11.2: "Renders: history with status, and for the render in progress, percentage
+// progress with estimated remaining time, live." The history itself comes from one GET (a snapshot);
 // any render that isn't terminal yet gets a live RenderProgressBar inline, on top of that
 // snapshot, rather than the page re-polling GET /api/renders.
 const props = defineProps<{ renders: BlueMapRenderResponse[] }>()

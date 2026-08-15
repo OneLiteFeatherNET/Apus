@@ -42,7 +42,7 @@ import java.util.List;
  * itself scales with how much actually changed, and that step runs off the main thread anyway.
  *
  * <p><b>What "changed" means.</b> Two signals, used together, exactly as the design brief
- * specifies ("nur Region-Dateien mit geänderter Änderungszeit oder Prüfsumme"):
+ * specifies ("only region files with a changed modification time or checksum"):
  *
  * <ol>
  *   <li>{@code size}/{@code mtime} is the cheap first check (a single {@code stat}, no file

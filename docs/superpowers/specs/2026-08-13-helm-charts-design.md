@@ -1,76 +1,76 @@
 # Apus — Helm Charts: Design
 
-**Stand:** 2026-08-13
-**Status:** Entwurf zur Freigabe
+**As of:** 2026-08-13
+**Status:** Draft for approval
 
-Apus wird über zwei Helm Charts ausgerollt, die im Apus-Repository leben, gemeinsam mit dem
-Code versioniert und als OCI-Artefakte nach Harbor veröffentlicht werden. Sie ersetzen die
-Kustomize-Basis, die der Phase-8-Plan bisher vorsah.
+Apus is rolled out via two Helm charts that live in the Apus repository, are versioned
+together with the code, and are published as OCI artifacts to Harbor. They replace the
+Kustomize base that the phase 8 plan previously called for.
 
 ---
 
-## 1. Ausgangslage
+## 1. Starting point
 
-Apus hat heute **keine** Deployment-Beschreibung. Der Phase-8-Plan sieht eine Kustomize-Basis
-unter `deploy/base` vor; davon ist nichts gebaut. Es gibt also nichts zu migrieren.
+Apus currently has **no** deployment description. The phase 8 plan calls for a Kustomize
+base under `deploy/base`; none of that has been built. So there is nothing to migrate.
 
-Im Cluster-Repository (`Kubernetes-FLUX`) existieren zwei etablierte Muster nebeneinander:
+The cluster repository (`Kubernetes-FLUX`) has two established patterns side by side:
 
-- **Eigene Charts** liegen unter `helm/<name>` (`leantime`, `micronaut`, `outline`, `shlink`)
-  und werden per `HelmRelease` mit `sourceRef: GitRepository helmcharts` referenziert.
-- **Fremde Charts** kommen als OCI-Artefakt über `OCIRepository`, etwa der
-  kube-prometheus-stack von `ghcr.io` mit
+- **In-house charts** live under `helm/<name>` (`leantime`, `micronaut`, `outline`, `shlink`)
+  and are referenced via `HelmRelease` with `sourceRef: GitRepository helmcharts`.
+- **Third-party charts** arrive as an OCI artifact via `OCIRepository`, for example the
+  kube-prometheus-stack from `ghcr.io` with
   `layerSelector.mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip`.
 
-Das zweite Muster ist der Weg, den Apus geht: Apus ist aus Sicht des Cluster-Repositories
-kein hauseigenes Manifest, sondern ein versioniertes Produkt mit eigenem Release-Zyklus.
+The second pattern is the path Apus takes: from the cluster repository's point of view,
+Apus is not an in-house manifest but a versioned product with its own release cycle.
 
-Das vorhandene `helm/micronaut`-Chart (v0.5.2) enthält Deployment, Service, Ingress,
-HTTPRoute, ConfigMap, Secret, ServiceAccount, RBAC, HPA, PDB und ServiceMonitor. Es dient
-als **Vorlage** für Struktur, Label-Konventionen und `values.yaml`-Gliederung — als
-Dependency ist es nicht nutzbar, weil es unpubliziert im Cluster-Repository liegt.
+The existing `helm/micronaut` chart (v0.5.2) contains Deployment, Service, Ingress,
+HTTPRoute, ConfigMap, Secret, ServiceAccount, RBAC, HPA, PDB, and ServiceMonitor. It serves
+as a **template** for structure, label conventions, and `values.yaml` layout — it cannot be
+used as a dependency, because it is unpublished and lives in the cluster repository.
 
 ---
 
-## 2. Entscheidungen
+## 2. Decisions
 
-| Frage | Entscheidung | Begründung |
+| Question | Decision | Rationale |
 | --- | --- | --- |
-| Helm oder Kustomize | **Helm ersetzt Kustomize** | Zwei parallele Deployment-Beschreibungen für dieselben Komponenten driften auseinander; das Cluster-Repository arbeitet ohnehin mit Helm |
-| Schnitt | **Zwei Charts**: `apus-operator`, `apus-platform` | Die Trennlinie liegt dort, wo sie im Design ohnehin liegt: Der Operator ist der Kern und funktioniert allein (Spec §14, Phase 2 „für interne Nutzung bereits vollständig brauchbar"), API und UI sind die Oberfläche darüber |
-| Ort | **Apus-Repository**, `deploy/charts/`, OCI nach Harbor | Chart und Code versionieren gemeinsam; die Kombination Chart↔Image kann nicht auseinanderlaufen |
-| CRDs | **Als Templates** mit `helm.sh/resource-policy: keep` | Helms `crds/`-Verzeichnis wird bei `helm upgrade` nie aktualisiert; Apus' CRDs werden generiert und ändern sich mit jeder Phase |
-| Mandanten | **Nicht im Chart** | Mandanten sind Betriebsdaten, keine Installationsdaten (Spec §14). Ein `helm uninstall` dürfte sie nicht mitreißen |
+| Helm or Kustomize | **Helm replaces Kustomize** | Two parallel deployment descriptions for the same components drift apart; the cluster repository already works with Helm anyway |
+| Split | **Two charts**: `apus-operator`, `apus-platform` | The dividing line sits exactly where the design already puts it: the operator is the core and works on its own (Spec §14, Phase 2 "already fully usable for internal use"); API and UI are the surface on top of it |
+| Location | **Apus repository**, `deploy/charts/`, OCI to Harbor | Chart and code are versioned together; the chart-to-image pairing cannot drift apart |
+| CRDs | **As templates** with `helm.sh/resource-policy: keep` | Helm's `crds/` directory is never updated on `helm upgrade`; Apus' CRDs are generated and change with every phase |
+| Tenants | **Not in the chart** | Tenants are operational data, not installation data (Spec §14). A `helm uninstall` must not sweep them away |
 
 ---
 
-## 3. Was die Charts ausrollen — und was nicht
+## 3. What the charts roll out — and what they don't
 
-Von den sechs Komponenten installiert Helm nur drei. Das ist keine Lücke, sondern folgt der
-Architektur:
+Of the six components, Helm installs only three. That is not a gap; it follows the
+architecture:
 
-| Komponente | Weg in den Cluster |
+| Component | Path into the cluster |
 | --- | --- |
-| `operator` | `apus-operator` — Deployment, cluster-weite RBAC |
-| die sechs CRDs | `apus-operator` — Templates mit `resource-policy: keep` |
+| `operator` | `apus-operator` — Deployment, cluster-wide RBAC |
+| the six CRDs | `apus-operator` — templates with `resource-policy: keep` |
 | `api` | `apus-platform` — Deployment, Service, Ingress, ServiceMonitor |
 | `ui` | `apus-platform` — Deployment, Service, Ingress |
-| `runner` | **vom Operator erzeugt** aus `BlueMapRender` (Job) |
-| `ingest` | **vom Operator erzeugt** aus `WorldIngest` (Job) |
-| `hosting` | **vom Operator erzeugt** aus `BlueMapHosting` (Deployment + Service + Ingress) |
+| `runner` | **created by the operator** from `BlueMapRender` (Job) |
+| `ingest` | **created by the operator** from `WorldIngest` (Job) |
+| `hosting` | **created by the operator** from `BlueMapHosting` (Deployment + Service + Ingress) |
 
-Für die letzten drei reicht Helm nur die Image-Referenz durch — sie erscheinen in
-`apus-operator`s `values.yaml` als `images.runner`, `images.ingest`, `images.hosting` und
-landen als `APUS_RUNNER_IMAGE`/`APUS_INGEST_IMAGE`/`APUS_HOSTING_IMAGE` im Operator-Deployment.
-Ein eigenes Chart für `hosting` wäre fachlich falsch: Es würde einen Webserver anlegen, den
-der Operator gleich noch einmal erzeugt.
+For the last three, Helm only passes through the image reference — they appear in
+`apus-operator`'s `values.yaml` as `images.runner`, `images.ingest`, `images.hosting` and end
+up as `APUS_RUNNER_IMAGE`/`APUS_INGEST_IMAGE`/`APUS_HOSTING_IMAGE` in the operator
+deployment. A dedicated chart for `hosting` would be conceptually wrong: it would create a
+web server that the operator would then create a second time.
 
 ---
 
 ## 4. Chart `apus-operator`
 
-Das Minimum, mit dem Apus arbeitet. Wer ausschließlich über `kubectl` und Git fährt,
-installiert nur dieses Chart.
+The minimum Apus needs to work. Anyone running purely on `kubectl` and Git installs only
+this chart.
 
 ```text
 deploy/charts/apus-operator/
@@ -81,25 +81,25 @@ deploy/charts/apus-operator/
   README.md
   templates/
     _helpers.tpl
-    crds.yaml            # die sechs CRDs, resource-policy: keep
+    crds.yaml            # the six CRDs, resource-policy: keep
     deployment.yaml
     serviceaccount.yaml
-    rbac.yaml            # ClusterRole + ClusterRoleBinding
-    service.yaml         # nur der Metrics-Port
-    servicemonitor.yaml  # optional, .Values.metrics.serviceMonitor.enabled
+    rbac.yaml             # ClusterRole + ClusterRoleBinding
+    service.yaml          # only the metrics port
+    servicemonitor.yaml   # optional, .Values.metrics.serviceMonitor.enabled
     NOTES.txt
 ```
 
-`values.yaml`-Oberfläche, gegliedert nach dem, was ein Betreiber tatsächlich entscheiden muss:
+The `values.yaml` surface, organized by what an operator actually needs to decide:
 
 ```yaml
 image:
   repository: harbor.onelitefeather.dev/apus/operator
-  tag: ""            # leer => .Chart.AppVersion
+  tag: ""            # empty => .Chart.AppVersion
   pullPolicy: IfNotPresent
 
-# Die Images, die der Operator für die von ihm erzeugten Workloads einsetzt.
-# Default ist jeweils dieselbe Version wie der Operator selbst.
+# The images the operator uses for the workloads it creates itself.
+# The default for each is the same version as the operator itself.
 images:
   runner:
     repository: harbor.onelitefeather.dev/apus/runner
@@ -111,13 +111,13 @@ images:
     repository: harbor.onelitefeather.dev/apus/hosting
     tag: ""
 
-# Rook/Ceph, aus dem der Operator Buckets und Mandanten-Nutzer bezieht (Spec §9.1).
+# Rook/Ceph, from which the operator obtains buckets and tenant users (Spec §9.1).
 rook:
   namespace: rook-ceph
   cephObjectStore: ceph-objectstore
   bucketStorageClass: ceph-bucket
 
-# Der plattformweite Bundle-Bucket (Spec §5) -- Installationsvoraussetzung, kein Inhalt.
+# The platform-wide bundle bucket (Spec §5) -- an installation prerequisite, not content.
 bundles:
   bucket: apus-bundles
   s3Endpoint: ""
@@ -138,8 +138,8 @@ podSecurityContext: {}
 securityContext: {}
 ```
 
-**CRDs.** `templates/crds.yaml` entsteht beim Chart-Bau aus `deploy/crds/` (den in Phase 8
-eingecheckten Generator-Ausgaben), jede Ressource mit
+**CRDs.** `templates/crds.yaml` is generated at chart-build time from `deploy/crds/` (the
+generator output checked in during phase 8), each resource with
 
 ```yaml
 metadata:
@@ -147,26 +147,26 @@ metadata:
     helm.sh/resource-policy: keep
 ```
 
-Damit werden sie bei `helm upgrade` mit aktualisiert, bei `helm uninstall` aber behalten —
-sonst würde das Deinstallieren des Charts sämtliche `Tenant`-, `BlueMapMap`- und
-`BlueMapHosting`-Ressourcen im Cluster mitlöschen.
+This means they get updated along with `helm upgrade`, but are kept on `helm uninstall` —
+otherwise uninstalling the chart would delete every `Tenant`, `BlueMapMap`, and
+`BlueMapHosting` resource in the cluster along with it.
 
-Ein Schalter `crds.install: true` erlaubt es, sie abzuschalten, wenn eine Organisation CRDs
-getrennt verwaltet. Der Default ist `true`.
+A `crds.install: true` switch lets you turn them off if an organization manages CRDs
+separately. The default is `true`.
 
-**RBAC.** Die ClusterRole ist die aus dem Phase-8-Plan (Task 2), unverändert in ihrem Umfang:
-eigene Custom Resources samt Status und Finalizern, Namespaces/ResourceQuotas/LimitRanges und
-NetworkPolicies für Mandanten, Jobs/Deployments/Services/ConfigMaps/Ingresses für die
-erzeugten Workloads, `pods` und `pods/log` lesend für die Fortschrittsermittlung,
-`objectbucketclaims` und `cephobjectstoreusers` für Rook, `secrets` **nur lesend**, `events`
-schreibend.
+**RBAC.** The ClusterRole is the one from the phase 8 plan (Task 2), unchanged in scope: the
+project's own custom resources including status and finalizers; Namespaces/ResourceQuotas/
+LimitRanges and NetworkPolicies for tenants; Jobs/Deployments/Services/ConfigMaps/Ingresses
+for the created workloads; `pods` and `pods/log` read-only for progress tracking;
+`objectbucketclaims` and `cephobjectstoreusers` for Rook; `secrets` **read-only**; `events`
+writable.
 
 ---
 
 ## 5. Chart `apus-platform`
 
-REST-API und Dashboard. Setzt ein installiertes `apus-operator` voraus — die CRDs müssen
-existieren, bevor die API sie liest.
+REST API and dashboard. Requires an installed `apus-operator` — the CRDs must exist before
+the API can read them.
 
 ```text
 deploy/charts/apus-platform/
@@ -187,65 +187,64 @@ deploy/charts/apus-platform/
     NOTES.txt
 ```
 
-Die `api-rbac.yaml` trägt die in Phase 9 verengte Berechtigung: `secrets` nur mit
-`resourceNames: ["apus-push-token"]` und `verbs: ["get"]`. Wird Phase 9 noch nicht umgesetzt
-sein, wenn dieses Chart entsteht, trägt es die heutige, breitere Regel — mit einem Kommentar,
-der auf §15 Punkt 9 verweist, damit die Verengung nicht vergessen wird.
+The `api-rbac.yaml` carries the narrowed permission from phase 9: `secrets` only with
+`resourceNames: ["apus-push-token"]` and `verbs: ["get"]`. If phase 9 has not yet been
+implemented by the time this chart is built, it carries today's broader rule instead — with
+a comment pointing to §15 item 9, so the narrowing does not get forgotten.
 
-`values.yaml` deckt zusätzlich zu den üblichen Bild-/Ressourcen-/Ingress-Blöcken den
-Identity-Broker ab:
+In addition to the usual image/resource/ingress blocks, `values.yaml` covers the identity
+broker:
 
 ```yaml
 auth:
-  issuer: ""          # Pflichtwert, ohne den die API nicht startet
+  issuer: ""          # required value, without which the API will not start
   jwksUri: ""
   audience: apus
 ```
 
-`issuer` hat bewusst **keinen** Default: Ein halb konfiguriertes Deployment muss beim Start
-scheitern, nicht Token ungeprüft akzeptieren. `values.schema.json` erzwingt das, sodass
-`helm install` ohne Issuer mit einer verständlichen Meldung abbricht statt mit einem
-CrashLoop.
+`issuer` deliberately has **no** default: a half-configured deployment must fail at startup,
+not accept tokens unchecked. `values.schema.json` enforces this, so `helm install` without an
+issuer aborts with an understandable message instead of a CrashLoop.
 
 ---
 
-## 6. Versionierung und Veröffentlichung
+## 6. Versioning and publishing
 
-Beide Charts werden von Release Please mitversioniert, im Root-Track — dieselbe Version, in
-der auch die Images entstehen. `Chart.yaml` bekommt je einen Marker:
+Both charts are versioned together by Release Please, in the root track — the same version
+in which the images are also produced. `Chart.yaml` gets one marker each:
 
 ```yaml
 version: 0.2.1     # x-release-please-version
 appVersion: "0.2.1" # x-release-please-version
 ```
 
-und `release-please-config.json` je einen `extra-files`-Eintrag im Root-Paket. Damit gilt:
-`apus-operator-0.3.0` referenziert `apus/operator:0.3.0`, weil `image.tag` leer bleibt und auf
-`.Chart.AppVersion` zurückfällt. Die Kombination kann nicht auseinanderlaufen.
+and `release-please-config.json` gets one `extra-files` entry each in the root package. This
+means: `apus-operator-0.3.0` references `apus/operator:0.3.0`, because `image.tag` stays
+empty and falls back to `.Chart.AppVersion`. The pairing cannot drift apart.
 
-Veröffentlicht wird nach dem Muster der Images, im selben `release-please.yml`, gegated auf
-`root-released`:
+Publishing follows the pattern used for the images, in the same `release-please.yml`, gated
+on `root-released`:
 
 ```bash
 helm package deploy/charts/apus-operator
 helm push apus-operator-<version>.tgz oci://<harbor>/apus/charts
 ```
 
-Ein zentraler wiederverwendbarer Workflow dafür existiert im OLF-Katalog **nicht** — dort gibt
-es nur `docker-publish`, `gradle-*`, `markdown-lint`, `pr-lint`, `close-invalid-prs` und
-`release-please`. Apus bekommt deshalb zunächst einen repo-eigenen Job. Sobald ein zweites
-OLF-Projekt Charts veröffentlicht, gehört er als `helm-publish.yml` in das
-`workflows`-Repository; der repo-eigene Job wird dann dagegen ersetzt.
+A central, reusable workflow for this does **not** exist in the OLF catalog — it only has
+`docker-publish`, `gradle-*`, `markdown-lint`, `pr-lint`, `close-invalid-prs`, and
+`release-please`. Apus therefore initially gets a job of its own within the repo. As soon as
+a second OLF project publishes charts, it belongs as `helm-publish.yml` in the `workflows`
+repository; the repo's own job is then replaced with that.
 
-**Offen und vor dem ersten Chart-Push zu klären:** Der Image-Push nach Harbor scheitert
-derzeit mit `empty challenge header` (Registry-Authentifizierung). Solange das ungelöst ist,
-wird auch ein Chart-Push scheitern — beide gehen an dieselbe Registry.
+**Open, and to be resolved before the first chart push:** the image push to Harbor currently
+fails with `empty challenge header` (registry authentication). As long as that is unresolved,
+a chart push will fail too — both go to the same registry.
 
 ---
 
-## 7. Einbindung ins Cluster-Repository
+## 7. Integration into the cluster repository
 
-Nach dem Muster, das dort für den kube-prometheus-stack bereits läuft:
+Following the pattern already in use there for the kube-prometheus-stack:
 
 ```yaml
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -263,95 +262,94 @@ spec:
     semver: "=0.3.0"
 ```
 
-plus ein `HelmRelease` je Chart unter `apps/base/apus/`. Die cluster-spezifischen Werte
-(Registry-Host, Rook-Namen, Hostnamen, Issuer) stehen dort in `values:` — nicht im Chart.
-Renovate hält die `semver`-Pins aktuell, wie bei den anderen OCI-Quellen.
+plus one `HelmRelease` per chart under `apps/base/apus/`. The cluster-specific values
+(registry host, Rook names, hostnames, issuer) live there in `values:` — not in the chart.
+Renovate keeps the `semver` pins current, as it does for the other OCI sources.
 
 ---
 
-## 8. Prüfung
+## 8. Verification
 
-| Ebene | Vorgehen |
+| Level | Approach |
 | --- | --- |
-| Statisch | `helm lint` und `helm template` für beide Charts im PR-Build; das gerenderte Ergebnis durch `kubectl apply --dry-run=client` |
-| Schema | `helm template` ohne `auth.issuer` muss **fehlschlagen** — sonst greift `values.schema.json` nicht |
-| Werte-Matrix | `helm template` mit Default-Werten, mit allen Schaltern an (`metrics.serviceMonitor`, `ingress`), und mit `crds.install: false` |
-| Installation | Der k3s-Integrationstest aus Phase 8 Task 8 installiert künftig das Chart, statt Manifeste einzeln anzuwenden — damit ist der Ausrollweg selbst getestet, nicht nur sein Ergebnis |
-| Upgrade | `helm upgrade` von der vorigen Chart-Version auf die aktuelle im selben k3s-Test, um zu belegen, dass die CRDs tatsächlich mit aktualisiert werden |
+| Static | `helm lint` and `helm template` for both charts in the PR build; the rendered result through `kubectl apply --dry-run=client` |
+| Schema | `helm template` without `auth.issuer` must **fail** — otherwise `values.schema.json` isn't taking effect |
+| Value matrix | `helm template` with default values, with all switches on (`metrics.serviceMonitor`, `ingress`), and with `crds.install: false` |
+| Installation | The k3s integration test from phase 8 Task 8 will install the chart instead of applying manifests individually — so the rollout path itself is tested, not just its result |
+| Upgrade | `helm upgrade` from the previous chart version to the current one, in the same k3s test, to prove that the CRDs actually get updated along with it |
 
-Der Upgrade-Test ist der wichtigste Punkt der Tabelle: Er prüft genau die Eigenschaft, wegen
-der CRDs als Templates statt im `crds/`-Verzeichnis liegen.
-
----
-
-## 9. Auswirkung auf den Phase-8-Plan
-
-`docs/superpowers/plans/2026-08-12-phase-8-deployment-und-observability.md` wird angepasst:
-
-- **Task 1 (CRDs einchecken)** bleibt unverändert — die Charts konsumieren `deploy/crds/`.
-- **Task 2 und 3** (Kustomize-Basis für Operator, API und UI) werden durch die beiden Charts
-  ersetzt.
-- **Task 6 (Scrape-Konfiguration)** verschiebt sich teilweise in die Charts: `ServiceMonitor`
-  für Operator und API werden Templates. Der `PodMonitor` für die vom Operator erzeugten
-  Render-Pods bleibt eigenständig, weil er Pods in Mandanten-Namespaces selektiert, die kein
-  Chart kennt.
-- **Task 7 (Dashboards)** bleibt, wandert aber als optionale ConfigMap ins
-  `apus-platform`-Chart (`dashboards.enabled`).
-- **Task 8 (k3s-E2E)** installiert künftig das Chart.
-- Die Tasks 4 und 5 (Metriken in Operator und API) sind unberührt.
+The upgrade test is the most important item in the table: it checks exactly the property
+that is the reason CRDs live as templates instead of in the `crds/` directory.
 
 ---
 
-## 10. Nicht-Ziele
+## 9. Impact on the phase 8 plan
 
-- **Kein Chart für `runner`, `ingest` oder `hosting`.** Sie werden vom Operator erzeugt.
-- **Keine Mandanten, Quellen oder Karten im Chart.** Betriebsdaten, nicht Installationsdaten.
-- **Kein Umbrella-Chart** über beide. Wer beides will, installiert zwei Releases; ein Umbrella
-  brächte eine dritte Version, die mit den anderen beiden synchron gehalten werden müsste.
-- **Keine Migration.** Es gibt keine bestehende Kustomize-Installation.
+`docs/superpowers/plans/2026-08-12-phase-8-deployment-und-observability.md` will be adjusted:
+
+- **Task 1 (check in CRDs)** stays unchanged — the charts consume `deploy/crds/`.
+- **Tasks 2 and 3** (Kustomize base for operator, API, and UI) are replaced by the two
+  charts.
+- **Task 6 (scrape configuration)** partly moves into the charts: the `ServiceMonitor` for
+  operator and API become templates. The `PodMonitor` for the render pods created by the
+  operator stays separate, because it selects pods in tenant namespaces that no chart knows
+  about.
+- **Task 7 (dashboards)** stays, but moves into the `apus-platform` chart as an optional
+  ConfigMap (`dashboards.enabled`).
+- **Task 8 (k3s E2E)** will install the chart going forward.
+- Tasks 4 and 5 (metrics in operator and API) are unaffected.
 
 ---
 
-## 11. Offene Punkte
+## 10. Non-goals
 
-1. **Harbor-Authentifizierung.** Der Image-Push scheiterte mit `empty challenge header`, bis
-   `docker-publish.yml` auf `regctl registry login --skip-check` umgestellt hat — der
-   anonyme Connectivity-Ping vor dem eigentlichen Push ist die Ursache. Der Chart-Push geht an
-   dieselbe Registry und vermeidet den Ping jetzt auf demselben Weg: kein
-   `helm registry login`, stattdessen wird die Credential-Datei direkt geschrieben und per
-   `--registry-config` an `helm push` übergeben (`release-please.yml`). **Nicht gegen die
-   echte Registry getestet** — lokal ist nur nachgewiesen, dass `helm push` mit einer
-   handgeschriebenen Credential-Datei und ohne vorherigen Login gegen eine Registry mit
-   Basic-Auth durchläuft. Ob Harbor sich beim Push selbst zufriedengibt, zeigt erst der erste
-   Release-Lauf.
-2. **Harbor-Projekt für Charts.** Ob `apus/charts` als Repository-Pfad im bestehenden
-   Projekt `apus` liegt oder ein eigenes Harbor-Projekt bekommt, ist eine Betriebsentscheidung.
-3. **Chart-Publishing im zentralen Katalog.** Zunächst repo-eigener Job; die Aufnahme in
-   `OneLiteFeatherNET/workflows` steht an, sobald ein zweites Projekt Charts veröffentlicht.
-4. **`values.schema.json`-Umfang.** Issuer und JWKS-URI sind als Pflichtfelder gesetzt — beide
-   kommen in `application.yml` ohne Default aus der Umgebung, ein leerer Wert lässt die API
-   also entweder ungeprüfte Token akzeptieren oder mangels Signaturschlüsseln jedes Token
-   ablehnen. Ob weitere Werte (Rook-Namen, Bundle-Bucket) ebenfalls erzwungen werden sollen,
-   entscheidet sich an der Frage, ob ein sinnvoller Default existiert.
-5. **Das Dashboard ist gar nicht konfigurierbar.** `ui/nuxt.config.ts` setzt `oidcIssuer` und
-   `oidcClientId` auf `''`, `ui/Dockerfile` ruft `pnpm generate` ohne Build-Argumente auf, und
-   ins nginx-Image wandert nur `.output/public`. Damit sind die leeren OIDC-Werte im
-   veröffentlichten Image eingefroren: `NUXT_PUBLIC_*` wirkt zur Laufzeit nur mit einem
-   Nitro-Server, den dieses Image nicht enthält. Konsequenz: **keine Installation kann sich
-   anmelden**, unabhängig davon, was im Chart steht — `apus-platform` reicht die Werte heute
-   bewusst nur an die API weiter, das UI-Deployment bekommt sie nicht, weil es sie nicht lesen
-   könnte. Das ist kein Chart-, sondern ein UI-/Build-Problem: die Reparatur ändert, wie das UI
-   gebaut wird (Build-Args plus `pnpm generate` je Installation, oder ein zur Laufzeit
-   geladenes `config.json` neben `index.html`, oder doch ein Nitro-Server im Image). Erst
-   danach ist im Chart überhaupt etwas zu verdrahten. Blockiert damit jede echte
-   Inbetriebnahme des Dashboards.
-6. **Kein Image-Pull-Secret für die vom Operator erzeugten Workloads.** Die Render- und
-   Ingest-Jobs sowie die Hosting-Deployments, die der Operator baut, tragen weder ein
-   `imagePullSecrets` noch einen ServiceAccount — die Charts setzen die zugehörigen Images
-   aber per Default auf ein privates Harbor-Projekt. Auf einem Cluster ohne node-weite
-   Registry-Credentials bleibt damit jeder Render-Job in `ImagePullBackOff` hängen, während
-   Operator und API selbst laufen (deren Pull-Secret setzt das Chart). Der Fix gehört in den
-   Operator-Code (die Ressourcen-Builder in `render`, `ingest`, `hosting`), nicht in die
-   Charts; die Charts können ihn nur begleiten, indem sie den Namen des Secrets bzw. des
-   ServiceAccounts als Wert an die Operator-Konfiguration durchreichen. `imagePullSecrets` in
-   `values.yaml` deckt heute ausschließlich die Pods, die die Charts selbst erzeugen.
+- **No chart for `runner`, `ingest`, or `hosting`.** They are created by the operator.
+- **No tenants, sources, or maps in the chart.** Operational data, not installation data.
+- **No umbrella chart** over both. Anyone who wants both installs two releases; an umbrella
+  chart would introduce a third version that would need to be kept in sync with the other
+  two.
+- **No migration.** There is no existing Kustomize installation.
+
+---
+
+## 11. Open points
+
+1. **Harbor authentication.** The image push failed with `empty challenge header` until
+   `docker-publish.yml` switched to `regctl registry login --skip-check` — the anonymous
+   connectivity ping before the actual push turned out to be the cause. The chart push goes
+   to the same registry and now avoids the ping the same way: no `helm registry login`;
+   instead, the credential file is written directly and passed to `helm push` via
+   `--registry-config` (`release-please.yml`). **Not tested against the real registry** —
+   locally, only that `helm push` with a hand-written credential file and no prior login
+   succeeds against a registry using basic auth has been demonstrated. Whether Harbor is
+   itself satisfied at push time will only be shown by the first release run.
+2. **Harbor project for charts.** Whether `apus/charts` lives as a repository path within the
+   existing `apus` project or gets its own Harbor project is an operational decision.
+3. **Chart publishing in the central catalog.** Initially a repo-owned job; inclusion in
+   `OneLiteFeatherNET/workflows` is due as soon as a second project publishes charts.
+4. **`values.schema.json` scope.** Issuer and JWKS URI are set as required fields — both come
+   from the environment in `application.yml` with no default, so an empty value would either
+   let the API accept unchecked tokens or reject every token for lack of signing keys.
+   Whether further values (Rook names, bundle bucket) should also be enforced depends on
+   whether a sensible default exists.
+5. **The dashboard is not configurable at all.** `ui/nuxt.config.ts` sets `oidcIssuer` and
+   `oidcClientId` to `''`, `ui/Dockerfile` runs `pnpm generate` without build arguments, and
+   only `.output/public` makes it into the nginx image. This freezes the empty OIDC values
+   into the published image: `NUXT_PUBLIC_*` only takes effect at runtime with a Nitro
+   server, which this image does not contain. Consequence: **no installation can log in**,
+   regardless of what is in the chart — `apus-platform` deliberately only passes the values
+   through to the API today; the UI deployment does not get them, because it could not read
+   them. This is not a chart problem but a UI/build problem: the fix changes how the UI is
+   built (build args plus `pnpm generate` per installation, or a runtime-loaded `config.json`
+   next to `index.html`, or a Nitro server in the image after all). Only after that is there
+   anything to wire up in the chart at all. This blocks any real deployment of the dashboard.
+6. **No image pull secret for the workloads the operator creates.** The render and ingest
+   jobs, as well as the hosting deployments the operator builds, carry neither an
+   `imagePullSecrets` nor a service account — yet the charts default the associated images to
+   a private Harbor project. On a cluster without node-wide registry credentials, every
+   render job is therefore stuck in `ImagePullBackOff`, while the operator and API themselves
+   run fine (the chart sets their pull secret). The fix belongs in the operator code (the
+   resource builders in `render`, `ingest`, `hosting`), not in the charts; the charts can only
+   support it by passing the name of the secret or service account through as a value to the
+   operator configuration. `imagePullSecrets` in `values.yaml` today covers only the pods that
+   the charts create themselves.

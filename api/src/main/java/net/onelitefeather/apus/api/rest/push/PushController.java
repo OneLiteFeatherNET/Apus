@@ -40,8 +40,8 @@ import net.onelitefeather.apus.operator.api.WorldSource;
  * WorldSource}'s owner (the Paper server plugin) sends once it has finished writing world data
  * directly into its tenant's staging prefix in S3. Creates one {@link WorldIngest} per world the
  * target source has configured (design spec §8.3, mirroring {@code
- * WorldSourceReconciler#triggerIngests}'s per-world loop for pull sources -- §6.4's "beide Wege
- * münden in denselben Code-Pfad").
+ * WorldSourceReconciler#triggerIngests}'s per-world loop for pull sources -- §6.4's "both paths
+ * lead into the same code path").
  *
  * <p><b>The one endpoint in this module that is not JWT-authenticated.</b> {@code
  * @Secured(SecurityRule.IS_ANONYMOUS)} is deliberate, not an oversight: this call carries a

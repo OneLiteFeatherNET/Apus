@@ -1,7 +1,7 @@
 /**
  * Lifecycle wiring shared by every live SSE view on the tenant dashboard (render progress,
- * render logs -- design spec §11.2: "Schließe die Ereignisströme wieder, wenn eine Ansicht
- * verlassen wird oder der Render terminal ist"). Deliberately framework-free, so the cleanup
+ * render logs -- design spec §11.2: "Close the event streams again when a view is left or
+ * the render is terminal"). Deliberately framework-free, so the cleanup
  * behaviour is unit-testable without mounting a component -- see
  * tests/unit/tenant/sseController.spec.ts. The Vue components in `components/tenant/` only call
  * `openSseController` from `onMounted` and its returned `stop()` from `onUnmounted`.

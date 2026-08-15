@@ -51,7 +51,7 @@ import software.amazon.awssdk.services.s3.model.GetObjectResponse;
  * WorldSourceConnector#discover} contract for push sources verbatim. {@link #fetch} is otherwise
  * identical to {@link S3SourceConnector#fetch}: the staged object at {@code prefix +
  * version.id()} is either extracted (recognised archive extension) or copied as a single raw
- * file -- "der Weg ist ähnlich, nur die Herkunft der Version unterscheidet sich" (phase 6 task
+ * file -- "the path is similar, only the origin of the version differs" (phase 6 task
  * brief). This class intentionally duplicates that small amount of S3-plumbing from {@link
  * S3SourceConnector} rather than refactoring it to share code: {@link S3SourceConnector} already
  * ships with its own passing test suite, and reaching into it here would risk that class for the

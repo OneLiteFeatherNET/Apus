@@ -1,49 +1,49 @@
-# Apus Phase 9 — Produktionshärte: Implementierungsplan
+# Apus Phase 9 — Production Hardening: Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Die fünf Punkte abarbeiten, die die Design-Spec in §15 selbst als ungeklärt führt — damit ein produktiver Betrieb nicht auf Heuristiken, ungetesteten Annahmen und zu breiten Berechtigungen steht.
+**Goal:** Work through the five points the design spec itself lists as unresolved in §15 — so that production operation does not rest on heuristics, untested assumptions and overly broad permissions.
 
-**Architecture:** Fünf voneinander unabhängige Härtungen am bestehenden Code. Zwei davon ersetzen Rateverfahren durch Verträge (Quota-Exit-Code, Push-Token-Lookup), zwei schließen Testlücken gegen echte Fremdsysteme (Identity-Broker, Paper-Server), eine ist eine Messung, deren Ergebnis einen Default in der CR festlegt.
+**Architecture:** Five independent hardening changes to the existing code. Two of them replace guesswork with contracts (quota exit code, push-token lookup), two close test gaps against real external systems (identity broker, Paper server), and one is a measurement whose result fixes a default in the CR.
 
-**Tech Stack:** Java 25, JOSDK 5.5.1, Micronaut Security, Testcontainers (Keycloak, k3s, MinIO), MockBukkit, Bash (Runner-Entrypoint).
+**Tech Stack:** Java 25, JOSDK 5.5.1, Micronaut Security, Testcontainers (Keycloak, k3s, MinIO), MockBukkit, Bash (runner entrypoint).
 
 ## Global Constraints
 
-- **Java-Toolchain 25**, AGPL-Lizenzheader über jede neue Java-Datei, Spotless erzwingt ihn.
-- **Neue Abhängigkeiten kommen in den Inline-Version-Catalog** in `settings.gradle.kts`, mit Kommentar, wogegen die Version geprüft wurde.
-- **Credentials und Token erscheinen nie in CR-Status, Events, Logs oder Metriken** (Design-Spec §12).
-- **Der Zeitvergleich in `FabricPushTokenRepository` bleibt konstant-zeitig und erschöpfend.** Er vergleicht heute per `MessageDigest.isEqual` gegen *jeden* Kandidaten ohne früh zurückzukehren — beides ist Absicht (Timing-Leck über Token-Präfix bzw. über die Anzahl existierender Secrets) und darf durch Task 2 nicht verlorengehen.
-- **Die Tasks sind unabhängig** und können in beliebiger Reihenfolge oder parallel ausgeführt werden. Einzige Ausnahme: Task 2 sollte vor einem produktiven Ausrollen der Manifeste aus Phase 8 fertig sein, weil deren API-`ClusterRole` heute den weiten Zugriff festschreibt.
+- **Java toolchain 25**, AGPL license header on every new Java file; Spotless enforces it.
+- **New dependencies go into the inline version catalog** in `settings.gradle.kts`, with a comment stating what the version was checked against.
+- **Credentials and tokens never appear in CR status, events, logs or metrics** (design spec §12).
+- **The comparison in `FabricPushTokenRepository` stays constant-time and exhaustive.** Today it compares against *every* candidate via `MessageDigest.isEqual` without returning early — both are deliberate (a timing leak via the token prefix, or via the number of existing secrets) and must not be lost through Task 2.
+- **The tasks are independent** and can be worked in any order or in parallel. The one exception: Task 2 should be finished before rolling the Phase 8 manifests out to production, because their API `ClusterRole` currently locks in the broad access.
 
 ---
 
-### Task 1: Belastbares Quota-Signal aus dem Runner
+### Task 1: Reliable quota signal from the runner
 
-**Offener Punkt §15.7.** `BlueMapRenderReconciler` erkennt ein erschöpftes Speicherkontingent heute daran, dass die Terminierungsmeldung des Pods bestimmte Zeichenketten enthält (`UNAMBIGUOUS_QUOTA_TOKENS`, plus „quota" in Verbindung mit `bucket`/`rgw`/`ceph`). Das Kubelet-Vokabular enthält „quota" nie, und die Meldung ist ein Log-Ausschnitt ohne Vertrag.
+**Open point §15.7.** Today, `BlueMapRenderReconciler` detects an exhausted storage quota by checking whether the pod's termination message contains certain strings (`UNAMBIGUOUS_QUOTA_TOKENS`, plus "quota" together with `bucket`/`rgw`/`ceph`). Kubelet's own vocabulary never contains "quota", and the message is a log excerpt with no contract behind it.
 
 **Files:**
 
 - Modify: `runner/entrypoint.sh`
-- Modify: `runner/README.md` (Exit-Code-Tabelle)
+- Modify: `runner/README.md` (exit-code table)
 - Modify: `operator/src/main/java/net/onelitefeather/apus/operator/render/BlueMapRenderReconciler.java`
 - Modify: `operator/src/test/java/net/onelitefeather/apus/operator/render/BlueMapRenderReconcilerTest.java`
 
 **Interfaces:**
 
-- Produces: Exit-Code `6` des Runner-Containers als Vertrag „Speicherkontingent erschöpft". Die bestehende `quotaExceededMessage(Pod)`-Heuristik bleibt als Fallback erhalten, wird aber nachrangig.
+- Produces: exit code `6` from the runner container, as the contract "storage quota exhausted". The existing `quotaExceededMessage(Pod)` heuristic stays in place as a fallback, but becomes secondary.
 
-- [ ] **Schritt 1: Feststellen, wo der Quota-Fehler tatsächlich auftritt**
+- [ ] **Step 1: Find out where the quota error actually occurs**
 
 Run: `grep -n 'exit\|bluemap' runner/entrypoint.sh`
-Expected: die Stelle, an der der BlueMap-CLI-Aufruf endet und sein Exit-Code ausgewertet wird.
+Expected: the place where the BlueMap CLI call ends and its exit code gets evaluated.
 
 Run: `grep -rn 'QuotaExceeded\|quota' runner/bin/*.sh runner/README.md`
-Expected: heute nichts. Damit ist belegt, dass der Runner das Signal derzeit nirgends erzeugt — genau die Lücke aus §15.7.
+Expected: nothing today. This confirms that the runner currently produces this signal nowhere — exactly the gap from §15.7.
 
-Der Fehler entsteht beim Schreiben in den Map-Bucket, also innerhalb von BlueMap über `BlueMapS3Storage`, nicht im `bundle-sync` (der liest). Er erscheint folglich in BlueMaps Ausgabe, nicht als eigener Prozess-Exit.
+The error occurs while writing to the map bucket, i.e. inside BlueMap via `BlueMapS3Storage`, not in `bundle-sync` (which reads). It therefore shows up in BlueMap's output, not as a separate process exit.
 
-- [ ] **Schritt 2: Failing test auf Reconciler-Seite schreiben**
+- [ ] **Step 2: Write a failing test on the reconciler side**
 
 In `BlueMapRenderReconcilerTest`:
 
@@ -81,32 +81,32 @@ void stillFallsBackToTheMessageHeuristicForOlderRunnerImages() {
 }
 ```
 
-`podTerminatedWith(int exitCode, String message)` als Hilfsmethode ergänzen, die einen `Pod` mit `status.containerStatuses[0].state.terminated.exitCode` und `.message` baut — analog zu den bereits vorhandenen Pod-Fixtures der Klasse.
+Add `podTerminatedWith(int exitCode, String message)` as a helper method that builds a `Pod` with `status.containerStatuses[0].state.terminated.exitCode` and `.message` — following the pattern of the class's existing Pod fixtures.
 
-- [ ] **Schritt 3: Test laufen lassen und Fehlschlag bestätigen**
+- [ ] **Step 3: Run the test and confirm the failure**
 
 Run: `./gradlew :operator:test --tests '*BlueMapRenderReconcilerTest*'`
-Expected: FAIL — der erste Test, weil Exit-Code 6 heute nichts bedeutet.
+Expected: FAIL — the first test, because exit code 6 currently means nothing.
 
-- [ ] **Schritt 4: Reconciler anpassen**
+- [ ] **Step 4: Adjust the reconciler**
 
-`quotaExceededMessage(Pod)` prüft zuerst den Exit-Code:
+`quotaExceededMessage(Pod)` first checks the exit code:
 
 ```java
 /** Exit code the runner image uses for "the tenant's storage quota is exhausted". */
 public static final int RUNNER_EXIT_QUOTA_EXCEEDED = 6;
 ```
 
-und liefert bei `exitCode == 6` unmittelbar eine Meldung zurück, ohne Textanalyse. Erst danach greift die bestehende Musterprüfung. Den Klassen-Javadoc (Zeilen 82–89) entsprechend aktualisieren: Das Verfahren ist ab jetzt vertragsbasiert mit Heuristik als Rückfallebene, nicht mehr umgekehrt.
+and, when `exitCode == 6`, returns a message immediately, without text analysis. Only after that does the existing pattern check kick in. Update the class Javadoc (lines 82–89) to match: the approach is now contract-based with the heuristic as a fallback, not the other way around.
 
-- [ ] **Schritt 5: Tests grün**
+- [ ] **Step 5: Tests pass**
 
 Run: `./gradlew :operator:test --tests '*BlueMapRenderReconcilerTest*'`
 Expected: PASS
 
-- [ ] **Schritt 6: Runner den Exit-Code tatsächlich setzen lassen**
+- [ ] **Step 6: Have the runner actually set the exit code**
 
-In `runner/entrypoint.sh` die BlueMap-Ausgabe mitschreiben und nach dem Lauf auswerten:
+In `runner/entrypoint.sh`, capture BlueMap's output and evaluate it after the run:
 
 ```bash
 # BlueMap exits non-zero for every failure alike. A storage-quota failure, though, must not
@@ -127,9 +127,9 @@ fi
 exit "$bluemap_status"
 ```
 
-Der genaue Einbau richtet sich nach der in Schritt 1 gefundenen Stelle; die Bedingung „nur wenn BlueMap ohnehin fehlgeschlagen ist" ist wesentlich, sonst kippt ein Render, der das Wort nur beiläufig geloggt hat.
+Exactly where this goes depends on the location found in Step 1; the condition "only if BlueMap failed anyway" is essential — otherwise a render that merely logged the word in passing gets tipped over too.
 
-- [ ] **Schritt 7: Exit-Code-Verhalten des Skripts prüfen**
+- [ ] **Step 7: Check the script's exit-code behavior**
 
 ```bash
 docker build -f runner/Dockerfile -t apus-runner:quota-test .
@@ -142,18 +142,18 @@ echo "exit=$?"
 
 Expected: `exit=6`
 
-- [ ] **Schritt 8: `runner/README.md` um die Exit-Code-Tabelle ergänzen**
+- [ ] **Step 8: Add the exit-code table to `runner/README.md`**
 
-| Code | Bedeutung | Wiederholbar |
+| Code | Meaning | Retryable |
 | --- | --- | --- |
-| 0 | Render erfolgreich | — |
-| 1 | Allgemeiner Fehler | ja |
-| 3 | Bundle-Sync fehlgeschlagen | ja |
-| 4 | Bundle oder Manifest nicht gefunden | nein |
-| 5 | Ungültige Konfiguration | nein |
-| 6 | Speicherkontingent erschöpft | **nein** |
+| 0 | Render succeeded | — |
+| 1 | Generic failure | yes |
+| 3 | Bundle sync failed | yes |
+| 4 | Bundle or manifest not found | no |
+| 5 | Invalid configuration | no |
+| 6 | Storage quota exhausted | **no** |
 
-- [ ] **Schritt 9: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
 git add runner/entrypoint.sh runner/README.md operator/src/main/java/net/onelitefeather/apus/operator/render/BlueMapRenderReconciler.java operator/src/test/java/net/onelitefeather/apus/operator/render/BlueMapRenderReconcilerTest.java
@@ -162,33 +162,33 @@ git commit -m "feat: give the runner a dedicated exit code for exhausted storage
 
 ---
 
-### Task 2: Push-Token-Lookup ohne clusterweites Secret-Leserecht
+### Task 2: Push-token lookup without cluster-wide secret read access
 
-**Offener Punkt §15.9.** `FabricPushTokenRepository#resolveNamespace` sucht per Label über alle Namespaces. RBAC kann einen Label-Filter nicht einschränken, also braucht die API heute `get`/`list` auf **alle** Secrets im Cluster. Der Klassen-Javadoc skizziert den schmaleren Weg bereits — er wurde nur nicht umgesetzt.
+**Open point §15.9.** `FabricPushTokenRepository#resolveNamespace` searches by label across all namespaces. RBAC cannot restrict a label filter, so the API currently needs `get`/`list` on **all** secrets in the cluster. The class's Javadoc already sketches the narrower approach — it just was never implemented.
 
 **Files:**
 
 - Modify: `api/src/main/java/net/onelitefeather/apus/api/rest/push/FabricPushTokenRepository.java`
 - Modify: `api/src/test/java/net/onelitefeather/apus/api/rest/push/FabricPushTokenRepositoryTest.java`
-- Modify: `deploy/charts/apus-platform/templates/api-rbac.yaml` — das Kustomize-Overlay
-  `deploy/base/api-rbac.yaml` aus dem ursprünglichen Phase-8-Plan entsteht nicht mehr; die
-  API-RBAC lebt seit den Helm-Charts nur noch in diesem Template, dessen Kommentar
-  ausdrücklich auf „phase 9 task 2" verweist.
+- Modify: `deploy/charts/apus-platform/templates/api-rbac.yaml` — the Kustomize overlay
+  `deploy/base/api-rbac.yaml` from the original phase 8 plan is no longer created; since the
+  Helm charts, the API's RBAC lives only in this template, whose comment points explicitly
+  at "phase 9 task 2".
 
 **Interfaces:**
 
-- Consumes: `PushTokenSecrets.SECRET_NAME` (fester Name), `TenantRepository` (listet die cluster-scoped `Tenant`-Ressourcen), `TenantReconciler.namespaceFor(...)` (Namespace-Konvention).
-- Produces: unverändert `Optional<String> resolveNamespace(String rawToken)` — die Signatur bleibt, nur der Weg dahinter ändert sich.
+- Consumes: `PushTokenSecrets.SECRET_NAME` (fixed name), `TenantRepository` (lists the cluster-scoped `Tenant` resources), `TenantReconciler.namespaceFor(...)` (namespace convention).
+- Produces: `Optional<String> resolveNamespace(String rawToken)`, unchanged — the signature stays, only the path behind it changes.
 
-- [ ] **Schritt 1: Bestehende Zusicherungen der Klasse dokumentiert festhalten**
+- [ ] **Step 1: Record the class's existing guarantees before changing anything**
 
 Run: `sed -n '60,140p' api/src/main/java/net/onelitefeather/apus/api/rest/push/FabricPushTokenRepository.java`
-Expected: Der Javadoc beschreibt drei Eigenschaften, die erhalten bleiben müssen: konstantzeitiger Vergleich über `MessageDigest.isEqual`, erschöpfende Prüfung ohne frühen Ausstieg, und dass ein Fehlschlag keinen Hinweis auf existierende Mandanten gibt.
+Expected: the Javadoc describes three properties that must be preserved: constant-time comparison via `MessageDigest.isEqual`, an exhaustive check with no early exit, and that a failure gives no indication of which tenants exist.
 
 Run: `grep -c '@Test' api/src/test/java/net/onelitefeather/apus/api/rest/push/FabricPushTokenRepositoryTest.java`
-Expected: eine Zahl > 0. Diese Tests sind die Absicherung des Umbaus — sie müssen nach dem Umbau unverändert grün sein.
+Expected: a number > 0. These tests are the safety net for the rework — they must still pass unchanged afterwards.
 
-- [ ] **Schritt 2: Failing test für den neuen Zugriffsweg schreiben**
+- [ ] **Step 2: Write a failing test for the new access path**
 
 ```java
 @Test
@@ -270,25 +270,25 @@ void toleratesATenantWithoutAPushTokenSecret() {
 }
 ```
 
-- [ ] **Schritt 3: Test laufen lassen und Fehlschlag bestätigen**
+- [ ] **Step 3: Run the test and confirm the failure**
 
 Run: `./gradlew :api:test --tests '*FabricPushTokenRepositoryTest*'`
-Expected: FAIL — die neuen Tests, weil die Implementierung noch labelbasiert clusterweit sucht.
+Expected: FAIL — the new tests, because the implementation still does a label-based, cluster-wide search.
 
-- [ ] **Schritt 4: `resolveNamespace` umbauen**
+- [ ] **Step 4: Rework `resolveNamespace`**
 
-Neuer Ablauf: die cluster-scoped `Tenant`-Ressourcen listen, für jeden den Namespace über die bestehende Konvention bilden, und dort ein `get` auf das Secret mit festem Namen absetzen. Über alle Ergebnisse erschöpfend und konstantzeitig vergleichen, wie bisher. `404` je Namespace ist ein regulärer Fall.
+New flow: list the cluster-scoped `Tenant` resources, derive each one's namespace via the existing convention, and issue a `get` there for the secret with the fixed name. Compare across all results exhaustively and in constant time, as before. A `404` per namespace is a normal case.
 
-Den Javadoc-Abschnitt, der den weiten Zugriff als bewusste Abwägung beschreibt, durch die Beschreibung des jetzt umgesetzten Wegs ersetzen — inklusive der RBAC-Regel, die er ermöglicht.
+Replace the Javadoc section that describes the broad access as a deliberate trade-off with a description of the now-implemented approach — including the RBAC rule it enables.
 
-- [ ] **Schritt 5: Alle Tests der Klasse grün, auch die alten**
+- [ ] **Step 5: All of the class's tests pass, including the old ones**
 
 Run: `./gradlew :api:test --tests '*FabricPushTokenRepositoryTest*' --tests '*PushControllerTest*'`
-Expected: PASS, ohne dass ein vorbestehender Test angepasst werden musste. War eine Anpassung nötig, ist das ein Signal, dass sich beobachtbares Verhalten geändert hat — dann prüfen, ob das beabsichtigt ist.
+Expected: PASS, without any pre-existing test needing adjustment. If an adjustment was necessary, that is a signal that observable behavior changed — check whether that was intended.
 
-- [ ] **Schritt 6: RBAC verengen**
+- [ ] **Step 6: Narrow the RBAC**
 
-In `deploy/charts/apus-platform/templates/api-rbac.yaml` die weite Secret-Regel ersetzen:
+In `deploy/charts/apus-platform/templates/api-rbac.yaml`, replace the broad secrets rule:
 
 ```yaml
   # Service-token lookup, narrowed in phase 9: the API only ever reads the one Secret
@@ -300,25 +300,25 @@ In `deploy/charts/apus-platform/templates/api-rbac.yaml` die weite Secret-Regel 
     verbs: ["get"]
 ```
 
-Den Warnhinweis-Kommentar, der auf §15.9 verwies, entfernen.
+Remove the warning comment that pointed to §15.9.
 
-- [ ] **Schritt 7: Prüfen, dass `resourceNames` den tatsächlichen Secret-Namen trifft**
+- [ ] **Step 7: Check that `resourceNames` matches the actual secret name**
 
 Run: `grep -n 'SECRET_NAME' api/src/main/java/net/onelitefeather/apus/api/rest/push/PushTokenSecrets.java`
-Expected: der Wert stimmt exakt mit `resourceNames` überein. Weicht er ab, liest die API im Cluster gar nichts mehr und jeder Push schlägt mit 403 fehl.
+Expected: the value matches `resourceNames` exactly. If it differs, the API can no longer read anything in the cluster and every push fails with 403.
 
-- [ ] **Schritt 8: Design-Spec §15, Punkt 9 als erledigt markieren**
+- [ ] **Step 8: Mark design spec §15, point 9, as resolved**
 
 ```markdown
-9. ~~**RBAC für den Push-Token-Lookup der API breiter als ideal.**~~ **Erledigt (Phase 9).**
-   `FabricPushTokenRepository#resolveNamespace` enumeriert die cluster-scoped
-   `Tenant`-Ressourcen und liest je Mandanten-Namespace gezielt das Secret mit festem Namen
-   `apus-push-token` — nie mehr `list` über alle Secrets. Die Berechtigung der API ist
-   entsprechend auf `resourceNames: ["apus-push-token"]`, `verbs: ["get"]` verengt. Der
-   konstantzeitige, erschöpfende Vergleich bleibt unverändert erhalten.
+9. ~~**RBAC for the API's push-token lookup is broader than ideal.**~~ **Resolved (Phase 9).**
+   `FabricPushTokenRepository#resolveNamespace` enumerates the cluster-scoped
+   `Tenant` resources and, per tenant namespace, reads specifically the secret with the
+   fixed name `apus-push-token` — never `list` across all secrets again. The API's
+   permission is narrowed accordingly to `resourceNames: ["apus-push-token"]`,
+   `verbs: ["get"]`. The constant-time, exhaustive comparison remains unchanged.
 ```
 
-- [ ] **Schritt 9: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
 git add api/ deploy/charts/apus-platform/templates/api-rbac.yaml docs/superpowers/specs/2026-08-08-apus-design.md
@@ -327,38 +327,38 @@ git commit -m "fix: read only the fixed-name push token secret instead of listin
 
 ---
 
-### Task 3: Identity-Broker auswählen und die Anmeldung gegen einen echten Broker prüfen
+### Task 3: Select an identity broker and verify login against a real broker
 
-**Offene Punkte §0 und §15.3.** Die API validiert JWTs gegen einen konfigurierbaren Issuer, aber welches Produkt davor steht, ist nicht entschieden, und ein Lauf gegen einen echten Broker hat nie stattgefunden — die Auth-Tests arbeiten mit selbst ausgestellten Test-JWTs.
+**Open points §0 and §15.3.** The API validates JWTs against a configurable issuer, but which product sits in front of it has not been decided, and a run against a real broker has never happened — the auth tests work with self-issued test JWTs.
 
 **Files:**
 
 - Create: `docs/superpowers/specs/2026-08-12-identity-broker-entscheidung.md`
-- Modify: `settings.gradle.kts` (Keycloak-Testcontainer)
+- Modify: `settings.gradle.kts` (Keycloak Testcontainer)
 - Modify: `api/build.gradle.kts`
 - Create: `api/src/test/java/net/onelitefeather/apus/api/security/RealBrokerAuthIntegrationTest.java`
 - Create: `api/src/test/resources/keycloak/apus-realm.json`
-- Create: `api/src/test/resources/keycloak/upstream-realm.json` (spielt den eigenen IdP eines Mandanten)
+- Create: `api/src/test/resources/keycloak/upstream-realm.json` (plays the role of a tenant's own IdP)
 - Modify: `docs/superpowers/specs/2026-08-08-apus-design.md`
 
-- [ ] **Schritt 1: Entscheidungsvorlage schreiben**
+- [ ] **Step 1: Write the decision document**
 
-`docs/superpowers/specs/2026-08-12-identity-broker-entscheidung.md`, mit Struktur:
+`docs/superpowers/specs/2026-08-12-identity-broker-entscheidung.md`, structured as:
 
-- **Anforderung** aus §10.3: Organisationen mit eigenem Identity-Provider je Organisation, Einladungs-Flows, ein einziger Issuer für Apus, Organisations-Claim bestimmt den Mandanten, Rollen `platform-admin`/`tenant-owner`/`tenant-operator`/`tenant-viewer`, mandantengebundene Service-Tokens mit Scope `world:push`.
+- **Requirement**, from §10.3: organizations with their own identity provider per organization, invitation flows, a single issuer for Apus, an organization claim that determines the tenant, roles `platform-admin`/`tenant-owner`/`tenant-operator`/`tenant-viewer`, tenant-bound service tokens with scope `world:push`.
 
-- **K.-o.-Kriterium: Rollenvergabe je Mandant, in beiden Anmeldewegen gleichermaßen.** Ein Mandant, der seinen eigenen IdP föderiert, und ein Mandant mit lokalen Accounts im Broker müssen **dieselbe** Rollenstruktur bekommen — dieselben vier Rollen, mandantenspezifisch vergeben, im Token an derselben Stelle und in derselben Form. Nur dann kommt die API mit einer einzigen Auswertung aus, statt zwei Token-Formate unterscheiden zu müssen. Das ist die Anforderung, an der die Produktwahl hängt, und sie ist kein Selbstläufer:
-  - Ein Broker, dessen Rollen realm- oder mandantenweit definiert sind statt je Organisation, erzwingt eine Behelfslösung über Gruppen oder Attribute. Die ist machbar, aber sie muss dann für den föderierten und den lokalen Weg identisch aussehen — sonst trägt ein föderierter Nutzer seine Rolle in einem anderen Claim als ein lokaler.
-  - Bei Föderation entscheidet zusätzlich das Mapping vom fremden IdP: Rollen dürfen **nicht** aus dem föderierten Token übernommen werden, sonst bestimmt der Mandant selbst, wer bei ihm `tenant-owner` ist — und nichts hindert einen fremden IdP daran, `platform-admin` zu behaupten. Die Rolle muss im Apus-Broker vergeben und dort in den ausgestellten Token geschrieben werden.
-- **Kandidaten:** Keycloak ab 26 und Zitadel — beide in §10.3 bereits genannt. Beide bringen ein Organisationskonzept mit; sie unterscheiden sich darin, wie eng Rollen an eine Organisation gebunden werden können. Genau dieser Unterschied ist am K.-o.-Kriterium zu messen, nicht aus der Produktdokumentation abzuschreiben: In Schritt 3 steht ein Test bereit, der die Frage praktisch beantwortet.
-- **Bewertungskriterien**, je Kandidat zu belegen statt zu behaupten: Rollenvergabe je Organisation im föderierten *und* im lokalen Weg (K.-o., siehe oben); Organisationsmodell und dessen Abbildung auf einen Token-Claim; Föderation je Organisation; Einladungs-Flow; Service-Accounts mit engem Scope; Betriebsaufwand im bestehenden Cluster (der laut §2 bereits einen OIDC-Provider für Outline, Grafana und Dependency-Track betreibt — welcher, ist zu ermitteln und wiegt schwer); Upgrade-Pfad.
-- **Entscheidung** mit Begründung.
-- **Konsequenz:** der konkrete Claim-Name, aus dem der Mandant abgeleitet wird, und wie Rollen im Token erscheinen.
+- **Knockout criterion: role assignment per tenant, the same way across both login paths.** A tenant that federates its own IdP and a tenant with local accounts in the broker must get **the same** role structure — the same four roles, assigned per tenant, in the same place and shape in the token. Only then can the API get by with a single evaluation instead of having to distinguish two token formats. This is the requirement the product choice hinges on, and it is not automatic:
+  - A broker whose roles are defined realm-wide or tenant-wide rather than per organization forces a workaround via groups or attributes. That is doable, but it then has to look identical for the federated and the local path — otherwise a federated user carries their role in a different claim than a local one.
+  - With federation, the mapping from the foreign IdP is an additional decision point: roles must **not** be taken over from the federated token, or a tenant could determine for itself who is `tenant-owner` on its own side — and nothing would stop a foreign IdP from claiming `platform-admin`. The role has to be assigned in the Apus broker and written into the token it issues.
+- **Candidates:** Keycloak 26+ and Zitadel — both already named in §10.3. Both bring an organization concept; they differ in how tightly roles can be bound to an organization. This exact difference has to be measured against the knockout criterion, not copied from product documentation — Step 3 provides a test that answers the question in practice.
+- **Evaluation criteria**, to be demonstrated per candidate rather than asserted: role assignment per organization in *both* the federated *and* the local path (knockout, see above); the organization model and how it maps onto a token claim; federation per organization; invitation flow; service accounts with a narrow scope; operational cost within the existing cluster (which, per §2, already runs an OIDC provider for Outline, Grafana and Dependency-Track — which one needs to be determined, and it weighs heavily); upgrade path.
+- **Decision**, with reasoning.
+- **Consequence:** the concrete claim name the tenant gets derived from, and how roles appear in the token.
 
 Run: `gh api repos/OneLiteFeatherNET/Kubernetes-FLUX/contents --jq '.[].name' 2>/dev/null | head -30`
-Expected: eine Verzeichnisliste des Cluster-Repositories. Darin nach dem heute betriebenen OIDC-Provider suchen — die Entscheidung sollte ihn schwer gewichten, weil ein zweiter Broker im selben Cluster dauerhaft Betriebsaufwand ist.
+Expected: a directory listing of the cluster repository. Search it for the OIDC provider currently in operation — the decision should weight it heavily, because a second broker in the same cluster is ongoing operational overhead.
 
-- [ ] **Schritt 2: Testcontainer in den Katalog aufnehmen**
+- [ ] **Step 2: Add the Testcontainer to the catalog**
 
 ```kotlin
 // Keycloak Testcontainer: proves the auth path against a real broker rather than
@@ -371,9 +371,9 @@ library("testcontainers.keycloak", "com.github.dasniko", "testcontainers-keycloa
 
 In `api/build.gradle.kts`: `testImplementation(libs.testcontainers.keycloak)`.
 
-Fällt die Entscheidung in Schritt 1 auf Zitadel, tritt an diese Stelle dessen Container-Image über `GenericContainer`; der Rest des Tasks bleibt unverändert, weil beide OIDC sprechen.
+If the decision in Step 1 falls on Zitadel, its container image goes here instead, via `GenericContainer`; the rest of the task stays unchanged, because both speak OIDC.
 
-- [ ] **Schritt 3: Failing test schreiben**
+- [ ] **Step 3: Write a failing test**
 
 ```java
 package net.onelitefeather.apus.api.security;
@@ -382,7 +382,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dasniko.testcontainers.keycloak.KeycloakContainer;
-// ... weitere Importe
+// ... additional imports
 
 /**
  * Proves the authentication path end to end against a real identity broker.
@@ -484,47 +484,47 @@ class RealBrokerAuthIntegrationTest {
 }
 ```
 
-Dazu zwei Realm-Definitionen unter `api/src/test/resources/keycloak/`:
+Alongside this, two realm definitions under `api/src/test/resources/keycloak/`:
 
-- `apus-realm.json` — der Apus-Realm: zwei Organisationen (`friends-server`, `other-server`), die vier Rollen, und die lokalen Testnutzer `platform-admin-user`, `friends-owner`, `friends-operator`, `friends-viewer`. `other-server` bekommt **keine** lokalen Nutzer; seine Mitglieder kommen aus der Föderation.
-- `upstream-realm.json` — spielt den eigenen IdP des Mandanten `other-server`. Er enthält `other-operator` und ist im Apus-Realm als Identity-Provider der Organisation `other-server` eingetragen. Genau diese Föderationsstrecke ist der zweite Anmeldeweg, den das K.-o.-Kriterium verlangt.
+- `apus-realm.json` — the Apus realm: two organizations (`friends-server`, `other-server`), the four roles, and the local test users `platform-admin-user`, `friends-owner`, `friends-operator`, `friends-viewer`. `other-server` gets **no** local users; its members come from federation.
+- `upstream-realm.json` — plays the role of tenant `other-server`'s own IdP. It contains `other-operator` and is registered in the Apus realm as the identity provider for organization `other-server`. This exact federation path is the second login path the knockout criterion requires.
 
-Beide Realms laufen im selben Keycloak-Container — ein zweiter Container wäre realistischer, kostet aber Laufzeit ohne die Frage besser zu beantworten: Für Apus ist der Upstream ohnehin nur ein OIDC-Endpunkt.
+Both realms run in the same Keycloak container — a second container would be more realistic, but costs runtime without answering the question any better: for Apus, the upstream is just an OIDC endpoint either way.
 
-`rolesOf(String token)` dekodiert den Token und liefert die Apus-Rollen als `Set<String>` — an der Stelle, an der der Produktivcode sie liest, damit der Test nicht seine eigene Auswertung mitbringt und dabei am Code vorbeitestet.
+`rolesOf(String token)` decodes the token and returns the Apus roles as `Set<String>` — at the point where the production code reads them, so the test does not bring its own evaluation logic and end up testing past the code.
 
-- [ ] **Schritt 4: Test laufen lassen und Fehlschlag bestätigen**
+- [ ] **Step 4: Run the test and confirm the failure**
 
 Run: `./gradlew :api:integrationTest --tests '*RealBrokerAuthIntegrationTest*'`
-Expected: FAIL. Existiert im `api`-Modul noch kein `integrationTest`-Task, ihn im selben Muster wie in `operator/build.gradle.kts` anlegen (Ausschluss von `**/*IntegrationTest.class` aus `test`, eigener Task mit denselben Source-Sets).
+Expected: FAIL. If the `api` module does not yet have an `integrationTest` task, create it following the same pattern as in `operator/build.gradle.kts` (excluding `**/*IntegrationTest.class` from `test`, a separate task with the same source sets).
 
-- [ ] **Schritt 5: Auth-Konfiguration so lange anpassen, bis der Test grün ist**
+- [ ] **Step 5: Adjust the auth configuration until the test passes**
 
-Erwartbare Befunde — jeder davon ist ein echter Fund, den die Test-JWTs bisher verdeckt haben: Der Claim-Name für die Organisation weicht vom angenommenen ab; die Rollen stecken verschachtelt in `realm_access.roles` statt flach in `roles`; die Audience-Prüfung ist zu lax oder zu streng; die JWKS-URL wird nur einmal geholt. Jeder dieser Punkte wird in `api/src/main/java/net/onelitefeather/apus/api/security/` behoben, nicht im Test weggemappt.
+Findings to expect — each one is a real finding that the test JWTs have concealed until now: the claim name for the organization differs from what was assumed; the roles are nested in `realm_access.roles` instead of flat in `roles`; the audience check is too lax or too strict; the JWKS URL is only ever fetched once. Every one of these gets fixed in `api/src/main/java/net/onelitefeather/apus/api/security/`, not mapped away in the test.
 
-**Der wahrscheinlichste harte Befund betrifft `grantsTheSameRoleStructureToLocalAndFederatedUsers`.** Wenn die Rollen des gewählten Brokers realm- statt organisationsweit definiert sind, lässt sich „`tenant-operator` bei `friends-server`, aber nirgends sonst" nicht direkt ausdrücken. Zwei Auswege, in dieser Reihenfolge zu prüfen:
+**The most likely hard finding concerns `grantsTheSameRoleStructureToLocalAndFederatedUsers`.** If the chosen broker's roles are defined realm-wide rather than per organization, "`tenant-operator` at `friends-server`, but nowhere else" cannot be expressed directly. Two ways out, to be checked in this order:
 
-1. **Der Broker kann es nativ** — Rollen bzw. Grants je Organisation. Dann ist nichts zu tun außer sie so anzulegen.
-2. **Der Broker kann es nicht** — dann Rollen als Gruppen der Form `<tenant>:<rolle>` modellieren und über einen Protocol-Mapper in einen flachen Claim schreiben. Der Mapper muss für lokale und föderierte Nutzer **derselbe** sein; nur so bleibt der Token in beiden Wegen gleich geformt. Diese Behelfslösung gehört dann ausdrücklich in die Entscheidungsvorlage aus Schritt 1 und in §10.3 der Spec — sie ist Betriebswissen, das sonst nur im Realm-Export steht.
+1. **The broker can do it natively** — roles or grants per organization. Then there is nothing to do except set them up that way.
+2. **The broker cannot do it** — then model roles as groups of the form `<tenant>:<role>` and write them into a flat claim via a protocol mapper. The mapper has to be **the same** one for local and federated users; only that way does the token stay the same shape across both paths. This workaround then belongs explicitly in the decision document from Step 1 and in §10.3 of the spec — it is operational knowledge that would otherwise only live in the realm export.
 
-Fällt der Broker in Fall 2, ist das ein starkes Argument für den jeweils anderen Kandidaten. Der Test ist der Ort, an dem sich das entscheidet, bevor Betriebsaufwand entsteht.
+If the broker falls into case 2, that is a strong argument for the other candidate. The test is where this gets decided, before operational cost is incurred.
 
-- [ ] **Schritt 6: Tests grün**
+- [ ] **Step 6: Tests pass**
 
 Run: `./gradlew :api:test :api:integrationTest`
 Expected: BUILD SUCCESSFUL
 
-- [ ] **Schritt 7: Spec nachziehen**
+- [ ] **Step 7: Update the spec**
 
-§0 und §15 Punkt 3: Produktwahl eintragen, den Verweis auf „nie gegen einen echten Broker getestet" streichen und durch den Test verweisen.
+§0 and §15, point 3: record the product choice, remove the reference to "never tested against a real broker" and point to the test instead.
 
-§10.3 um drei Angaben ergänzen, die dort heute fehlen und ohne die niemand einen zweiten Mandanten anlegen kann:
+Add three pieces of information to §10.3 that are currently missing there, and without which nobody can set up a second tenant:
 
-1. Der konkrete Claim-Name, aus dem der Mandant abgeleitet wird, und die Form, in der die Rollen im Token stehen.
-2. Dass die Rollenstruktur für beide Anmeldewege identisch ist — föderierter IdP des Mandanten und lokale Accounts im Broker — samt der Modellierung, die das erreicht (nativ organisationsgebundene Rollen oder die Gruppen-Behelfslösung aus Schritt 5).
-3. Dass Rollen **niemals** aus einem föderierten Token übernommen werden, sondern ausschließlich im Apus-Broker vergeben werden. Das ist keine Feinheit, sondern die Grenze, ab der ein Mandant sich sonst selbst zum `platform-admin` erklären könnte.
+1. The concrete claim name the tenant gets derived from, and the shape the roles take in the token.
+2. That the role structure is identical across both login paths — a tenant's federated IdP and local accounts in the broker — together with the modeling that achieves it (natively organization-bound roles, or the group-based workaround from Step 5).
+3. That roles are **never** taken over from a federated token, but assigned exclusively in the Apus broker. This is not a nuance — it is the line beyond which a tenant could otherwise declare itself `platform-admin`.
 
-- [ ] **Schritt 8: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add docs/superpowers/specs/ settings.gradle.kts api/
@@ -533,9 +533,9 @@ git commit -m "feat: verify the auth path against a real identity broker"
 
 ---
 
-### Task 4: Das Save-Fenster von `paper-worldpush` prüfen
+### Task 4: Check the save window of `paper-worldpush`
 
-**Offener Punkt §15.8.** `BukkitSaveCoordinator` pausiert das Autosave und erzwingt einen Save, bevor kopiert wird. Ob das kurze Fenster auf einem laufenden Server einen konsistenten Snapshot liefert, wurde nie geprüft — es existiert nur Unit-Abdeckung für Kopierlogik, Konfiguration und den HTTP-Report-Weg.
+**Open point §15.8.** `BukkitSaveCoordinator` pauses autosave and forces a save before copying. Whether that short window delivers a consistent snapshot on a running server has never been checked — only unit coverage exists for the copy logic, configuration and the HTTP report path.
 
 **Files:**
 
@@ -545,15 +545,15 @@ git commit -m "feat: verify the auth path against a real identity broker"
 - Create: `paper-worldpush/src/test/java/net/onelitefeather/apus/paper/PushCycleConsistencyTest.java`
 - Modify: `docs/superpowers/specs/2026-08-08-apus-design.md`
 
-- [ ] **Schritt 1: Die tatsächliche Reihenfolge im Code feststellen**
+- [ ] **Step 1: Determine the actual sequence in the code**
 
 Run: `cat paper-worldpush/src/main/java/net/onelitefeather/apus/paper/BukkitSaveCoordinator.java`
-Expected: die exakte Abfolge aus `disableAutoSave()`, `save()`/`forceSave()` und Wiederaktivierung, sowie auf welchem Thread sie läuft. Der Test muss genau diese Abfolge prüfen, nicht eine vermutete.
+Expected: the exact sequence of `disableAutoSave()`, `save()`/`forceSave()` and re-enabling, plus which thread it runs on. The test has to check exactly this sequence, not an assumed one.
 
 Run: `grep -n 'SaveCoordinator\|copier' paper-worldpush/src/main/java/net/onelitefeather/apus/paper/PushCycleRunner.java`
-Expected: wo der Koordinator im Zyklus aufgerufen wird — das ist die Naht, an der die Konsistenzfrage hängt.
+Expected: where the coordinator is called within the cycle — that is the seam the consistency question hangs on.
 
-- [ ] **Schritt 2: MockBukkit aufnehmen**
+- [ ] **Step 2: Add MockBukkit**
 
 ```kotlin
 // MockBukkit: the design spec (§13.2) called for it from the start; without it
@@ -563,12 +563,12 @@ version("mockbukkit", "4.62.2")
 library("mockbukkit", "org.mockbukkit.mockbukkit", "mockbukkit-v1.21").versionRef("mockbukkit")
 ```
 
-Die passende Artefakt- und Versionskombination gegen die im Katalog gepinnte Paper-API prüfen:
+Check the matching artifact and version combination against the Paper API version pinned in the catalog:
 
 Run: `grep -n 'paper' settings.gradle.kts | head`
-Expected: die Paper-API-Version. MockBukkits Artefaktname trägt die Minecraft-Generation im Namen; sie muss dazu passen, sonst startet der Mock-Server mit einer Registry-Fehlermeldung.
+Expected: the Paper API version. MockBukkit's artifact name carries the Minecraft generation in its name; it has to match, or the mock server starts up with a registry error.
 
-- [ ] **Schritt 3: Failing test für den Koordinator schreiben**
+- [ ] **Step 3: Write a failing test for the coordinator**
 
 ```java
 /**
@@ -652,27 +652,27 @@ class BukkitSaveCoordinatorTest {
 }
 ```
 
-- [ ] **Schritt 4: Fehlschlag bestätigen**
+- [ ] **Step 4: Confirm the failure**
 
 Run: `./gradlew :paper-worldpush:test --tests '*BukkitSaveCoordinatorTest*'`
 Expected: FAIL
 
-- [ ] **Schritt 5: Konsistenztest über den ganzen Zyklus**
+- [ ] **Step 5: Consistency test across the whole cycle**
 
-`PushCycleConsistencyTest`: MockBukkit-Server mit einer Welt, während des Kopierens werden Region-Dateien fortlaufend verändert. Geprüft wird, dass das kopierte Ergebnis dem Stand zum Zeitpunkt des erzwungenen Saves entspricht und keine halb geschriebene Region enthält.
+`PushCycleConsistencyTest`: a MockBukkit server with a world, where region files keep changing while the copy runs. It checks that the copied result matches the state at the moment of the forced save and contains no half-written region.
 
-Dieser Test kann echte Befunde produzieren. Findet er Inkonsistenzen, ist das **das erwartete Ergebnis dieses Tasks**, nicht sein Scheitern: §15.8 fragt genau danach. Der Fund gehört dann als eigener Abschnitt in die Spec und die Behebung in einen Folge-Task — nicht durch Abschwächen der Assertion aus der Welt geschafft.
+This test can produce real findings. If it finds inconsistencies, that is **the expected outcome of this task**, not its failure: §15.8 asks exactly this question. The finding then belongs in the spec as its own section, and the fix in a follow-up task — not made to disappear by weakening the assertion.
 
-- [ ] **Schritt 6: Tests grün, Befunde dokumentiert**
+- [ ] **Step 6: Tests pass, findings documented**
 
 Run: `./gradlew :paper-worldpush:test`
-Expected: BUILD SUCCESSFUL — bzw. ein dokumentierter, in der Spec festgehaltener Befund.
+Expected: BUILD SUCCESSFUL — or a documented finding recorded in the spec.
 
-- [ ] **Schritt 7: Spec nachziehen**
+- [ ] **Step 7: Update the spec**
 
-§13.2 (Zeile `paper-worldpush`), §15 Punkt 8 und §0: den „Offen"-Vermerk durch das Testergebnis ersetzen. Bleibt der Lauf gegen einen echten Paper-Server unter Last aus (MockBukkit ersetzt ihn nicht vollständig), muss das ausdrücklich stehen bleiben — mit der Angabe, was MockBukkit abdeckt und was nicht.
+§13.2 (the `paper-worldpush` line), §15 point 8, and §0: replace the "open" note with the test result. If a run against a real Paper server under load is still missing (MockBukkit does not fully replace it), that has to remain stated explicitly — along with what MockBukkit covers and what it does not.
 
-- [ ] **Schritt 8: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add settings.gradle.kts paper-worldpush/ docs/superpowers/specs/2026-08-08-apus-design.md
@@ -681,9 +681,9 @@ git commit -m "test: cover the paper-worldpush save window with MockBukkit"
 
 ---
 
-### Task 5: Die `emptyDir`-Grenze messen
+### Task 5: Measure the `emptyDir` limit
 
-**Offener Punkt §15.6.** „`emptyDir` genügt bis zu einer Größe, die von der Node-Ausstattung abhängt; darüber ist ein PVC nötig." Die Grenze wurde nie gemessen, obwohl sie laut Spec vor Phase 2 nachzuholen war — und der Operator legt heute trotzdem einen Default fest.
+**Open point §15.6.** "`emptyDir` is sufficient up to a size that depends on node capacity; above that a PVC is needed." The limit was never measured, even though the spec called for catching up on it before Phase 2 — and yet the operator sets a default today regardless.
 
 **Files:**
 
@@ -693,31 +693,31 @@ git commit -m "test: cover the paper-worldpush save window with MockBukkit"
 - Modify: `operator/src/test/java/net/onelitefeather/apus/operator/render/RenderJobBuilderTest.java`
 - Modify: `docs/superpowers/specs/2026-08-08-apus-design.md`
 
-- [ ] **Schritt 1: Den heutigen Default feststellen**
+- [ ] **Step 1: Determine today's default**
 
 Run: `grep -n -B3 -A10 'emptyDir\|EmptyDir' operator/src/main/java/net/onelitefeather/apus/operator/render/RenderJobBuilder.java`
-Expected: der aktuell erzeugte Volume-Typ und, falls vorhanden, ein `sizeLimit`. Das ist der Wert, den die Messung bestätigen oder widerlegen soll.
+Expected: the volume type currently produced and, if present, a `sizeLimit`. That is the value the measurement is meant to confirm or disprove.
 
-- [ ] **Schritt 2: Messskript schreiben**
+- [ ] **Step 2: Write the measurement script**
 
-`run-spike.sh` im Stil des vorhandenen Sharding-Spikes (`docs/superpowers/spikes/2026-08-09-lowres-sharding-spike/run-spike.sh` als Vorlage lesen). Es fährt gegen einen Cluster:
+`run-spike.sh`, in the style of the existing sharding spike (read `docs/superpowers/spikes/2026-08-09-lowres-sharding-spike/run-spike.sh` as a template). It runs against a cluster:
 
-1. Node-Ausstattung erheben: `kubectl get nodes -o json | jq '.items[].status.allocatable["ephemeral-storage"]'`.
-2. Render-Jobs mit `emptyDir` und wachsenden Welt-Größen starten (1, 5, 10, 20, 40 GiB Bundle).
-3. Je Lauf festhalten: Erfolg/Misserfolg, Grund bei Misserfolg (`Evicted` mit `ephemeral-storage`-Bezug ist der gesuchte Fall), Spitzenverbrauch über `kubectl top pod`.
-4. Die kleinste Größe ermitteln, bei der ein Lauf durch Eviction scheitert.
+1. Collect node capacity: `kubectl get nodes -o json | jq '.items[].status.allocatable["ephemeral-storage"]'`.
+2. Start render jobs with `emptyDir` and growing world sizes (1, 5, 10, 20, 40 GiB bundle).
+3. Record per run: success/failure, the reason on failure (`Evicted` referencing `ephemeral-storage` is the case being looked for), peak usage via `kubectl top pod`.
+4. Determine the smallest size at which a run fails through eviction.
 
-- [ ] **Schritt 3: Messung durchführen und Bericht schreiben**
+- [ ] **Step 3: Run the measurement and write the report**
 
-`2026-08-12-emptydir-grenze.md` nach dem Muster des Sharding-Spike-Berichts: Aufbau, Messwerte als Tabelle, Rohdaten unter `evidence/`, Auswertung, Entscheidung.
+`2026-08-12-emptydir-grenze.md`, following the pattern of the sharding-spike report: setup, measurements as a table, raw data under `evidence/`, analysis, decision.
 
-Die Auswertung muss beantworten: Ab welcher Bundle-Größe reicht `emptyDir` auf der real vorhandenen Node-Ausstattung nicht mehr? Welcher Default folgt daraus? Ab welcher Größe soll der Operator automatisch auf ein PVC wechseln — oder soll er es nie automatisch tun und stattdessen ein Feld in der CR verlangen?
+The analysis has to answer: above which bundle size does `emptyDir` stop being sufficient on the node capacity actually available? What default follows from that? Above which size should the operator switch to a PVC automatically — or should it never do so automatically and instead require a field in the CR?
 
-- [ ] **Schritt 4: Failing test für das Ergebnis schreiben**
+- [ ] **Step 4: Write a failing test for the result**
 
-Sobald die Entscheidung feststeht, in `RenderJobBuilderTest`:
+Once the decision is made, in `RenderJobBuilderTest`:
 
-`MEASURED_LIMIT_GIB` ist der in Schritt 3 gemessene Wert; er wird als benannte Konstante in `RenderJobBuilder` geführt, damit im Test und im Produktivcode derselbe Wert steht.
+`MEASURED_LIMIT_GIB` is the value measured in Step 3; it is kept as a named constant in `RenderJobBuilder`, so the test and the production code share the same value.
 
 ```java
 @Test
@@ -755,18 +755,18 @@ void setsASizeLimitOnTheEmptyDirSoAnOverrunEvictsPredictably() {
 }
 ```
 
-`renderWithBundleSize(long)` baut einen `BlueMapRender`, dessen referenziertes Bundle-Manifest die angegebene `sizeBytes` trägt (Feld aus Design-Spec §5), `workVolumeOf(Job)` liest das Volume heraus, auf das der `bluemap`-Container mountet. Beide als Hilfsmethoden der Testklasse ergänzen, im Stil der dort bereits vorhandenen Fixtures.
+`renderWithBundleSize(long)` builds a `BlueMapRender` whose referenced bundle manifest carries the given `sizeBytes` (a field from design spec §5); `workVolumeOf(Job)` reads out the volume the `bluemap` container mounts. Add both as helper methods on the test class, following the style of the fixtures already there.
 
-- [ ] **Schritt 5: `RenderJobBuilder` anpassen und Tests grün bekommen**
+- [ ] **Step 5: Adjust `RenderJobBuilder` and get the tests passing**
 
 Run: `./gradlew :operator:test --tests '*RenderJobBuilderTest*'`
 Expected: PASS
 
-- [ ] **Schritt 6: Spec nachziehen**
+- [ ] **Step 6: Update the spec**
 
-§15 Punkt 6 durch das Messergebnis ersetzen, mit Verweis auf den Spike-Bericht — im selben Stil, in dem §14 Phase 4 auf den Sharding-Spike verweist. §7.1 („`emptyDir` (oder PVC bei großen Welten)") um die konkrete Grenze ergänzen.
+Replace §15 point 6 with the measurement result, pointing to the spike report — in the same style §14 Phase 4 points to the sharding spike. Add the concrete limit to §7.1 ("`emptyDir` (or PVC for large worlds)").
 
-- [ ] **Schritt 7: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add docs/superpowers/spikes/2026-08-12-emptydir-grenze* operator/ docs/superpowers/specs/2026-08-08-apus-design.md
@@ -775,20 +775,20 @@ git commit -m "feat: pick the render volume type from a measured limit instead o
 
 ---
 
-## Reihenfolge und Abhängigkeiten
+## Order and dependencies
 
-| Task | Blockiert von | Kann parallel zu |
+| Task | Blocked by | Can run in parallel with |
 | --- | --- | --- |
-| 1 — Quota-Exit-Code | — | 2, 3, 4, 5 |
-| 2 — Push-Token-RBAC | Phase 8 Task 3 (die Datei, die verengt wird) | 1, 3, 4, 5 |
-| 3 — Identity-Broker | — (die Produktentscheidung in Schritt 1 ist der einzige Blocker) | 1, 2, 4, 5 |
-| 4 — Save-Fenster | — | 1, 2, 3, 5 |
-| 5 — `emptyDir`-Grenze | Zugang zu einem Cluster mit realistischer Node-Ausstattung | 1, 2, 3, 4 |
+| 1 — Quota exit code | — | 2, 3, 4, 5 |
+| 2 — Push-token RBAC | Phase 8 Task 3 (the file being narrowed) | 1, 3, 4, 5 |
+| 3 — Identity broker | — (the product decision in Step 1 is the only blocker) | 1, 2, 4, 5 |
+| 4 — Save window | — | 1, 2, 3, 5 |
+| 5 — `emptyDir` limit | Access to a cluster with realistic node capacity | 1, 2, 3, 4 |
 
-Task 3 und Task 5 tragen echte Unsicherheit: Beide können ein Ergebnis liefern, das Folgearbeit auslöst — ein Claim-Format, das die Rollenabbildung ändert, oder eine Grenze, die einen PVC-Pfad im Operator nötig macht, den es heute nicht gibt. Das ist kein Planungsfehler, sondern der Grund, warum diese Punkte offen sind.
+Task 3 and Task 5 carry genuine uncertainty: both can produce a result that triggers follow-up work — a claim format that changes the role mapping, or a limit that requires a PVC path in the operator that does not exist today. That is not a planning mistake, but the reason these points are open in the first place.
 
-## Was dieser Plan bewusst nicht abdeckt
+## What this plan deliberately does not cover
 
-- **§15 Punkt 5 (`render-mask` und Kanten).** Er ist ausdrücklich nur relevant, falls in Phase 4 der Maskenweg gewählt worden wäre. Nach der Absage an Sharding (§14, Phase 4) hat er keinen Gegenstand mehr und sollte in der Spec als gegenstandslos markiert statt abgearbeitet werden.
-- **§15 Punkt 2 (Bucket-Notifications als zweiter Erkennungsweg).** Die Spec führt ihn selbst nicht mehr als offen, sondern als mögliche spätere Härtung für den Fall, dass ein Schreiber seinen Completion-Callback verliert. Das ist ein eigenes Feature, keine Härtung des Bestehenden.
-- **Eine CI-Matrix über mehrere BlueMap-Versionen.** Braucht zuerst einen parametrierbaren Contract-Test; siehe den Abschluss des Phase-7-Plans.
+- **§15 point 5 (`render-mask` and edges).** It is explicitly only relevant if Phase 4 had chosen the mask-based approach. After sharding was called off (§14, Phase 4) it has no remaining subject and should be marked moot in the spec rather than worked through.
+- **§15 point 2 (bucket notifications as a second detection path).** The spec itself no longer lists it as open, but as a possible later hardening for the case where a writer loses its completion callback. That is a feature of its own, not a hardening of what already exists.
+- **A CI matrix across multiple BlueMap versions.** Needs a parameterizable contract test first; see the closing section of the Phase 7 plan.

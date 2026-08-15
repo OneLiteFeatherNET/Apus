@@ -28,8 +28,8 @@ import java.util.Optional;
  * validates a JWT issued by the identity broker (design spec §10.3, {@code
  * PrincipalResolver}/{@code TenantResolver}). A push token is different on purpose: it is a
  * long-lived, tenant-bound bearer secret a Paper server plugin holds, deliberately not tied to
- * any user login (§10.3: "sonst würde das Ausscheiden einer Person den Server-Upload
- * lahmlegen"). It arrives as a path segment, not a bearer JWT, and {@link #resolveNamespace} must
+ * any user login (§10.3: "otherwise a person leaving would cripple the server upload"). It
+ * arrives as a path segment, not a bearer JWT, and {@link #resolveNamespace} must
  * compare it against every known token in constant time (see {@code
  * FabricPushTokenRepository#resolveNamespace} for how) so that no amount of failed guesses lets
  * an attacker learn a correct token one character at a time, and a non-matching token must look

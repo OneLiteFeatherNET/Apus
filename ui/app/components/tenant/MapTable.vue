@@ -2,8 +2,8 @@
 import type { BlueMapMapResponse } from '~/utils/apiTypes'
 import { ApusApiError } from '~/utils/apiErrors'
 
-// Design spec §11.2: "Karten: Liste der BlueMapMap mit ihrem Zustand, und ein Weg, einen Render
-// auszulösen." Triggering is gated on canWriteTenant() -- convenience only, see
+// Design spec §11.2: "Maps: list of the BlueMapMap with its status, and a way to trigger
+// a render." Triggering is gated on canWriteTenant() -- convenience only, see
 // app/utils/role.ts's module doc: the api module re-checks this on every POST regardless, a
 // tenant-viewer who somehow still called it would just get a 403 back.
 const props = defineProps<{ maps: BlueMapMapResponse[] }>()

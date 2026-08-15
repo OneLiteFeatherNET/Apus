@@ -23,7 +23,7 @@ import java.util.List;
 /**
  * Request body for {@code PATCH /api/tenants/{name}} -- the only way to change quota or allowed
  * hosting domains on a tenant after creation (design spec §10.3: {@code platform-admin} may
- * "Tenants anlegen/ändern/löschen, Quotas"). {@code name} is deliberately not repeated here, nor
+ * "create/modify/delete tenants, quotas"). {@code name} is deliberately not repeated here, nor
  * is it ever taken from anywhere but the path -- see {@code TenantController#update}.
  *
  * <p>Partial-update semantics, same as {@link CreateTenantRequest}: a {@code null} field leaves

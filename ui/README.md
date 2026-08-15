@@ -99,8 +99,8 @@ Everything with real logic (`apiClient.ts`, `role.ts`, `jwt.ts`, `sse.ts`) is pl
 with no Nuxt runtime dependency, so a full Nuxt test environment (module resolution, virtual
 `#imports`, a mounted app) would only add startup cost and indirection for no benefit. `useAuth`
 and `useApiClient` themselves are thin enough (a few lines of wiring) that they are exercised
-indirectly through the pure functions they call, per the task brief's "reine Darstellung braucht
-keine Tests" — the composables' own logic content is effectively zero.
+indirectly through the pure functions they call, per the task brief's "pure presentation needs
+no tests" — the composables' own logic content is effectively zero.
 
 ### Why no server-side session
 
@@ -222,7 +222,7 @@ logic the api module applies in
 
 **This exists purely to decide what the UI shows.** It enforces nothing, and it must never be
 extended as though it did. The api module is the sole enforcement point (design spec §10.3:
-"Das Backend ist der Durchsetzungspunkt") and re-checks every one of these on every request,
+"the backend is the enforcement point") and re-checks every one of these on every request,
 regardless of what a compromised or simply out-of-date client renders. Concretely: hiding the
 "Platform" nav link from a non-`platform-admin` user is a convenience so they are not staring at
 a dashboard that will 403 on every call — it is not, and must not become, the reason `GET
@@ -260,7 +260,7 @@ per the task brief's "what carries logic" standard:
 - `jwt.spec.ts` — the unverified JWT payload decoder: normal decode, non-ASCII claim values,
   an unpadded base64url payload, and the two rejection paths.
 
-Not tested, per the same standard ("für reine Darstellung braucht es keine Tests"): the `.vue`
+Not tested, per the same standard ("pure presentation needs no tests"): the `.vue`
 files themselves (layout, nav, the account page) and the two thin composables
 (`useAuth`/`useApiClient`), whose own logic content is close to zero — see "Why plain Vitest"
 above.

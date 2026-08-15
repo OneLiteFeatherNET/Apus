@@ -1,32 +1,32 @@
-# Apus Phase 1 — Render-Kern: Implementierungsplan
+# Apus Phase 1 — Render Core: Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Ein Container-Image, das eine Minecraft-Welt aus S3 mit BlueMap rendert, das Ergebnis nach S3 schreibt und währenddessen seinen Fortschritt über HTTP als JSON und Prometheus-Metriken meldet — vollständig ohne Kubernetes betreibbar.
+**Goal:** A container image that renders a Minecraft world from S3 with BlueMap, writes the result back to S3, and reports its progress along the way over HTTP as JSON and Prometheus metrics — fully operable without Kubernetes.
 
-**Architecture:** Ein Gradle-Monorepo mit zwei Auslieferungsartefakten. Das `telemetry-addon` ist ein BlueMap-Addon (`implements Runnable`), das über `BlueMapAPI.onEnable` an den internen RenderManager kommt und einen JDK-eigenen HTTP-Server startet. Das `runner`-Image bündelt den BlueMap-CLI, das Telemetry-Addon und das bestehende `BlueMapS3Storage`-Addon mit einem Entrypoint, der die Welt aus S3 holt, die BlueMap-Konfiguration aus Umgebungsvariablen erzeugt und den Render startet. Der gesamte Zugriff auf BlueMap-Interna liegt hinter einer einzigen Schnittstelle (`RenderManagerAccess`), damit er testbar bleibt und später austauschbar ist.
+**Architecture:** A Gradle monorepo with two delivery artifacts. The `telemetry-addon` is a BlueMap addon (`implements Runnable`) that reaches the internal RenderManager via `BlueMapAPI.onEnable` and starts a JDK-native HTTP server. The `runner` image bundles the BlueMap CLI, the telemetry addon, and the existing `BlueMapS3Storage` addon with an entrypoint that fetches the world from S3, generates the BlueMap configuration from environment variables, and starts the render. All access to BlueMap internals sits behind a single interface (`RenderManagerAccess`) so it stays testable and can be swapped out later.
 
-**Tech Stack:** Java 25, Gradle 9.4.1 (Kotlin DSL, Inline-Version-Catalog), JUnit Jupiter, Testcontainers (MinIO), Spotless, Shadow, Docker (eclipse-temurin:25-jre), MinIO Client (`mc`), `jq`.
+**Tech Stack:** Java 25, Gradle 9.4.1 (Kotlin DSL, inline version catalog), JUnit Jupiter, Testcontainers (MinIO), Spotless, Shadow, Docker (eclipse-temurin:25-jre), MinIO Client (`mc`), `jq`.
 
 ---
 
 ## Global Constraints
 
-Diese Vorgaben gelten für **jede** Aufgabe in diesem Plan:
+These rules apply to **every** task in this plan:
 
-- **Java-Toolchain: 25.** BlueMap 5.23 wird mit `JavaLanguageVersion.of(25)` gebaut und liefert ein `eclipse-temurin:25-jre-jammy`-Image aus. Gegen `bluemap-common` kompilierter Code braucht daher JDK 25.
-- **BlueMap-Version: 5.23.** Artefakte: `de.bluecolored:bluemap-core:5.23`, `de.bluecolored:bluemap-common:5.23`, `de.bluecolored:bluemap-api:2.8.0` (die API hat eine eigene Versionierung). Repository: `https://repo.bluecolored.de/releases`, Pfadstruktur `de/bluecolored/<artifactId>/`.
-- **Alle BlueMap-Abhängigkeiten sind `compileOnly`.** Sie liegen zur Laufzeit im CLI-Fat-Jar vor. Werden sie mitgeliefert, entstehen Klassenkonflikte.
-- **Lizenz: AGPL-3.0**, wie `BlueMapS3Storage`. Jede Java-Datei trägt den Header aus `.spotless/Copyright.java`, durchgesetzt von Spotless.
-- **Java-Basispaket: `net.onelitefeather.apus`.**
-- **Gradle-Group: `net.onelitefeather.apus`, Version `999.0.0`** in `gradle.properties` (Release-Please ersetzt sie beim Release — gleiche Konvention wie `BlueMapS3Storage`).
-- **Keine Fremdabhängigkeiten zur Laufzeit im Addon.** HTTP über `com.sun.net.httpserver.HttpServer`, JSON über einen eigenen kleinen Writer. Grund: Das Addon läuft in einem eigenen Classloader neben BlueMap; jede mitgelieferte Bibliothek ist ein potenzieller Konflikt.
-- **Commit-Konvention: Conventional Commits.** Git-Identität ist bereits im Repo gesetzt (`TheMeinerLP <github@themeinerlp.dev>`). **Keine** Claude-Co-Author- oder „Generated with"-Zeilen.
-- **Sprache im Code:** Bezeichner und Javadoc auf Englisch, wie in `BlueMapS3Storage`.
+- **Java toolchain: 25.** BlueMap 5.23 is built with `JavaLanguageVersion.of(25)` and ships an `eclipse-temurin:25-jre-jammy` image. Code compiled against `bluemap-common` therefore needs JDK 25.
+- **BlueMap version: 5.23.** Artifacts: `de.bluecolored:bluemap-core:5.23`, `de.bluecolored:bluemap-common:5.23`, `de.bluecolored:bluemap-api:2.8.0` (the API has its own versioning). Repository: `https://repo.bluecolored.de/releases`, path structure `de/bluecolored/<artifactId>/`.
+- **All BlueMap dependencies are `compileOnly`.** They are present at runtime in the CLI fat jar. Shipping them alongside would cause class conflicts.
+- **License: AGPL-3.0**, like `BlueMapS3Storage`. Every Java file carries the header from `.spotless/Copyright.java`, enforced by Spotless.
+- **Java base package: `net.onelitefeather.apus`.**
+- **Gradle group: `net.onelitefeather.apus`, version `999.0.0`** in `gradle.properties` (Release Please replaces it on release — same convention as `BlueMapS3Storage`).
+- **No third-party runtime dependencies in the addon.** HTTP via `com.sun.net.httpserver.HttpServer`, JSON via a small hand-written writer. Reason: the addon runs in its own classloader alongside BlueMap; every shipped library is a potential conflict.
+- **Commit convention: Conventional Commits.** Git identity is already set in the repo (`TheMeinerLP <github@themeinerlp.dev>`). **No** Claude co-author or "Generated with" lines.
+- **Language in code:** identifiers and Javadoc in English, as in `BlueMapS3Storage`.
 
-### Verifizierte BlueMap-Fakten
+### Verified BlueMap facts
 
-Diese Signaturen wurden gegen den Quellcode von BlueMap 5.23 geprüft und werden im Plan verwendet:
+These signatures were checked against the BlueMap 5.23 source and are used throughout the plan:
 
 ```java
 // de.bluecolored.bluemap.api.BlueMapAPI
@@ -35,13 +35,13 @@ public static synchronized void onDisable(Consumer<BlueMapAPI> consumer)
 public abstract Collection<BlueMapMap> getMaps();
 
 // de.bluecolored.bluemap.common.api.BlueMapAPIImpl
-public @Nullable Plugin plugin();          // laut Javadoc ausdrücklich für Addons gedacht
+public @Nullable Plugin plugin();          // per its Javadoc, explicitly intended for addons
 
 // de.bluecolored.bluemap.common.plugin.Plugin
 public RenderManager getRenderManager();   // Lombok-@Getter
 
 // de.bluecolored.bluemap.common.rendermanager.RenderManager
-public RenderTask getCurrentRenderTask()             // null, wenn nichts läuft
+public RenderTask getCurrentRenderTask()             // null when nothing is running
 public long estimateCurrentRenderTaskTimeRemaining() // Millisekunden, 0 = unbekannt
 public int getScheduledRenderTaskCount()
 public int getWorkerThreadCount()
@@ -55,22 +55,22 @@ String getDescription();
 BmMap getMap();              // de.bluecolored.bluemap.core.map.BmMap
 ```
 
-**Kein Reflection erforderlich.** Der Zugang läuft über `((BlueMapAPIImpl) api).plugin().getRenderManager()`. `plugin()` kann `null` liefern, wenn die Plattform kein Plugin-API bereitstellt — das ist als Fehlerfall zu behandeln, nicht als Absturz.
+**No reflection required.** Access goes through `((BlueMapAPIImpl) api).plugin().getRenderManager()`. `plugin()` can return `null` when the platform provides no plugin API — that must be treated as an error case, not a crash.
 
-### Verifizierte BlueMap-CLI-Fakten
+### Verified BlueMap CLI facts
 
-- Artefakt: `bluemap-5.23-cli.jar`, Download unter `https://github.com/BlueMap-Minecraft/BlueMap/releases/download/v5.23/bluemap-5.23-cli.jar`. Einzelnes Fat-Jar.
-- Relevante Optionen: `-c/--config <ordner>`, `-r/--render`, `-f/--force-render`, `-m/--maps <liste>`, `-u/--watch`, `-w/--webserver`, `-v/--mc-version <version>`, `-V/--version`.
-- Der `packs/`-Ordner liegt **fest** unter `<config-ordner>/packs` und ist nicht konfigurierbar. Addons **und** Ressourcenpakete kommen dorthin.
-- Ohne Aktionsflag schreibt der CLI nur Default-Konfigurationen und beendet sich mit **Exit-Code 1**.
-- Exit-Codes: `0` Erfolg, `1` Konfigurations-/IO-/Argumentfehler, `2` fehlende Minecraft-Ressourcen (`accept-download` nicht gesetzt).
-- Die Minecraft-Client-JAR wird nach `<data-ordner>/minecraft-client-<versionId>.jar` geladen — **nur wenn die Datei fehlt**. Vorbefüllen verhindert den Download zuverlässig.
-- Der CLI setzt seinen Default-Datenordner auf `data` (relativ zum Arbeitsverzeichnis), nicht auf `bluemap`.
-- Logging geht auf stdout. Es gibt weder Log-Level- noch JSON-Logging-Schalter.
+- Artifact: `bluemap-5.23-cli.jar`, download at `https://github.com/BlueMap-Minecraft/BlueMap/releases/download/v5.23/bluemap-5.23-cli.jar`. Single fat jar.
+- Relevant options: `-c/--config <folder>`, `-r/--render`, `-f/--force-render`, `-m/--maps <list>`, `-u/--watch`, `-w/--webserver`, `-v/--mc-version <version>`, `-V/--version`.
+- The `packs/` folder is **fixed** at `<config-folder>/packs` and is not configurable. Addons **and** resource packs both go there.
+- Without an action flag, the CLI only writes default configurations and exits with **exit code 1**.
+- Exit codes: `0` success, `1` configuration/IO/argument error, `2` missing Minecraft resources (`accept-download` not set).
+- The Minecraft client JAR is downloaded to `<data-folder>/minecraft-client-<versionId>.jar` — **only if the file is missing**. Pre-seeding it reliably prevents the download.
+- The CLI defaults its data folder to `data` (relative to the working directory), not `bluemap`.
+- Logging goes to stdout. There is neither a log-level nor a JSON-logging switch.
 
-### Konfigurationsformate
+### Configuration formats
 
-`core.conf` (nur die hier benötigten Schlüssel):
+`core.conf` (only the keys needed here):
 
 ```hocon
 accept-download: true
@@ -91,7 +91,7 @@ storage: "s3"
 render-edges: true
 ```
 
-`storages/s3.conf` — Felder aus `S3StorageConfiguration` in `BlueMapS3Storage`. Configurate bildet camelCase auf kebab-case ab (erkennbar an `render-thread-count` ↔ `renderThreadCount` in `core.conf`):
+`storages/s3.conf` — fields from `S3StorageConfiguration` in `BlueMapS3Storage`. Configurate maps camelCase to kebab-case (visible in `render-thread-count` ↔ `renderThreadCount` in `core.conf`):
 
 ```hocon
 storage-type: "themeinerlp:s3"
@@ -105,7 +105,7 @@ root-path: "survival"
 force-path-style: true
 ```
 
-> **Verifiziert in Task 7:** Der Integrationstest `runner/src/test/java/net/onelitefeather/apus/runner/RenderEndToEndTest.java` rendert die Fixture-Welt aus MinIO gegen einen echten BlueMap-CLI-Lauf mit `themeinerlp:s3` als Storage-Typ und den kebab-case-Feldnamen oben — **unverändert, wie ursprünglich angenommen**. Die BlueMap-Logausgabe bestätigt `Initializing Storage: 's3' (Type: 'themeinerlp:s3')`, und der Render endet mit Exit-Code 0. Zusätzlich bestätigt durch Quellcode-Review: `StorageConfig.storageType` in `bluemap-common` wird über `@Setting`-freies Configurate-Object-Mapping auf `storage-type` abgebildet (siehe `de.bluecolored.bluemap.common.config.storage.StorageConfig`), und `Key.parse(key, Key.BLUEMAP_NAMESPACE)` erwartet exakt das `namespace:value`-Format `themeinerlp:s3` aus `new Key("themeinerlp", "s3")` in `S3StorageAddon`. `render-config.sh` musste dafür nicht geändert werden.
+> **Verified in Task 7:** The integration test `runner/src/test/java/net/onelitefeather/apus/runner/RenderEndToEndTest.java` renders the fixture world from MinIO against a real BlueMap CLI run with `themeinerlp:s3` as the storage type and the kebab-case field names above — **unchanged, exactly as originally assumed**. The BlueMap log output confirms `Initializing Storage: 's3' (Type: 'themeinerlp:s3')`, and the render finishes with exit code 0. Also confirmed by source review: `StorageConfig.storageType` in `bluemap-common` is mapped to `storage-type` via `@Setting`-free Configurate object mapping (see `de.bluecolored.bluemap.common.config.storage.StorageConfig`), and `Key.parse(key, Key.BLUEMAP_NAMESPACE)` expects exactly the `namespace:value` format `themeinerlp:s3` produced by `new Key("themeinerlp", "s3")` in `S3StorageAddon`. `render-config.sh` did not need to change for this.
 
 ---
 
@@ -113,10 +113,10 @@ force-path-style: true
 
 ```text
 Apus/
-├── settings.gradle.kts                 Module + Inline-Version-Catalog
-├── build.gradle.kts                    Root: Spotless, Toolchain für alle Module
+├── settings.gradle.kts                 Modules + inline version catalog
+├── build.gradle.kts                    Root: Spotless, toolchain for all modules
 ├── gradle.properties                   group, version
-├── .spotless/Copyright.java            AGPL-Header-Vorlage
+├── .spotless/Copyright.java            AGPL header template
 ├── .gitignore
 ├── LICENSE                             AGPL-3.0
 ├── gradle/wrapper/                     Gradle 9.4.1
@@ -125,18 +125,18 @@ Apus/
 │   ├── build.gradle.kts
 │   └── src/
 │       ├── main/java/net/onelitefeather/apus/telemetry/
-│       │   ├── ApusTelemetryAddon.java      Entrypoint (Runnable), Verdrahtung
-│       │   ├── TelemetryConfig.java         Konfiguration aus Umgebungsvariablen
-│       │   ├── ProgressSnapshot.java        Unveränderliches Datenmodell (record)
-│       │   ├── JsonWriter.java              Minimaler JSON-Serialisierer
-│       │   ├── PrometheusWriter.java        Prometheus-Textformat
-│       │   ├── TelemetryServer.java         HTTP-Server, Routen
+│       │   ├── ApusTelemetryAddon.java      Entrypoint (Runnable), wiring
+│       │   ├── TelemetryConfig.java         Configuration from environment variables
+│       │   ├── ProgressSnapshot.java        Immutable data model (record)
+│       │   ├── JsonWriter.java              Minimal JSON serializer
+│       │   ├── PrometheusWriter.java        Prometheus text format
+│       │   ├── TelemetryServer.java         HTTP server, routes
 │       │   └── probe/
-│       │       ├── RenderManagerAccess.java Schmale Schnittstelle auf BlueMap
-│       │       ├── RenderProgressProbe.java Erzeugt Snapshots, kapselt Fehlerfälle
-│       │       ├── BlueMapRenderManagerAccess.java  Weg über die BlueMap-API
-│       │       └── LogTailRenderManagerAccess.java  Weg über BlueMaps Logger (in Task 8
-│       │                                            ergänzt, siehe unten)
+│       │       ├── RenderManagerAccess.java Narrow interface onto BlueMap
+│       │       ├── RenderProgressProbe.java Produces snapshots, encapsulates error cases
+│       │       ├── BlueMapRenderManagerAccess.java  Route via the BlueMap API
+│       │       └── LogTailRenderManagerAccess.java  Route via BlueMap's logger (added in Task 8,
+│       │                                            see below)
 │       ├── main/resources/bluemap.addon.json
 │       └── test/java/net/onelitefeather/apus/telemetry/
 │           ├── ProgressSnapshotTest.java
@@ -150,30 +150,30 @@ Apus/
 │
 ├── runner/
 │   ├── Dockerfile
-│   ├── entrypoint.sh                   Ablaufsteuerung
+│   ├── entrypoint.sh                   Flow control
 │   ├── bin/
-│   │   ├── render-config.sh            Erzeugt core.conf, maps/, storages/
-│   │   └── bundle-sync.sh              Holt Welt-Daten aus S3
+│   │   ├── render-config.sh            Generates core.conf, maps/, storages/
+│   │   └── bundle-sync.sh              Fetches world data from S3
 │   └── src/test/java/net/onelitefeather/apus/runner/
-│       ├── RunnerImageTest.java        Image-Smoke-Test
-│       └── RenderEndToEndTest.java     MinIO + echter Render
+│       ├── RunnerImageTest.java        Image smoke test
+│       └── RenderEndToEndTest.java     MinIO + real render
 │
 └── testdata/
-    ├── README.md                       Herkunft und Erzeugung der Fixture
-    └── mini-world/                     Minimale Vanilla-Welt für Tests
+    ├── README.md                       Origin and generation of the fixture
+    └── mini-world/                     Minimal Vanilla world for tests
 ```
 
-**Warum diese Aufteilung:** BlueMap-Typen werden **ausschließlich** im Paket `probe` importiert, hinter der Schnittstelle `RenderManagerAccess`. Alles andere — Snapshot, Serialisierung, HTTP, Fehlerbehandlung — ist reines Java und ohne laufende BlueMap-Instanz testbar. Das macht Phase 1 fast vollständig unit-testbar und begrenzt die Auswirkung eines BlueMap-Upgrades auf dieses eine Paket.
+**Why this split:** BlueMap types are imported **exclusively** within the `probe` package, behind the `RenderManagerAccess` interface. Everything else — snapshot, serialization, HTTP, error handling — is plain Java and testable without a running BlueMap instance. That makes Phase 1 almost fully unit-testable and limits the blast radius of a BlueMap upgrade to that one package.
 
-> **Nachgeführt auf den ausgelieferten Stand:** Ursprünglich war `BlueMapRenderManagerAccess` als *einzige* Klasse mit BlueMap-Bezug geplant. Task 8 hat ergeben, dass der API-Weg im CLI-Betrieb prinzipbedingt nicht trägt, und `LogTailRenderManagerAccess` als zweite Implementierung derselben Schnittstelle ergänzt. Genau dieser Zuschnitt hat die Erweiterung billig gemacht: Es kam eine Klasse hinzu, keine bestehende musste geändert werden.
+> **Updated to reflect the delivered state:** Originally, `BlueMapRenderManagerAccess` was planned as the *only* class touching BlueMap. Task 8 found that the API route is structurally unable to work in CLI mode, and added `LogTailRenderManagerAccess` as a second implementation of the same interface. This exact cut is what made the extension cheap: one class was added, no existing one had to change.
 
 ---
 
-## Parallelisierung
+## Parallelization
 
-Aufgaben mit gleicher Gruppe können gleichzeitig von verschiedenen Agenten bearbeitet werden:
+Tasks in the same group can be worked on simultaneously by different agents:
 
-| Gruppe | Aufgaben | Voraussetzung |
+| Group | Tasks | Prerequisite |
 | --- | --- | --- |
 | A | Task 1 | — |
 | B | Task 2, Task 3, Task 4 | Task 1 |
@@ -181,11 +181,11 @@ Aufgaben mit gleicher Gruppe können gleichzeitig von verschiedenen Agenten bear
 | D | Task 7 | Task 5, Task 6 |
 | E | Task 8 | Task 7 |
 
-Task 2 (Snapshot + JSON), Task 3 (Probe) und Task 4 (HTTP-Server) berühren getrennte Dateien und sind echt parallel bearbeitbar. Die Schnittstellen zwischen ihnen sind unten in jedem `Interfaces`-Block exakt festgelegt — daran müssen sich alle drei halten, ohne sich abzustimmen.
+Task 2 (snapshot + JSON), Task 3 (probe), and Task 4 (HTTP server) touch separate files and can genuinely be worked on in parallel. The interfaces between them are pinned down exactly below, in each `Interfaces` block — all three must stick to them without coordinating.
 
 ---
 
-### Task 1: Monorepo-Grundgerüst
+### Task 1: Monorepo scaffolding
 
 **Files:**
 
@@ -200,17 +200,17 @@ Task 2 (Snapshot + JSON), Task 3 (Probe) und Task 4 (HTTP-Server) berühren getr
 
 **Interfaces:**
 
-- Consumes: nichts
-- Produces: Version-Catalog-Aliase `libs.bluemap.api`, `libs.bluemap.core`, `libs.bluemap.common`, `libs.junit.bom`, `libs.junit.jupiter`, `libs.junit.platform.launcher`, `libs.testcontainers.bom`, `libs.testcontainers.junit`, `libs.testcontainers.minio`, `libs.plugins.spotless`, `libs.plugins.shadow`. Modulname `:telemetry-addon`.
+- Consumes: nothing
+- Produces: version catalog aliases `libs.bluemap.api`, `libs.bluemap.core`, `libs.bluemap.common`, `libs.junit.bom`, `libs.junit.jupiter`, `libs.junit.platform.launcher`, `libs.testcontainers.bom`, `libs.testcontainers.junit`, `libs.testcontainers.minio`, `libs.plugins.spotless`, `libs.plugins.shadow`. Module name `:telemetry-addon`.
 
-- [ ] **Step 1: Gradle-Wrapper anlegen**
+- [ ] **Step 1: Create the Gradle wrapper**
 
 ```bash
 cd /mnt/projects/oss/onelitefeather/Apus
 gradle wrapper --gradle-version 9.4.1
 ```
 
-Falls kein `gradle` global verfügbar ist, den Wrapper aus `BlueMapS3Storage` kopieren:
+If no `gradle` is available globally, copy the wrapper from `BlueMapS3Storage`:
 
 ```bash
 cp -r ../BlueMapS3Storage/gradle/wrapper gradle/
@@ -218,7 +218,7 @@ cp ../BlueMapS3Storage/gradlew ../BlueMapS3Storage/gradlew.bat .
 chmod +x gradlew
 ```
 
-- [ ] **Step 2: `settings.gradle.kts` schreiben**
+- [ ] **Step 2: Write `settings.gradle.kts`**
 
 ```kotlin
 rootProject.name = "Apus"
@@ -258,7 +258,7 @@ dependencyResolutionManagement {
 }
 ```
 
-- [ ] **Step 3: `gradle.properties` schreiben**
+- [ ] **Step 3: Write `gradle.properties`**
 
 ```properties
 group = net.onelitefeather.apus
@@ -267,7 +267,7 @@ org.gradle.caching = true
 org.gradle.parallel = true
 ```
 
-- [ ] **Step 4: Root-`build.gradle.kts` schreiben**
+- [ ] **Step 4: Write the root `build.gradle.kts`**
 
 ```kotlin
 plugins {
@@ -300,7 +300,7 @@ subprojects {
 }
 ```
 
-- [ ] **Step 5: `.spotless/Copyright.java` schreiben**
+- [ ] **Step 5: Write `.spotless/Copyright.java`**
 
 ```java
 /**
@@ -322,7 +322,7 @@ subprojects {
  */
 ```
 
-- [ ] **Step 6: `.gitignore` schreiben**
+- [ ] **Step 6: Write `.gitignore`**
 
 ```gitignore
 .gradle/
@@ -333,17 +333,17 @@ build/
 runner/vendor/
 ```
 
-**Achtung:** `/bin/` mit führendem Schrägstrich, damit nur ein Verzeichnis im Wurzelverzeichnis gemeint ist. Ein reines `bin/` würde auch `runner/bin/` ausschließen — und eine Ausnahme per `!runner/bin/` würde **nicht** greifen, weil Git Dateien in einem ausgeschlossenen Verzeichnis nicht wieder einschließen kann.
+**Careful:** `/bin/` with a leading slash, so it means only one directory at the repository root. A bare `bin/` would also exclude `runner/bin/` — and an exception via `!runner/bin/` would **not** help, because Git cannot re-include files inside an already-excluded directory.
 
-- [ ] **Step 7: `LICENSE` anlegen**
+- [ ] **Step 7: Create `LICENSE`**
 
-Den vollständigen AGPL-3.0-Text übernehmen:
+Copy over the full AGPL-3.0 text:
 
 ```bash
 cp ../BlueMapS3Storage/LICENSE LICENSE
 ```
 
-- [ ] **Step 8: `telemetry-addon/build.gradle.kts` schreiben**
+- [ ] **Step 8: Write `telemetry-addon/build.gradle.kts`**
 
 ```kotlin
 plugins {
@@ -371,9 +371,9 @@ tasks {
 }
 ```
 
-- [ ] **Step 9: Den fehlschlagenden Test schreiben**
+- [ ] **Step 9: Write the failing test**
 
-Dieser Test beweist, dass die BlueMap-Abhängigkeiten wirklich auflösen und die erwarteten Klassen enthalten. Genau hier scheitert das Setup sonst still.
+This test proves that the BlueMap dependencies actually resolve and contain the expected classes. This is exactly where the setup would otherwise fail silently.
 
 `telemetry-addon/src/test/java/net/onelitefeather/apus/telemetry/BuildSetupTest.java`:
 
@@ -403,7 +403,7 @@ class BuildSetupTest {
 }
 ```
 
-Damit die Klassen im Test sichtbar sind, muss `telemetry-addon/build.gradle.kts` sie auch dem Test-Classpath geben. Ergänze im `dependencies`-Block:
+For the classes to be visible in the test, `telemetry-addon/build.gradle.kts` must also expose them on the test classpath. Add to the `dependencies` block:
 
 ```kotlin
     testCompileOnly(libs.bluemap.common)
@@ -412,26 +412,26 @@ Damit die Klassen im Test sichtbar sind, muss `telemetry-addon/build.gradle.kts`
     testRuntimeOnly(libs.bluemap.common)
 ```
 
-- [ ] **Step 10: Test ausführen und Fehlschlag prüfen**
+- [ ] **Step 10: Run the test and confirm the failure**
 
 Run: `./gradlew :telemetry-addon:test --tests '*BuildSetupTest*'`
-Expected: FAIL, solange Wrapper, Katalog oder Repository nicht stimmen — typischerweise „Could not find de.bluecolored:bluemap-common:5.23".
+Expected: FAIL, as long as the wrapper, catalog, or repository are not right — typically "Could not find de.bluecolored:bluemap-common:5.23".
 
-**Wenn die Auflösung scheitert:** Die Koordinaten haben zwischen BlueMap-Versionen gewechselt. `BlueMapS3Storage` nutzt für 5.3 noch `de.bluecolored.bluemap:BlueMapCore`. Prüfe, welche Form für 5.23 gilt:
+**If resolution fails:** the coordinates have changed between BlueMap versions. `BlueMapS3Storage` still uses `de.bluecolored.bluemap:BlueMapCore` for 5.3. Check which form applies to 5.23:
 
 ```bash
 curl -s https://repo.bluecolored.de/releases/de/bluecolored/bluemap-common/maven-metadata.xml | head -20
 curl -s https://repo.bluecolored.de/releases/de/bluecolored/bluemap/BlueMapCommon/maven-metadata.xml | head -20
 ```
 
-Nimm die Variante, die eine gültige `maven-metadata.xml` liefert, und passe den Katalog **sowie diesen Plan** an.
+Use whichever variant returns a valid `maven-metadata.xml`, and adjust both the catalog **and this plan**.
 
-- [ ] **Step 11: Setup korrigieren bis der Test besteht**
+- [ ] **Step 11: Fix the setup until the test passes**
 
 Run: `./gradlew :telemetry-addon:test --tests '*BuildSetupTest*'`
 Expected: PASS
 
-- [ ] **Step 12: Spotless anwenden und Gesamtbau prüfen**
+- [ ] **Step 12: Apply Spotless and verify the full build**
 
 Run: `./gradlew spotlessApply build`
 Expected: BUILD SUCCESSFUL
@@ -445,7 +445,7 @@ git commit -m "build: set up Apus gradle monorepo with telemetry-addon module"
 
 ---
 
-### Task 2: ProgressSnapshot und Serialisierung
+### Task 2: ProgressSnapshot and serialization
 
 **Files:**
 
@@ -460,19 +460,19 @@ git commit -m "build: set up Apus gradle monorepo with telemetry-addon module"
 
 **Interfaces:**
 
-- Consumes: nichts aus anderen Aufgaben
+- Consumes: nothing from other tasks
 - Produces:
 
 ```java
 public record ProgressSnapshot(
         State state,              // RENDERING, IDLE, STARTING, UNKNOWN
-        String currentMap,        // null wenn unbekannt
-        double progress,          // 0..1, -1 wenn unbekannt
-        long etaSeconds,          // -1 wenn unbekannt
-        int queuedTasks,          // -1 wenn unbekannt
-        int renderThreads,        // -1 wenn unbekannt
+        String currentMap,        // null when unknown
+        double progress,          // 0..1, -1 when unknown
+        long etaSeconds,          // -1 when unknown
+        int queuedTasks,          // -1 when unknown
+        int renderThreads,        // -1 when unknown
         boolean degraded,
-        String description)       // null wenn unbekannt
+        String description)       // null when unknown
 {
     public enum State { STARTING, RENDERING, IDLE, UNKNOWN }
     public static ProgressSnapshot unknown(String reason);
@@ -493,9 +493,9 @@ public final class PrometheusWriter {
 }
 ```
 
-`Numbers.compact` wird von **beiden** Writern genutzt. Es ist die einzige Stelle mit Zahlenformatierung — dieselbe Logik zweimal zu schreiben wäre ein Duplikat.
+`Numbers.compact` is used by **both** writers. It's the single place with number formatting — writing the same logic twice would be a duplicate.
 
-- [ ] **Step 1: Den fehlschlagenden Test für `ProgressSnapshot` schreiben**
+- [ ] **Step 1: Write the failing test for `ProgressSnapshot`**
 
 `ProgressSnapshotTest.java`:
 
@@ -536,12 +536,12 @@ class ProgressSnapshotTest {
 }
 ```
 
-- [ ] **Step 2: Test ausführen und Fehlschlag prüfen**
+- [ ] **Step 2: Run the test and confirm the failure**
 
 Run: `./gradlew :telemetry-addon:test --tests '*ProgressSnapshotTest*'`
-Expected: FAIL, „cannot find symbol: class ProgressSnapshot"
+Expected: FAIL, "cannot find symbol: class ProgressSnapshot"
 
-- [ ] **Step 3: `ProgressSnapshot` implementieren**
+- [ ] **Step 3: Implement `ProgressSnapshot`**
 
 ```java
 package net.onelitefeather.apus.telemetry;
@@ -584,12 +584,12 @@ public record ProgressSnapshot(
 }
 ```
 
-- [ ] **Step 4: Test ausführen und Erfolg prüfen**
+- [ ] **Step 4: Run the test and confirm it passes**
 
 Run: `./gradlew :telemetry-addon:test --tests '*ProgressSnapshotTest*'`
 Expected: PASS
 
-- [ ] **Step 5: Den fehlschlagenden Test für `Numbers` schreiben**
+- [ ] **Step 5: Write the failing test for `Numbers`**
 
 `NumbersTest.java`:
 
@@ -629,10 +629,10 @@ class NumbersTest {
 }
 ```
 
-- [ ] **Step 6: Test ausführen, Fehlschlag prüfen, `Numbers` implementieren**
+- [ ] **Step 6: Run the test, confirm the failure, implement `Numbers`**
 
 Run: `./gradlew :telemetry-addon:test --tests '*NumbersTest*'`
-Expected: FAIL, „cannot find symbol: class Numbers"
+Expected: FAIL, "cannot find symbol: class Numbers"
 
 ```java
 package net.onelitefeather.apus.telemetry;
@@ -666,7 +666,7 @@ public final class Numbers {
 Run: `./gradlew :telemetry-addon:test --tests '*NumbersTest*'`
 Expected: PASS
 
-- [ ] **Step 7: Den fehlschlagenden Test für `JsonWriter` schreiben**
+- [ ] **Step 7: Write the failing test for `JsonWriter`**
 
 `JsonWriterTest.java`:
 
@@ -714,12 +714,12 @@ class JsonWriterTest {
 }
 ```
 
-- [ ] **Step 8: Test ausführen und Fehlschlag prüfen**
+- [ ] **Step 8: Run the test and confirm the failure**
 
 Run: `./gradlew :telemetry-addon:test --tests '*JsonWriterTest*'`
-Expected: FAIL, „cannot find symbol: class JsonWriter"
+Expected: FAIL, "cannot find symbol: class JsonWriter"
 
-- [ ] **Step 9: `JsonWriter` implementieren**
+- [ ] **Step 9: Implement `JsonWriter`**
 
 ```java
 package net.onelitefeather.apus.telemetry;
@@ -796,14 +796,14 @@ public final class JsonWriter {
 }
 ```
 
-- [ ] **Step 10: Test ausführen und Erfolg prüfen**
+- [ ] **Step 10: Run the test and confirm it passes**
 
 Run: `./gradlew :telemetry-addon:test --tests '*JsonWriterTest*'`
 Expected: PASS
 
-Falls `progress` als `-1` statt `-1.0` erwartet wird: Der Test in Step 5 fordert `0.674` exakt; `trimTrailingZeros` liefert dafür `0.674`. Für `-1.0` liefert es `-1`. Beides ist gültiges JSON.
+If `progress` is expected as `-1` instead of `-1.0`: the test in Step 5 requires exactly `0.674`; `trimTrailingZeros` produces `0.674` for that. For `-1.0` it produces `-1`. Both are valid JSON.
 
-- [ ] **Step 11: Den fehlschlagenden Test für `PrometheusWriter` schreiben**
+- [ ] **Step 11: Write the failing test for `PrometheusWriter`**
 
 `PrometheusWriterTest.java`:
 
@@ -844,12 +844,12 @@ class PrometheusWriterTest {
 }
 ```
 
-- [ ] **Step 12: Test ausführen und Fehlschlag prüfen**
+- [ ] **Step 12: Run the test and confirm the failure**
 
 Run: `./gradlew :telemetry-addon:test --tests '*PrometheusWriterTest*'`
-Expected: FAIL, „cannot find symbol: class PrometheusWriter"
+Expected: FAIL, "cannot find symbol: class PrometheusWriter"
 
-- [ ] **Step 13: `PrometheusWriter` implementieren**
+- [ ] **Step 13: Implement `PrometheusWriter`**
 
 ```java
 package net.onelitefeather.apus.telemetry;
@@ -909,7 +909,7 @@ public final class PrometheusWriter {
 }
 ```
 
-- [ ] **Step 14: Test ausführen und Erfolg prüfen**
+- [ ] **Step 14: Run the test and confirm it passes**
 
 Run: `./gradlew :telemetry-addon:test --tests '*PrometheusWriterTest*'`
 Expected: PASS
@@ -924,7 +924,7 @@ git commit -m "feat(telemetry): add progress snapshot model with json and promet
 
 ---
 
-### Task 3: Progress-Probe mit BlueMap-Zugriff
+### Task 3: Progress probe with BlueMap access
 
 **Files:**
 
@@ -936,7 +936,7 @@ git commit -m "feat(telemetry): add progress snapshot model with json and promet
 
 **Interfaces:**
 
-- Consumes: `ProgressSnapshot` aus Task 2 (inklusive `unknown(String)` und `idle(int, int)`)
+- Consumes: `ProgressSnapshot` from Task 2 (including `unknown(String)` and `idle(int, int)`)
 - Produces:
 
 ```java
@@ -956,9 +956,9 @@ public final class RenderProgressProbe {
 }
 ```
 
-Der Konstruktor nimmt einen `Supplier`, weil die BlueMap-API beim Start des Addons noch nicht bereit ist. Der Supplier liefert `null`, solange sie fehlt.
+The constructor takes a `Supplier` because the BlueMap API is not yet ready when the addon starts. The supplier returns `null` for as long as it's missing.
 
-- [ ] **Step 1: `RenderManagerAccess` schreiben (noch ohne Implementierung)**
+- [ ] **Step 1: Write `RenderManagerAccess` (still without an implementation)**
 
 ```java
 package net.onelitefeather.apus.telemetry.probe;
@@ -993,9 +993,9 @@ public interface RenderManagerAccess {
 }
 ```
 
-- [ ] **Step 2: Den Fake für Tests schreiben**
+- [ ] **Step 2: Write the fake for tests**
 
-`FakeRenderManagerAccess.java` (im Testverzeichnis):
+`FakeRenderManagerAccess.java` (in the test directory):
 
 ```java
 package net.onelitefeather.apus.telemetry.probe;
@@ -1035,7 +1035,7 @@ final class FakeRenderManagerAccess implements RenderManagerAccess {
 }
 ```
 
-- [ ] **Step 3: Den fehlschlagenden Test für die Probe schreiben**
+- [ ] **Step 3: Write the failing test for the probe**
 
 `RenderProgressProbeTest.java`:
 
@@ -1127,12 +1127,12 @@ class RenderProgressProbeTest {
 }
 ```
 
-- [ ] **Step 4: Test ausführen und Fehlschlag prüfen**
+- [ ] **Step 4: Run the test and confirm the failure**
 
 Run: `./gradlew :telemetry-addon:test --tests '*RenderProgressProbeTest*'`
-Expected: FAIL, „cannot find symbol: class RenderProgressProbe"
+Expected: FAIL, "cannot find symbol: class RenderProgressProbe"
 
-- [ ] **Step 5: `RenderProgressProbe` implementieren**
+- [ ] **Step 5: Implement `RenderProgressProbe`**
 
 ```java
 package net.onelitefeather.apus.telemetry.probe;
@@ -1202,16 +1202,16 @@ public final class RenderProgressProbe {
 }
 ```
 
-`Throwable` statt `Exception` ist hier Absicht: Ein BlueMap-Upgrade äußert sich typischerweise als `NoSuchMethodError` oder `NoClassDefFoundError`, und genau die dürfen den Render nicht abbrechen.
+`Throwable` instead of `Exception` is deliberate here: a BlueMap upgrade typically manifests as a `NoSuchMethodError` or `NoClassDefFoundError`, and those specifically must not be allowed to abort the render.
 
-- [ ] **Step 6: Test ausführen und Erfolg prüfen**
+- [ ] **Step 6: Run the test and confirm it passes**
 
 Run: `./gradlew :telemetry-addon:test --tests '*RenderProgressProbeTest*'`
-Expected: PASS (6 Tests)
+Expected: PASS (6 tests)
 
-- [ ] **Step 7: `BlueMapRenderManagerAccess` implementieren**
+- [ ] **Step 7: Implement `BlueMapRenderManagerAccess`**
 
-Die erste der beiden Klassen mit BlueMap-Importen — die zweite (`LogTailRenderManagerAccess`) kam in Task 8 hinzu, nachdem sich dieser Weg im CLI-Betrieb als nicht tragfähig erwiesen hatte.
+The first of the two classes with BlueMap imports — the second (`LogTailRenderManagerAccess`) was added in Task 8, after this route turned out not to work in CLI mode.
 
 ```java
 package net.onelitefeather.apus.telemetry.probe;
@@ -1289,19 +1289,19 @@ public final class BlueMapRenderManagerAccess implements RenderManagerAccess {
 }
 ```
 
-- [ ] **Step 8: Kompilierung prüfen**
+- [ ] **Step 8: Verify compilation**
 
 Run: `./gradlew :telemetry-addon:compileJava`
 Expected: BUILD SUCCESSFUL
 
-**Wenn `BmMap.getId()` nicht existiert:** Prüfe die tatsächliche Methode:
+**If `BmMap.getId()` doesn't exist:** check the actual method:
 
 ```bash
 cd /tmp && curl -sL https://repo.bluecolored.de/releases/de/bluecolored/bluemap-core/5.23/bluemap-core-5.23.jar -o core.jar \
   && unzip -p core.jar de/bluecolored/bluemap/core/map/BmMap.class | javap -c - 2>/dev/null | head -40
 ```
 
-Alternativ liefert `javap -classpath core.jar de.bluecolored.bluemap.core.map.BmMap` die vollständige Signaturliste. Passe den Aufruf an und korrigiere diesen Plan.
+Alternatively, `javap -classpath core.jar de.bluecolored.bluemap.core.map.BmMap` gives the full signature list. Adjust the call and correct this plan.
 
 - [ ] **Step 9: Commit**
 
@@ -1313,7 +1313,7 @@ git commit -m "feat(telemetry): read render progress through a single blueMap se
 
 ---
 
-### Task 4: HTTP-Server
+### Task 4: HTTP server
 
 **Files:**
 
@@ -1323,7 +1323,7 @@ git commit -m "feat(telemetry): read render progress through a single blueMap se
 
 **Interfaces:**
 
-- Consumes: `ProgressSnapshot`, `JsonWriter`, `PrometheusWriter` aus Task 2
+- Consumes: `ProgressSnapshot`, `JsonWriter`, `PrometheusWriter` from Task 2
 - Produces:
 
 ```java
@@ -1339,9 +1339,9 @@ public final class TelemetryServer implements AutoCloseable {
 }
 ```
 
-Routen: `GET /progress` (JSON), `GET /metrics` (Prometheus-Text), `GET /healthz` (`"ok"`), alles andere 404.
+Routes: `GET /progress` (JSON), `GET /metrics` (Prometheus text), `GET /healthz` (`"ok"`), everything else 404.
 
-- [ ] **Step 1: Den fehlschlagenden Test für `TelemetryConfig` schreiben**
+- [ ] **Step 1: Write the failing test for `TelemetryConfig`**
 
 In `TelemetryServerTest.java`:
 
@@ -1394,12 +1394,12 @@ class TelemetryServerTest {
 }
 ```
 
-- [ ] **Step 2: Test ausführen und Fehlschlag prüfen**
+- [ ] **Step 2: Run the test and confirm the failure**
 
 Run: `./gradlew :telemetry-addon:test --tests '*TelemetryServerTest*'`
-Expected: FAIL, „cannot find symbol: class TelemetryConfig"
+Expected: FAIL, "cannot find symbol: class TelemetryConfig"
 
-- [ ] **Step 3: `TelemetryConfig` implementieren**
+- [ ] **Step 3: Implement `TelemetryConfig`**
 
 ```java
 package net.onelitefeather.apus.telemetry;
@@ -1443,14 +1443,14 @@ public record TelemetryConfig(String bindAddress, int port, boolean enabled) {
 }
 ```
 
-- [ ] **Step 4: Test ausführen und Erfolg prüfen**
+- [ ] **Step 4: Run the test and confirm it passes**
 
 Run: `./gradlew :telemetry-addon:test --tests '*TelemetryServerTest*'`
-Expected: PASS (3 Tests)
+Expected: PASS (3 tests)
 
-- [ ] **Step 5: Den fehlschlagenden Test für den Server schreiben**
+- [ ] **Step 5: Write the failing test for the server**
 
-An `TelemetryServerTest.java` anhängen:
+Append to `TelemetryServerTest.java`:
 
 ```java
     private static HttpResponse<String> get(int port, String path) throws Exception {
@@ -1518,22 +1518,22 @@ An `TelemetryServerTest.java` anhängen:
     }
 ```
 
-Ergänze oben in der Datei den Import `java.util.function.Supplier`.
+Add the import `java.util.function.Supplier` at the top of the file.
 
-- [ ] **Step 6: Test ausführen und Fehlschlag prüfen**
+- [ ] **Step 6: Run the test and confirm the failure**
 
 Run: `./gradlew :telemetry-addon:test --tests '*TelemetryServerTest*'`
-Expected: FAIL, „cannot find symbol: class TelemetryServer"
+Expected: FAIL, "cannot find symbol: class TelemetryServer"
 
-- [ ] **Step 7: `TelemetryServer` implementieren**
+- [ ] **Step 7: Implement `TelemetryServer`**
 
-**Nachgeführt auf den ausgelieferten Stand:** `HttpServer.createContext` matcht Pfade als
-Präfix, nicht exakt — ein Context für `/progress` würde ohne Weiteres auch
-`/progressX` oder `/progress/nested` bedienen. Das wurde während der Umsetzung entdeckt
-und behoben: Jeder Handler unten ist ausgeliefert in ein `exactPath(...)`-Wrapper gehüllt,
-das bei fehlendem exaktem Match 404 liefert, statt sich auf `createContext`s
-Präfix-Matching zu verlassen. Die Skizze unten zeigt bewusst noch die ursprüngliche,
-naive Fassung ohne `exactPath()` — den tatsächlich ausgelieferten Code siehe
+**Updated to reflect the delivered state:** `HttpServer.createContext` matches paths as a
+prefix, not exactly — a context for `/progress` would happily also serve `/progressX` or
+`/progress/nested`. This was discovered and fixed during implementation: every handler
+below ships wrapped in an `exactPath(...)` wrapper that returns 404 on anything but an
+exact match, instead of relying on `createContext`'s prefix matching. The sketch below
+deliberately still shows the original, naive version without `exactPath()` — for the code
+actually delivered, see
 `telemetry-addon/src/main/java/net/onelitefeather/apus/telemetry/TelemetryServer.java`.
 
 ```java
@@ -1623,12 +1623,12 @@ public final class TelemetryServer implements AutoCloseable {
 }
 ```
 
-- [ ] **Step 8: Test ausführen und Erfolg prüfen**
+- [ ] **Step 8: Run the test and confirm it passes**
 
 Run: `./gradlew :telemetry-addon:test --tests '*TelemetryServerTest*'`
-Expected: PASS (7 Tests)
+Expected: PASS (7 tests)
 
-Beachte: `/healthz` liefert bewusst auch dann 200, wenn die Probe scheitert — der Prozess ist gesund, nur die Messung nicht. Eine k8s-Liveness-Probe darf den Render nicht wegen eines Telemetriefehlers töten.
+Note: `/healthz` deliberately returns 200 even when the probe fails — the process is healthy, just the measurement isn't. A k8s liveness probe must not kill the render over a telemetry failure.
 
 - [ ] **Step 9: Commit**
 
@@ -1640,7 +1640,7 @@ git commit -m "feat(telemetry): serve progress over http as json and prometheus 
 
 ---
 
-### Task 5: Addon-Entrypoint
+### Task 5: Addon entrypoint
 
 **Files:**
 
@@ -1651,11 +1651,11 @@ git commit -m "feat(telemetry): serve progress over http as json and prometheus 
 **Interfaces:**
 
 - Consumes: `TelemetryConfig`, `TelemetryServer` (Task 4), `RenderProgressProbe`, `BlueMapRenderManagerAccess` (Task 3)
-- Produces: Die Klasse `net.onelitefeather.apus.telemetry.ApusTelemetryAddon` als Addon-Entrypoint, referenziert in `bluemap.addon.json`
+- Produces: the class `net.onelitefeather.apus.telemetry.ApusTelemetryAddon` as the addon entrypoint, referenced in `bluemap.addon.json`
 
-- [ ] **Step 1: Den fehlschlagenden Test für das Manifest schreiben**
+- [ ] **Step 1: Write the failing test for the manifest**
 
-Dieser Test fängt den häufigsten Fehler dieser Art von Addon ab: einen Tippfehler im Entrypoint-Pfad, der erst zur Laufzeit im Cluster auffällt.
+This test catches the most common mistake with this kind of addon: a typo in the entrypoint path that only surfaces at runtime in the cluster.
 
 `AddonManifestTest.java`:
 
@@ -1704,12 +1704,12 @@ class AddonManifestTest {
 }
 ```
 
-- [ ] **Step 2: Test ausführen und Fehlschlag prüfen**
+- [ ] **Step 2: Run the test and confirm the failure**
 
 Run: `./gradlew :telemetry-addon:test --tests '*AddonManifestTest*'`
-Expected: FAIL, „bluemap.addon.json must be on the classpath"
+Expected: FAIL, "bluemap.addon.json must be on the classpath"
 
-- [ ] **Step 3: `bluemap.addon.json` schreiben**
+- [ ] **Step 3: Write `bluemap.addon.json`**
 
 `telemetry-addon/src/main/resources/bluemap.addon.json`:
 
@@ -1720,7 +1720,7 @@ Expected: FAIL, „bluemap.addon.json must be on the classpath"
 }
 ```
 
-- [ ] **Step 4: `ApusTelemetryAddon` implementieren**
+- [ ] **Step 4: Implement `ApusTelemetryAddon`**
 
 ```java
 package net.onelitefeather.apus.telemetry;
@@ -1784,24 +1784,24 @@ public final class ApusTelemetryAddon implements Runnable {
 }
 ```
 
-- [ ] **Step 5: Test ausführen und Erfolg prüfen**
+- [ ] **Step 5: Run the test and confirm it passes**
 
 Run: `./gradlew :telemetry-addon:test --tests '*AddonManifestTest*'`
-Expected: PASS (2 Tests)
+Expected: PASS (2 tests)
 
-- [ ] **Step 6: Fat-Jar bauen und Inhalt prüfen**
+- [ ] **Step 6: Build the fat jar and inspect its contents**
 
 ```bash
 ./gradlew :telemetry-addon:shadowJar
 unzip -l telemetry-addon/build/libs/apus-telemetry-addon-999.0.0.jar | head -30
 ```
 
-Expected: `bluemap.addon.json` liegt im Wurzelverzeichnis des Jars, die `net/onelitefeather/apus/telemetry/`-Klassen sind enthalten, und **keine** `de/bluecolored/`-Klassen (die sind `compileOnly`).
+Expected: `bluemap.addon.json` sits at the jar's root, the `net/onelitefeather/apus/telemetry/` classes are present, and **no** `de/bluecolored/` classes (those are `compileOnly`).
 
-- [ ] **Step 7: Vollständigen Testlauf ausführen**
+- [ ] **Step 7: Run the full test suite**
 
 Run: `./gradlew build`
-Expected: BUILD SUCCESSFUL, alle Tests grün
+Expected: BUILD SUCCESSFUL, all tests green
 
 - [ ] **Step 8: Commit**
 
@@ -1813,7 +1813,7 @@ git commit -m "feat(telemetry): add bluemap addon entrypoint and manifest"
 
 ---
 
-### Task 6: Runner-Image
+### Task 6: Runner image
 
 **Files:**
 
@@ -1825,26 +1825,26 @@ git commit -m "feat(telemetry): add bluemap addon entrypoint and manifest"
 
 **Interfaces:**
 
-- Consumes: `apus-telemetry-addon-<version>.jar` aus Task 5
-- Produces: Image `apus/runner:dev` mit folgendem Vertrag über Umgebungsvariablen:
+- Consumes: `apus-telemetry-addon-<version>.jar` from Task 5
+- Produces: image `apus/runner:dev` with the following contract via environment variables:
 
-| Variable | Pflicht | Bedeutung |
+| Variable | Required | Meaning |
 | --- | --- | --- |
-| `APUS_MAP_ID` | ja | Map-Id, z.B. `overworld` |
-| `APUS_DIMENSION` | ja | `minecraft:overworld`, `minecraft:the_nether`, `minecraft:the_end` |
-| `APUS_MC_VERSION` | ja | z.B. `1.21.10` |
-| `APUS_WORLD_S3_URL` | ja | Quelle der Welt, z.B. `s3://bundles/worlds/t/survival/v1/overworld` |
-| `APUS_MAP_BUCKET` | ja | Ziel-Bucket für die gerenderte Map |
-| `APUS_MAP_PREFIX` | nein | Präfix im Ziel-Bucket, Default `.` |
-| `APUS_S3_ENDPOINT` | ja | z.B. `http://minio:9000` |
-| `APUS_S3_ACCESS_KEY` | ja | Zugangsschlüssel |
-| `APUS_S3_SECRET_KEY` | ja | Geheimer Schlüssel |
-| `APUS_S3_REGION` | nein | Default `us-east-1` |
-| `APUS_RENDER_THREADS` | nein | Default `2` |
-| `APUS_FORCE_RENDER` | nein | `true` fügt `-f` hinzu |
-| `APUS_TELEMETRY_PORT` | nein | Default `8099` |
+| `APUS_MAP_ID` | yes | Map id, e.g. `overworld` |
+| `APUS_DIMENSION` | yes | `minecraft:overworld`, `minecraft:the_nether`, `minecraft:the_end` |
+| `APUS_MC_VERSION` | yes | e.g. `1.21.10` |
+| `APUS_WORLD_S3_URL` | yes | Source of the world, e.g. `s3://bundles/worlds/t/survival/v1/overworld` |
+| `APUS_MAP_BUCKET` | yes | Target bucket for the rendered map |
+| `APUS_MAP_PREFIX` | no | Prefix within the target bucket, default `.` |
+| `APUS_S3_ENDPOINT` | yes | e.g. `http://minio:9000` |
+| `APUS_S3_ACCESS_KEY` | yes | Access key |
+| `APUS_S3_SECRET_KEY` | yes | Secret key |
+| `APUS_S3_REGION` | no | Default `us-east-1` |
+| `APUS_RENDER_THREADS` | no | Default `2` |
+| `APUS_FORCE_RENDER` | no | `true` adds `-f` |
+| `APUS_TELEMETRY_PORT` | no | Default `8099` |
 
-- [ ] **Step 1: `runner/Dockerfile` schreiben**
+- [ ] **Step 1: Write `runner/Dockerfile`**
 
 ```dockerfile
 # syntax=docker/dockerfile:1
@@ -1905,7 +1905,7 @@ EXPOSE 8099
 ENTRYPOINT ["/opt/apus/entrypoint.sh"]
 ```
 
-- [ ] **Step 2: `runner/bin/render-config.sh` schreiben**
+- [ ] **Step 2: Write `runner/bin/render-config.sh`**
 
 ```bash
 #!/usr/bin/env bash
@@ -1950,7 +1950,7 @@ EOF
 echo "[apus] wrote BlueMap config to ${CONFIG_DIR}"
 ```
 
-- [ ] **Step 3: `runner/bin/bundle-sync.sh` schreiben**
+- [ ] **Step 3: Write `runner/bin/bundle-sync.sh`**
 
 ```bash
 #!/usr/bin/env bash
@@ -1978,20 +1978,19 @@ REGION_COUNT=$(find "${TARGET}/region" -name '*.mca' | wc -l)
 echo "[apus] synced ${REGION_COUNT} region files"
 ```
 
-- [ ] **Step 4: `runner/entrypoint.sh` schreiben**
+- [ ] **Step 4: Write `runner/entrypoint.sh`**
 
-**Nachgeführt auf den ausgelieferten Stand (Task 6/8):** `APUS_MC_VERSION` ist Pflicht,
-nicht optional — konsistent mit der Vertragstabelle oben, die es schon immer als `ja`
-führte. Der ursprünglich hier skizzierte `if [ -n ... ]`-Fallback ließ das BlueMap-CLI
-ohne `-v` starten, was BlueMap zwingt, die Minecraft-Version selbst zu raten; das wird
-nirgends unterstützt und wurde vor der Auslieferung korrigiert.
+**Updated to reflect the delivered state (Task 6/8):** `APUS_MC_VERSION` is required, not
+optional — consistent with the contract table above, which always listed it as `yes`. The
+`if [ -n ... ]` fallback originally sketched here let the BlueMap CLI start without `-v`,
+forcing BlueMap to guess the Minecraft version itself; that is unsupported anywhere and was
+corrected before delivery.
 
-**Nachgeführt auf den ausgelieferten Stand:** Die Pflichtprüfung der Umgebungsvariablen
-läuft im ausgelieferten Skript über eine kleine `require_env`-Hilfsfunktion, die jeden
-Variablennamen nur einmal nennt, statt ihn wie ursprünglich hier skizziert pro Zeile zu
-wiederholen — die alte, wiederholende Schreibweise wurde von einem Secret-Scanner als
-möglicher hochentropischer Wert fehlinterpretiert. Der Codeblock unten zeigt die
-ausgelieferte Fassung.
+**Updated to reflect the delivered state:** in the delivered script, the required-variable
+check runs through a small `require_env` helper function that names each variable only
+once, instead of repeating it line by line as originally sketched here — the old,
+repetitive style was misinterpreted by a secret scanner as a possible high-entropy value.
+The code block below shows the delivered version.
 
 ```bash
 #!/usr/bin/env bash
@@ -2031,14 +2030,14 @@ echo "[apus] starting BlueMap: ${ARGS[*]}"
 exec java -jar /opt/bluemap/cli.jar "${ARGS[@]}"
 ```
 
-`exec` ist wichtig: BlueMap wird damit PID 1 und empfängt `SIGTERM` direkt, wenn Kubernetes den Pod beendet.
+`exec` matters here: it makes BlueMap PID 1, so it receives `SIGTERM` directly when Kubernetes terminates the pod.
 
-- [ ] **Step 5: `runner/README.md` schreiben**
+- [ ] **Step 5: Write `runner/README.md`**
 
-**Nachgeführt auf den ausgelieferten Stand:** `releases/latest/download/BlueMapS3Storage.jar`
-liefert 404 — das Release-Asset ist versioniert (z.B. `BlueMapS3Storage-1.5.1.jar`). Die
-untenstehende URL ist daher bereits auf die versionierte Form korrigiert; die
-authoritative, jeweils aktuelle Fassung steht in `runner/README.md` selbst.
+**Updated to reflect the delivered state:** `releases/latest/download/BlueMapS3Storage.jar`
+returns 404 — the release asset is versioned (e.g. `BlueMapS3Storage-1.5.1.jar`). The URL
+below has therefore already been corrected to the versioned form; the authoritative,
+always-current version lives in `runner/README.md` itself.
 
 ````markdown
 # Apus Runner Image
@@ -2082,7 +2081,7 @@ Inherited from the BlueMap CLI: `0` success, `1` configuration or IO error,
 world contains no `region/` directory.
 ````
 
-- [ ] **Step 6: Image bauen**
+- [ ] **Step 6: Build the image**
 
 ```bash
 cd /mnt/projects/oss/onelitefeather/Apus
@@ -2093,31 +2092,31 @@ curl -fsSL -o runner/vendor/BlueMapS3Storage.jar \
 docker build -f runner/Dockerfile -t apus/runner:dev .
 ```
 
-Expected: Image baut durch.
+Expected: image builds successfully.
 
-**Falls der Download der `BlueMapS3Storage.jar` fehlschlägt:** Der Release-Asset-Name kann abweichen. Prüfe mit `gh release view --repo TheMeinerLP/BlueMapS3Storage --json assets` und passe die URL sowie `runner/README.md` an. Alternativ lokal bauen: `(cd ../BlueMapS3Storage && ./gradlew shadowJar)` und das Jar aus `build/libs/` kopieren.
+**If downloading `BlueMapS3Storage.jar` fails:** the release asset name may differ. Check with `gh release view --repo TheMeinerLP/BlueMapS3Storage --json assets` and adjust the URL and `runner/README.md` accordingly. Alternatively, build locally: `(cd ../BlueMapS3Storage && ./gradlew shadowJar)` and copy the jar from `build/libs/`.
 
-- [ ] **Step 7: Smoke-Test des Images**
+- [ ] **Step 7: Smoke-test the image**
 
 ```bash
 docker run --rm --entrypoint java apus/runner:dev -jar /opt/bluemap/cli.jar -V
 ```
 
-Expected: Ausgabe der BlueMap-Version, Exit-Code 0.
+Expected: prints the BlueMap version, exit code 0.
 
 ```bash
 docker run --rm --entrypoint sh apus/runner:dev -c 'ls -la /work/config/packs && id'
 ```
 
-Expected: Beide Addon-Jars liegen in `packs/`, und der Prozess läuft als `uid=10001(apus)`.
+Expected: both addon jars are in `packs/`, and the process runs as `uid=10001(apus)`.
 
-- [ ] **Step 8: Prüfen, dass fehlende Pflichtvariablen sauber scheitern**
+- [ ] **Step 8: Verify that missing required variables fail cleanly**
 
 ```bash
 docker run --rm apus/runner:dev; echo "exit=$?"
 ```
 
-Expected: Fehlermeldung `APUS_MAP_ID is required`, Exit-Code ungleich 0.
+Expected: error message `APUS_MAP_ID is required`, exit code non-zero.
 
 - [ ] **Step 9: Commit**
 
@@ -2126,40 +2125,40 @@ git add -A
 git commit -m "feat(runner): add container image running bluemap cli with apus addons"
 ```
 
-`runner/vendor/` ist bereits in `.gitignore` (Task 1) — das heruntergeladene Fremd-Jar gehört nicht ins Repository.
+`runner/vendor/` is already in `.gitignore` (Task 1) — the downloaded third-party jar does not belong in the repository.
 
 ---
 
-### Task 7: Integrationstest gegen MinIO
+### Task 7: Integration test against MinIO
 
 **Files:**
 
 - Create: `testdata/README.md`
-- Create: `testdata/mini-world/` (Fixture)
+- Create: `testdata/mini-world/` (fixture)
 - Create: `runner/build.gradle.kts`
 - Create: `runner/src/test/java/net/onelitefeather/apus/runner/RenderEndToEndTest.java`
-- Modify: `settings.gradle.kts` (Modul `runner` ergänzen)
+- Modify: `settings.gradle.kts` (add the `runner` module)
 
 **Interfaces:**
 
-- Consumes: Image `apus/runner:dev` aus Task 6, der Umgebungsvariablen-Vertrag aus Task 6
-- Produces: Bestätigung, dass `storage-type: "themeinerlp:s3"` und die kebab-case-Schlüssel korrekt sind; korrigiert bei Abweichung Task 6 **und** die Spec
+- Consumes: image `apus/runner:dev` from Task 6, the environment variable contract from Task 6
+- Produces: confirmation that `storage-type: "themeinerlp:s3"` and the kebab-case keys are correct; corrects Task 6 **and** the spec if they differ
 
-- [ ] **Step 1: Mini-Welt-Fixture erzeugen**
+- [ ] **Step 1: Create the mini-world fixture**
 
-Aus der vorhandenen Demo-Welt eine kleine, deterministische Fixture schneiden. **Nur `region/` und `level.dat`** — `playerdata/`, `stats/` und `advancements/` enthalten personenbezogene Daten und gehören nicht ins Repository.
+Cut a small, deterministic fixture from the existing demo world. **Only `region/` and `level.dat`** — `playerdata/`, `stats/`, and `advancements/` contain personal data and must not go into the repository.
 
 ```bash
 cd /mnt/projects/oss/onelitefeather/Apus
 SRC=../falco-demo-world-backup-1.21.10
 mkdir -p testdata/mini-world/region
 
-# Zwei benachbarte Regionen ergeben eine zusammenhängende Fläche
+# Two adjacent regions produce one contiguous area
 for f in r.0.0.mca r.0.1.mca; do
   if [ -f "$SRC/region/$f" ]; then cp "$SRC/region/$f" testdata/mini-world/region/; fi
 done
 
-# Falls diese Koordinaten nicht existieren, die zwei kleinsten Dateien nehmen:
+# If these coordinates don't exist, take the two smallest files instead:
 if [ -z "$(ls -A testdata/mini-world/region)" ]; then
   find "$SRC/region" -name '*.mca' -printf '%s %p\n' | sort -n | head -2 | cut -d' ' -f2- \
     | xargs -I{} cp {} testdata/mini-world/region/
@@ -2170,9 +2169,9 @@ du -sh testdata/mini-world
 ls -la testdata/mini-world/region
 ```
 
-Expected: Verzeichnis unter etwa 20 MB. Ist es größer, eine einzelne Region behalten.
+Expected: directory under roughly 20 MB. If it's bigger, keep only a single region.
 
-- [ ] **Step 2: `testdata/README.md` schreiben**
+- [ ] **Step 2: Write `testdata/README.md`**
 
 ```markdown
 # Test fixtures
@@ -2192,15 +2191,15 @@ Regenerate with the snippet in
 `docs/superpowers/plans/2026-08-08-phase-1-render-kern.md`, Task 7, Step 1.
 ```
 
-- [ ] **Step 3: Modul `runner` registrieren**
+- [ ] **Step 3: Register the `runner` module**
 
-In `settings.gradle.kts` die Include-Zeile ersetzen:
+In `settings.gradle.kts`, replace the include line:
 
 ```kotlin
 include("telemetry-addon", "runner")
 ```
 
-- [ ] **Step 4: `runner/build.gradle.kts` schreiben**
+- [ ] **Step 4: Write `runner/build.gradle.kts`**
 
 ```kotlin
 dependencies {
@@ -2222,7 +2221,7 @@ tasks.test {
 }
 ```
 
-- [ ] **Step 5: Den fehlschlagenden End-to-End-Test schreiben**
+- [ ] **Step 5: Write the failing end-to-end test**
 
 `runner/src/test/java/net/onelitefeather/apus/runner/RenderEndToEndTest.java`:
 
@@ -2340,9 +2339,9 @@ class RenderEndToEndTest {
 }
 ```
 
-Ergänze in `runner/build.gradle.kts` bei den Testabhängigkeiten `testImplementation("org.slf4j:slf4j-simple:2.0.16")`, damit `Slf4jLogConsumer` Ausgaben zeigt.
+Add `testImplementation("org.slf4j:slf4j-simple:2.0.16")` to the test dependencies in `runner/build.gradle.kts`, so `Slf4jLogConsumer` actually shows output.
 
-- [ ] **Step 6: Test ausführen und Fehlschlag erwarten**
+- [ ] **Step 6: Run the test and expect a failure**
 
 ```bash
 ./gradlew :telemetry-addon:shadowJar
@@ -2350,24 +2349,24 @@ docker build -f runner/Dockerfile -t apus/runner:dev .
 ./gradlew :runner:test
 ```
 
-Expected: FAIL — höchstwahrscheinlich, weil `storage-type` oder die Schlüsselnamen in `storages/s3.conf` nicht stimmen. Genau dafür ist dieser Test da.
+Expected: FAIL — most likely because `storage-type` or the field names in `storages/s3.conf` are wrong. This is exactly what this test is for.
 
-- [ ] **Step 7: `s3.conf`-Format anhand der Fehlermeldung korrigieren**
+- [ ] **Step 7: Fix the `s3.conf` format based on the error message**
 
-Die BlueMap-Fehlermeldung nennt den unbekannten Storage-Typ oder das unbekannte Feld. Prüfe gegen die Quelle:
+The BlueMap error message names the unknown storage type or the unknown field. Check it against the source:
 
 ```bash
 grep -n "Key(" ../BlueMapS3Storage/src/main/java/dev/themeinerlp/bluemap/s3/S3StorageAddon.java
 grep -rn "NamingScheme\|NAMING" ../BlueMapS3Storage/src/main/java/ || true
 ```
 
-Der Registry-Key ist `new Key("themeinerlp", "s3")`, was `themeinerlp:s3` ergibt. Sollte BlueMap das Format anders erwarten, zeigt die Fehlermeldung die zulässigen Werte an.
+The registry key is `new Key("themeinerlp", "s3")`, which yields `themeinerlp:s3`. If BlueMap expects a different format, the error message shows the allowed values.
 
-Bei Feldnamen: Configurate bildet standardmäßig camelCase auf kebab-case ab (`renderThreadCount` → `render-thread-count`). Falls die Felder unbekannt bleiben, teste die camelCase-Variante (`bucketName` statt `bucket-name`).
+For field names: Configurate maps camelCase to kebab-case by default (`renderThreadCount` → `render-thread-count`). If the fields remain unknown, try the camelCase variant (`bucketName` instead of `bucket-name`).
 
-Passe `runner/bin/render-config.sh` an, baue das Image neu und wiederhole.
+Adjust `runner/bin/render-config.sh`, rebuild the image, and repeat.
 
-- [ ] **Step 8: Test ausführen und Erfolg prüfen**
+- [ ] **Step 8: Run the test and confirm it passes**
 
 ```bash
 docker build -f runner/Dockerfile -t apus/runner:dev .
@@ -2376,9 +2375,9 @@ docker build -f runner/Dockerfile -t apus/runner:dev .
 
 Expected: PASS
 
-- [ ] **Step 9: Die Spec korrigieren, falls das Format abwich**
+- [ ] **Step 9: Correct the spec if the format differed**
 
-Wenn Step 7 Änderungen erforderte, den Abschnitt „Konfigurationsformate" in diesem Plan **und** §9.2 der Spec `docs/superpowers/specs/2026-08-08-apus-design.md` auf die verifizierten Werte aktualisieren. Der Operator generiert in Phase 2 genau diese Datei — eine falsche Annahme würde sich dort fortpflanzen.
+If Step 7 required changes, update the "Configuration formats" section of this plan **and** §9.2 of the spec `docs/superpowers/specs/2026-08-08-apus-design.md` to the verified values. The operator generates exactly this file in Phase 2 — a wrong assumption there would propagate.
 
 - [ ] **Step 10: Commit**
 
@@ -2389,7 +2388,7 @@ git commit -m "test(runner): verify end-to-end render from s3 to s3 against mini
 
 ---
 
-### Task 8: Telemetrie im echten Render nachweisen
+### Task 8: Prove telemetry works in a real render
 
 **Files:**
 
@@ -2398,10 +2397,10 @@ git commit -m "test(runner): verify end-to-end render from s3 to s3 against mini
 
 **Interfaces:**
 
-- Consumes: alles aus Task 7
-- Produces: Der Nachweis, dass `/progress` während eines echten Renders belastbare Werte liefert — der Contract-Test, der ein BlueMap-Upgrade auffliegen lässt
+- Consumes: everything from Task 7
+- Produces: proof that `/progress` delivers reliable values during a real render — the contract test that exposes a BlueMap upgrade
 
-- [ ] **Step 1: Den fehlschlagenden Contract-Test schreiben**
+- [ ] **Step 1: Write the failing contract test**
 
 `TelemetryContractTest.java`:
 
@@ -2518,19 +2517,19 @@ class TelemetryContractTest {
 }
 ```
 
-- [ ] **Step 2: Test ausführen**
+- [ ] **Step 2: Run the test**
 
 ```bash
 ./gradlew :runner:test --tests '*TelemetryContractTest*'
 ```
 
-Expected beim ersten Lauf: möglicherweise FAIL mit `degraded:true`. Das ist die wertvollste Rückmeldung des gesamten Plans — sie bedeutet, dass der Zugriffspfad über `BlueMapAPIImpl.plugin()` im CLI-Kontext nicht greift.
+Expected on the first run: possibly FAIL with `degraded:true`. That is the single most valuable piece of feedback in this whole plan — it means the access path via `BlueMapAPIImpl.plugin()` doesn't work in the CLI context.
 
-- [ ] **Step 3: Bei `degraded:true` den Zugriffspfad diagnostizieren**
+- [ ] **Step 3: If `degraded:true`, diagnose the access path**
 
-Der wahrscheinlichste Grund: Im CLI-Betrieb gibt es keine `Plugin`-Instanz (die existiert primär im Server-Plugin-Betrieb), sodass `impl.plugin()` `null` liefert.
+Most likely reason: in CLI mode there is no `Plugin` instance (it exists primarily in server-plugin mode), so `impl.plugin()` returns `null`.
 
-Diagnose:
+Diagnosis:
 
 ```bash
 docker run --rm --entrypoint sh apus/runner:dev -c \
@@ -2538,7 +2537,7 @@ docker run --rm --entrypoint sh apus/runner:dev -c \
    && javap -p de/bluecolored/bluemap/common/api/BlueMapAPIImpl.class | head -40'
 ```
 
-Zeigt die tatsächlich verfügbaren Felder und Methoden. Prüfe zusätzlich, wie der CLI die API bereitstellt:
+Shows the actually available fields and methods. Also check how the CLI provides the API:
 
 ```bash
 docker run --rm --entrypoint sh apus/runner:dev -c \
@@ -2546,26 +2545,25 @@ docker run --rm --entrypoint sh apus/runner:dev -c \
    && javap -p -c de/bluecolored/bluemap/cli/BlueMapCLI.class | grep -i "renderManager\|BlueMapAPIImpl" | head -20'
 ```
 
-Ergibt sich daraus ein anderer Weg (etwa ein zugänglicher `BlueMapService` oder ein anderer Konstruktor von `BlueMapAPIImpl`), **ausschließlich `BlueMapRenderManagerAccess` anpassen**. Alle anderen Klassen und sämtliche Unit-Tests bleiben unverändert — genau dafür wurde die Schnittstelle eingezogen.
+If this reveals a different route (say, an accessible `BlueMapService` or a different `BlueMapAPIImpl` constructor), **adjust only `BlueMapRenderManagerAccess`**. All other classes and every unit test stay unchanged — that is exactly what the interface was introduced for.
 
-Führt kein Weg über die API zum internen RenderManager, ist Reflection auf das private Feld `renderManager` in `RenderManagerImpl` der dokumentierte Rückfallweg (Feldname aus der Recherche in den Global Constraints). Auch das gehört ausschließlich in `BlueMapRenderManagerAccess`.
+If no route via the API reaches the internal RenderManager, reflection on the private field `renderManager` in `RenderManagerImpl` is the documented fallback (field name from the research in the Global Constraints). That, too, belongs exclusively in `BlueMapRenderManagerAccess`.
 
-**Nachgeführt auf den ausgelieferten Stand:** Der oben skizzierte Reflection-Rückfallweg
-wurde **nicht** umgesetzt. Die Diagnose in Step 3 bestätigte, dass `impl.plugin()` im
-CLI-Betrieb strukturell immer `null` liefert und BlueMap dafür auch keine
-`RenderManagerImpl`-Instanz baut — es gibt in diesem Modus kein Feld, auf das Reflection
-zugreifen könnte; der Rückfallweg liefe ins Leere. Stattdessen wurde
-`LogTailRenderManagerAccess` eingeführt: Es registriert sich auf BlueMaps eigenem
-`Logger.global` und parst die Fortschrittszeile, die die CLI ohnehin selbst loggt — ein
-dokumentierter Erweiterungspunkt, keine Reflection. Damit besteht der BlueMap-Zugriff
-entgegen der ursprünglichen Annahme aus **zwei** Implementierungen derselben
-`RenderManagerAccess`-Schnittstelle (`BlueMapRenderManagerAccess` für den — im CLI-Betrieb
-toten — API-Weg, `LogTailRenderManagerAccess` für den tatsächlich tragenden Weg), zwischen
-denen `ApusTelemetryAddon` wählt. Details, der vollständige Dekompilierungsbefund und die
-verworfene `java.util.Timer`-Reflection-Alternative stehen in `runner/README.md#telemetry`
-und Spec §7.2.
+**Updated to reflect the delivered state:** the reflection fallback sketched above was
+**not** implemented. The diagnosis in Step 3 confirmed that `impl.plugin()` structurally
+always returns `null` in CLI mode, and that BlueMap doesn't even build a `RenderManagerImpl`
+instance for it — in this mode there is no field for reflection to reach; the fallback
+would have hit a dead end. Instead, `LogTailRenderManagerAccess` was introduced: it
+registers itself on BlueMap's own `Logger.global` and parses the progress line that the CLI
+logs anyway — a documented extension point, not reflection. As a result, contrary to the
+original assumption, BlueMap access consists of **two** implementations of the same
+`RenderManagerAccess` interface (`BlueMapRenderManagerAccess` for the API route — dead in
+CLI mode — and `LogTailRenderManagerAccess` for the route that actually works), between
+which `ApusTelemetryAddon` chooses. Details, the full decompilation findings, and the
+discarded `java.util.Timer` reflection alternative are documented in
+`runner/README.md#telemetry` and spec §7.2.
 
-- [ ] **Step 4: Korrektur umsetzen, bis der Test besteht**
+- [ ] **Step 4: Implement the fix until the test passes**
 
 ```bash
 ./gradlew :telemetry-addon:shadowJar
@@ -2575,18 +2573,18 @@ docker build -f runner/Dockerfile -t apus/runner:dev .
 
 Expected: PASS
 
-- [ ] **Step 5: Erkenntnisse dokumentieren**
+- [ ] **Step 5: Document the findings**
 
-Ergänze `runner/README.md` um einen Abschnitt „Telemetry" mit dem tatsächlich funktionierenden Zugriffsweg und dem Hinweis, dass `TelemetryContractTest` bei jedem BlueMap-Upgrade laufen muss. Aktualisiere §7.2 der Spec, falls der Weg vom dort beschriebenen abweicht.
+Add a "Telemetry" section to `runner/README.md` with the access route that actually works, noting that `TelemetryContractTest` must run on every BlueMap upgrade. Update spec §7.2 if the route differs from what's described there.
 
-- [ ] **Step 6: Gesamtlauf**
+- [ ] **Step 6: Full run**
 
 ```bash
 ./gradlew build
 ./gradlew :runner:test
 ```
 
-Expected: Alles grün.
+Expected: everything green.
 
 - [ ] **Step 7: Commit**
 
@@ -2598,15 +2596,15 @@ git commit -m "test(runner): add telemetry contract test against a real bluemap 
 
 ---
 
-## Abschluss Phase 1
+## Phase 1 completion
 
-Nach Task 8 ist erreicht:
+After Task 8, the following has been achieved:
 
-- Ein Container-Image rendert eine Welt aus S3 nach S3, ohne Kubernetes.
-- Der Fortschritt ist während des Laufs als JSON und als Prometheus-Metriken abrufbar.
-- Der gesamte BlueMap-Zugriff liegt hinter der `RenderManagerAccess`-Schnittstelle, umgesetzt in zwei Klassen (`BlueMapRenderManagerAccess` für den API-Weg, `LogTailRenderManagerAccess` für den im CLI-Betrieb tatsächlich tragenden Log-Tail-Weg) — abgesichert durch einen Contract-Test, der den Log-Tail-Weg abdeckt.
-- Serialisierung, Fehlerbehandlung und Konfiguration sind ohne laufende BlueMap-Instanz getestet.
+- A container image renders a world from S3 to S3, without Kubernetes.
+- Progress is available during the run as JSON and as Prometheus metrics.
+- All BlueMap access sits behind the `RenderManagerAccess` interface, implemented by two classes (`BlueMapRenderManagerAccess` for the API route, `LogTailRenderManagerAccess` for the log-tail route that actually works in CLI mode) — backed by a contract test that covers the log-tail route.
+- Serialization, error handling, and configuration are tested without a running BlueMap instance.
 
-**Nicht Teil von Phase 1** (folgt in eigenen Plänen): Operator und CRDs, Ingest/ETL, Hosting, Asset-Cache für die Minecraft-Client-JAR, Region-Sharding.
+**Not part of Phase 1** (follows in separate plans): operator and CRDs, ingest/ETL, hosting, asset cache for the Minecraft client JAR, region sharding.
 
-**Übergabepunkte an Phase 2:** Der Umgebungsvariablen-Vertrag aus Task 6 ist die Schnittstelle, die der Operator bedienen wird. Das in Task 7 verifizierte `s3.conf`-Format ist die Vorlage für die Konfigurationsgenerierung des Operators.
+**Handoff points to Phase 2:** the environment variable contract from Task 6 is the interface the operator will drive. The `s3.conf` format verified in Task 7 is the template for the operator's configuration generation.
