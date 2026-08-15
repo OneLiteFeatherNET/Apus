@@ -394,8 +394,18 @@ editor.
 `isPlatformAdmin()` still decides what the console renders, and it still enforces nothing: the
 API re-checks every request and answers 403 regardless. What changes is the failure mode. A
 non-admin who reaches the console URL now gets a deliberate, explanatory page rather than a
-dashboard that 403s on every call — and, more importantly, the app no longer renders a nav link
-into an area most of its users cannot enter.
+dashboard that 403s on every call — and, more importantly, the app's main navigation no longer
+carries a link into an area most of its users cannot enter. Admins are not left guessing at a
+URL either: the app's account menu shows a single "Platform console" entry, gated on
+`isPlatformAdmin()` exactly as today's nav link is, pointing at `/console`. It leaves the SPA,
+so it is a plain link and not a router navigation.
+
+**The OIDC redirect URI must follow the base path.** `useAuth()` builds
+`redirect_uri` from `window.location.origin + '/auth/callback'` today. Under
+`app.baseURL: '/console/'` that address belongs to the *app*, so an admin signing in to the
+console would be returned to the tenant application. The construction moves into a pure helper
+in `layers/core` that takes the origin and the configured base path, is unit-tested for both
+apps' values, and is what `useAuth()` calls.
 
 ---
 
