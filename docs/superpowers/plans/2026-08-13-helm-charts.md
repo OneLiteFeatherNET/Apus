@@ -1008,7 +1008,7 @@ git commit -m "ci: lint, render and schema-check the Helm charts on pull request
 
 **Files:**
 
-- Modify: `docs/superpowers/plans/2026-08-12-phase-8-deployment-und-observability.md`
+- Modify: `docs/superpowers/plans/2026-08-12-phase-8-deployment-and-observability.md`
 - Modify: `docs/superpowers/specs/2026-08-08-apus-design.md`
 
 - [ ] **Step 1: Adjust the phase 8 plan**
@@ -1029,7 +1029,7 @@ A paragraph stating that Apus is rolled out via two Helm charts, with a referenc
 
 - [ ] **Step 3: Markdown lint**
 
-Run: `npx markdownlint-cli2 docs/superpowers/plans/2026-08-12-phase-8-deployment-und-observability.md docs/superpowers/specs/2026-08-08-apus-design.md`
+Run: `npx markdownlint-cli2 docs/superpowers/plans/2026-08-12-phase-8-deployment-and-observability.md docs/superpowers/specs/2026-08-08-apus-design.md`
 Expected: 0 issues.
 
 - [ ] **Step 4: Commit**

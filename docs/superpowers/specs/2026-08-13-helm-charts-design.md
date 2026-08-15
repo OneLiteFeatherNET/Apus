@@ -285,7 +285,7 @@ that is the reason CRDs live as templates instead of in the `crds/` directory.
 
 ## 9. Impact on the phase 8 plan
 
-`docs/superpowers/plans/2026-08-12-phase-8-deployment-und-observability.md` will be adjusted:
+`docs/superpowers/plans/2026-08-12-phase-8-deployment-and-observability.md` will be adjusted:
 
 - **Task 1 (check in CRDs)** stays unchanged — the charts consume `deploy/crds/`.
 - **Tasks 2 and 3** (Kustomize base for operator, API, and UI) are replaced by the two
