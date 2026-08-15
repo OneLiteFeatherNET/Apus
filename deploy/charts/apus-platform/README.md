@@ -9,10 +9,17 @@ This chart installs:
   (`ClusterRole`/`ClusterRoleBinding`) needed to read and write the Apus custom resources
   (`Tenant`, `WorldSource`, `WorldIngest`, `BlueMapMap`, `BlueMapRender`, `BlueMapHosting`)
   and to tail render-job Pod logs as a Loki-less fallback.
-- The UI `Deployment` and `Service` — the SPA served out of a distroless image by Nuxt's own
-  Nitro server. Configure an installation with `ui.env`; see `ui/README.md`, "Serving the
-  built SPA".
-- Optionally, a single `Ingress` that routes `/api` to the API and `/` to the UI.
+- The UI `Deployment` and `Service` — the tenant application, an SPA served out of a distroless
+  image by Nuxt's own Nitro server. Configure an installation with `ui.env`; see
+  `ui/README.md`, "Serving the built SPA".
+- The console `Deployment` and `Service` (`console.enabled`, default `true`) — the management
+  console, a *second* SPA image serving the platform-admin area under `/console` on the same
+  host. Same origin on purpose: the API configures no CORS, so a console on its own hostname
+  could not call it. It shares the UI's OIDC client, which means two extra redirect URIs at the
+  broker — the install notes print them, and `ui/README.md` explains why.
+- Optionally, a single `Ingress` routing `/api` to the API, `/console` to the console and `/` to
+  the UI — **in that order**. Controllers evaluate a host's paths as listed, so the catch-all
+  must come last or it swallows the other two.
 - Optionally, a Prometheus Operator `ServiceMonitor` for the API.
 
 It assumes an installed `apus-operator`: the CRDs the API reads must already exist. See
@@ -101,6 +108,21 @@ listed here.
 | `ui.nodeSelector` | object | `{}` | Node selector for the UI pod. |
 | `ui.tolerations` | list | `[]` | Tolerations for the UI pod. |
 | `ui.affinity` | object | `{}` | Affinity rules for the UI pod. |
+| `console.enabled` | bool | `true` | Deploy the management console. `false` removes its Deployment, Service and ingress rule together — the platform then ships without a management UI. |
+| `console.image.repository` | string | `"harbor.onelitefeather.dev/apus/console"` | Console container image repository. A different image from `ui`: `apus/ui` is the tenant application only. |
+| `console.image.tag` | string | `""` | Image tag. Empty on purpose, same reasoning as `api.image.tag`. |
+| `console.image.pullPolicy` | string | `"IfNotPresent"` | Image pull policy. |
+| `console.replicaCount` | int | `1` | Number of console replicas. One by default: the audience is a handful of platform admins, and a restart costs them a page reload. |
+| `console.podSecurityContext` | object | `{"runAsNonRoot": true, "runAsUser": 65532, "seccompProfile": {"type": "RuntimeDefault"}}` | Pod-level security context for the console. Same distroless uid as the UI. |
+| `console.securityContext` | object | `{"allowPrivilegeEscalation": false, "readOnlyRootFilesystem": true, "capabilities": {"drop": ["ALL"]}}` | Container-level security context for the console. |
+| `console.resources` | object | `{"requests": {"cpu": "50m", "memory": "128Mi"}, "limits": {"memory": "256Mi"}}` | Resource requests/limits for the console container. The same floor as the UI despite far less traffic — it is the same Nitro shell-per-request process. |
+| `console.env` | object | `{}` | Environment for the console container, passed through verbatim. It needs the same three `NUXT_PUBLIC_*` values as `ui.env`, including the same client ID. |
+| `console.envFrom` | list | `[]` | `configMapRef`/`secretRef` entries for the console container, passed through verbatim. |
+| `console.podAnnotations` | object | `{}` | Extra annotations added to the console pod. |
+| `console.podLabels` | object | `{}` | Extra labels added to the console pod. |
+| `console.nodeSelector` | object | `{}` | Node selector for the console pod. |
+| `console.tolerations` | list | `[]` | Tolerations for the console pod. |
+| `console.affinity` | object | `{}` | Affinity rules for the console pod. |
 | `ingress.enabled` | bool | `false` | Creates a single `Ingress` routing `/api` to the API and `/` to the UI. |
 | `ingress.className` | string | `"nginx"` | `ingressClassName` on the `Ingress`. |
 | `ingress.annotations` | object | `{}` | Extra annotations added to the `Ingress`. |

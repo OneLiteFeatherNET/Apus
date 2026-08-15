@@ -18,7 +18,7 @@ The full design is in
 | `hosting` | Long-lived BlueMap web server, reads rendered maps from S3 | Container image |
 | `operator` | Kubernetes operator, six CRDs, creates Jobs/Deployments/Ingresses/Buckets | Container image |
 | `api` | Micronaut REST/SSE over the custom resources, enforcement point for auth | Container image |
-| `ui` | Nuxt 4 dashboard for tenants and platform operators | Container image |
+| `ui` | Nuxt 4 workspace: the tenant application (`apus/ui`) and the management console (`apus/console`) | Container images |
 | `paper-worldpush` | Paper plugin, pushes worlds from the running server to Apus | Maven |
 
 ## Building
