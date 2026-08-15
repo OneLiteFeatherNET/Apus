@@ -2,7 +2,7 @@
 // Edits an existing tenant's storage quota and allowed hosting domains -- `PATCH
 // /api/tenants/{name}` (api/src/main/java/net/onelitefeather/apus/api/rest/tenant/
 // TenantController.java#update), platform-admin only, closing the gap design spec §10.3's role
-// table already promised ("Tenants anlegen/ändern/löschen, Quotas") but the api module did not
+// table already promised ("create/modify/delete tenants, quotas") but the api module did not
 // yet implement when the platform dashboard first shipped. `displayName` is deliberately not
 // editable here -- `UpdateTenantRequest` does not carry it, see that record's own Javadoc.
 import type { FormError, FormSubmitEvent } from '@nuxt/ui'

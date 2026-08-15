@@ -2,8 +2,8 @@
 import { openSseController, type SseController } from '~/utils/sseController'
 
 /**
- * Live log tail for one render (design spec §11.2: "Log-Ansicht für einen Render, ebenfalls
- * über SSE"), via `GET /api/renders/{id}/logs`. Started unconditionally on mount -- unlike
+ * Live log tail for one render (design spec §11.2: "Log view for a render, likewise
+ * via SSE"), via `GET /api/renders/{id}/logs`. Started unconditionally on mount -- unlike
  * RenderProgressBar, the logs endpoint tails a completed job's log too (see
  * RenderStreamController's Javadoc: it only skips the *watch* half for a terminal render, not the
  * log tail itself), so this is useful for a finished render as well as a running one. Closed on

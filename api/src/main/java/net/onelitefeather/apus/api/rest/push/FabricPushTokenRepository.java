@@ -57,7 +57,7 @@ import net.onelitefeather.apus.operator.tenant.TenantReconciler;
  * every other one in this module). The token itself is the only input, so resolving it to a
  * namespace necessarily means searching across namespaces; this is exactly the kind of
  * cluster-wide, cross-tenant read design spec §10.3 reserves for the backend's own ServiceAccount
- * ("Das Backend ist der Durchsetzungspunkt"). The label scopes that search to service-token
+ * ("the backend is the enforcement point"). The label scopes that search to service-token
  * Secrets specifically, not every Secret in the cluster -- but Kubernetes RBAC has no way to
  * restrict a grant by a resource's label or content, only by resource type, verb and (for
  * {@code get}/{@code update}/{@code patch}/{@code delete}, not {@code list}/{@code watch})
@@ -70,8 +70,8 @@ import net.onelitefeather.apus.operator.tenant.TenantReconciler;
  *       types, no write verbs) -- bound to the api ServiceAccount via a {@code
  *       ClusterRoleBinding}. This is still, unavoidably, read access to every Secret in the
  *       cluster (RBAC cannot see the label filter passed in the list query), which is broader
- *       than the task brief's "engster Weg, der funktioniert" ("narrowest path that works")
- *       ideally allows -- flagged as a known trade-off, not silently accepted;
+ *       than the task brief's "narrowest path that works" ideally allows -- flagged as a known
+ *       trade-off, not silently accepted;
  *   <li>a genuinely narrower alternative exists but was deliberately <b>not</b> implemented here,
  *       to avoid an invasive rewrite of this already-tested class: since {@link
  *       PushTokenSecrets#SECRET_NAME} is now a fixed name, {@code resolveNamespace} could instead

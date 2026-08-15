@@ -4,9 +4,9 @@
  * `api/src/main/java/net/onelitefeather/apus/api/rest/support/TenantAccess.java`.
  *
  * IMPORTANT -- read before using any of this: these helpers exist purely so the UI can decide
- * what to *show* (design spec §11.2: "Zwei Ebenen, getrennt über die Rolle im Token"). They
+ * what to *show* (design spec §11.2: "Two levels, separated via the role in the token"). They
  * enforce nothing. Every one of these checks is re-done, authoritatively, by the api module on
- * every request (design spec §10.3: "Das Backend ist der Durchsetzungspunkt"). Hiding a button
+ * every request (design spec §10.3: "the backend is the enforcement point"). Hiding a button
  * here only hides something the API would have refused anyway -- it must never be the *only*
  * thing standing between a user and an action. Do not add logic here that a reviewer could
  * mistake for an access-control boundary.

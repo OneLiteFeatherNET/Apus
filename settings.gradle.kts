@@ -104,8 +104,8 @@ dependencyResolutionManagement {
             // and unlike :operator it does not get these transitively, because :operator itself
             // depends on JOSDK/fabric8 via `implementation`, which -- correctly -- does not leak
             // onto a downstream project's compile classpath (verified directly: referencing
-            // Tenant from a first draft of this module failed to compile with "Klassendatei für
-            // io.fabric8.kubernetes.client.CustomResource nicht gefunden" until this was added).
+            // Tenant from a first draft of this module failed to compile with "class file for
+            // io.fabric8.kubernetes.client.CustomResource not found" until this was added).
             // kubernetes-httpclient-jdk is picked as the HTTP engine over the vertx/okhttp
             // options fabric8 7.x supports: it needs no extra dependency of its own, and -- more
             // importantly -- avoids pulling a second, differently-versioned Netty into a module

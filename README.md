@@ -1,46 +1,46 @@
 # Apus
 
-Apus rendert Minecraft-Welten mit [BlueMap](https://bluemap.bluecolored.de/) auf Kubernetes
-und hostet die Ergebnisse. Welt-Daten kommen aus mehreren, sehr unterschiedlichen Quellen;
-ein ETL-Layer normalisiert sie, ein Operator führt Render- und Hosting-Jobs aus, eine
-Oberfläche zeigt Fortschritt und erlaubt Bedienung ohne YAML.
+Apus renders Minecraft worlds with [BlueMap](https://bluemap.bluecolored.de/) on Kubernetes
+and hosts the results. World data comes from several, very different sources; an ETL layer
+normalizes it, an operator runs render and hosting jobs, and a UI shows progress and allows
+operation without YAML.
 
-Das vollständige Design steht in
+The full design is in
 [`docs/superpowers/specs/2026-08-08-apus-design.md`](docs/superpowers/specs/2026-08-08-apus-design.md).
 
-## Module
+## Modules
 
-| Modul | Zweck | Auslieferung |
+| Module | Purpose | Delivery |
 | --- | --- | --- |
-| `telemetry-addon` | BlueMap-Addon, exponiert Render-Fortschritt als JSON und Prometheus-Metriken | Maven |
-| `ingest` | ETL: Connectoren (s3, pterodactyl, push, upload), Layout-Erkennung, Bundle-Writer | Container-Image |
-| `runner` | BlueMap-CLI plus beide Addons, rendert eine Welt aus S3 nach S3 | Container-Image |
-| `hosting` | Langlebiger BlueMap-Webserver, liest gerenderte Karten aus S3 | Container-Image |
-| `operator` | Kubernetes-Operator, sechs CRDs, erzeugt Jobs/Deployments/Ingresses/Buckets | Container-Image |
-| `api` | Micronaut-REST/SSE über den Custom Resources, Durchsetzungspunkt für Auth | Container-Image |
-| `ui` | Nuxt-4-Dashboard für Mandanten und Plattform-Betreiber | Container-Image |
-| `paper-worldpush` | Paper-Plugin, schiebt Welten vom laufenden Server nach Apus | Maven |
+| `telemetry-addon` | BlueMap addon, exposes render progress as JSON and Prometheus metrics | Maven |
+| `ingest` | ETL: connectors (s3, pterodactyl, push, upload), layout detection, bundle writer | Container image |
+| `runner` | BlueMap CLI plus both addons, renders a world from S3 to S3 | Container image |
+| `hosting` | Long-lived BlueMap web server, reads rendered maps from S3 | Container image |
+| `operator` | Kubernetes operator, six CRDs, creates Jobs/Deployments/Ingresses/Buckets | Container image |
+| `api` | Micronaut REST/SSE over the custom resources, enforcement point for auth | Container image |
+| `ui` | Nuxt 4 dashboard for tenants and platform operators | Container image |
+| `paper-worldpush` | Paper plugin, pushes worlds from the running server to Apus | Maven |
 
-## Bauen
+## Building
 
-Voraussetzungen: JDK 25, Docker (für Integrationstests), pnpm (für `ui`).
+Prerequisites: JDK 25, Docker (for integration tests), pnpm (for `ui`).
 
-    ./gradlew build          # alle Java-Module, ohne Integrationstests
-    ./gradlew integrationTest # braucht Docker
-    ./gradlew :operator:generateCrds  # erzeugt die sechs CRD-YAMLs nach operator/build/crds
+    ./gradlew build          # all Java modules, without integration tests
+    ./gradlew integrationTest # needs Docker
+    ./gradlew :operator:generateCrds  # generates the six CRD YAMLs into operator/build/crds
 
     cd ui && pnpm install && pnpm test && pnpm lint
 
-## Entwicklung
+## Development
 
-Der Kern des Systems ist das **World Bundle** — eine unveränderliche, normalisierte
-Momentaufnahme einer Welt in S3. Links davon (Ingest) weiß niemand etwas von BlueMap,
-rechts davon (Render, Hosting) niemand etwas von Pterodactyl oder ZIP-Uploads. Wer eine
-neue Welt-Quelle anbindet, implementiert nur `WorldSourceConnector` in `ingest`.
+The core of the system is the **World Bundle** — an immutable, normalized
+snapshot of a world in S3. On its left (ingest), nobody knows anything about BlueMap;
+on its right (render, hosting), nobody knows anything about Pterodactyl or ZIP uploads.
+Anyone connecting a new world source only needs to implement `WorldSourceConnector` in `ingest`.
 
-Commits folgen [Conventional Commits](https://www.conventionalcommits.org/) — Release
-Please leitet daraus Version und Changelog ab.
+Commits follow [Conventional Commits](https://www.conventionalcommits.org/) — Release
+Please derives the version and changelog from them.
 
-## Lizenz
+## License
 
-AGPL-3.0, siehe [LICENSE](LICENSE).
+AGPL-3.0, see [LICENSE](LICENSE).

@@ -45,7 +45,7 @@ public interface TenantRepository {
 
     /**
      * Persists changes to an already-existing {@link Tenant} (design spec §10.3: {@code
-     * platform-admin} may "Tenants anlegen/ändern/löschen, Quotas"). {@code tenant} must be one
+     * platform-admin} may "create/modify/delete tenants, quotas"). {@code tenant} must be one
      * previously returned by {@link #findByName(String)} (or {@link #list()}) with its fields
      * mutated -- this method does not create a new resource if the name does not already exist.
      */

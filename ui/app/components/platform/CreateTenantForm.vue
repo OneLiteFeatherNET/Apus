@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // Create-tenant form for the platform dashboard (design spec §11.2, and the explicit
-// requirement behind this whole task: "Wir wollen für uns als Betreiber ein Management-
-// Dashboard, wo wir pro Kunde ein maximales Speicherlimit setzen können"). Quota and allowed
+// requirement behind this whole task: "We want, as operators, a management
+// dashboard where we can set a maximum storage limit per customer"). Quota and allowed
 // domains set here can be changed later too, via each tenant's "Edit quota / domains" control in
 // PlatformTenantList.vue (backed by `PATCH /api/tenants/{name}`).
 import type { FormError, FormSubmitEvent } from '@nuxt/ui'

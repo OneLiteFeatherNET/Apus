@@ -102,7 +102,7 @@ public class TenantController {
 
     /**
      * Changes an existing tenant's storage quota and/or allowed hosting domains (design spec
-     * §10.3: {@code platform-admin} may "Tenants anlegen/ändern/löschen, Quotas"). {@code name}
+     * §10.3: {@code platform-admin} may "create/modify/delete tenants, quotas"). {@code name}
      * comes from the path, exactly like every other tenant-identifying value in this module --
      * never re-derived from the body. Closes the gap the platform dashboard flagged: before this,
      * a quota was only settable at {@link #create}-time.

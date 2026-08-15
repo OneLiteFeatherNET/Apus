@@ -31,7 +31,7 @@ import java.util.List;
  * client, used only when no Loki instance is configured (see {@link LogSourceFactory}). Needs
  * {@code get}/{@code list} on {@code pods} and {@code get} on {@code pods/log} in tenant
  * namespaces for the API's ServiceAccount -- permissions the Loki path avoids entirely (design
- * spec §11.1: "damit braucht die API keinen direkten Pod-Zugriff"). See the task 3 report for the
+ * spec §11.1: "so that the API needs no direct pod access"). See the task 3 report for the
  * full trade-off.
  *
  * <p>Finds the pod via the {@code job-name} label Kubernetes sets on every pod a {@code Job}

@@ -129,7 +129,7 @@ class TenantIsolationIntegrationTest implements TestPropertyProvider {
     @Inject
     TokenGenerator tokenGenerator;
 
-    // -- "weder sehen ..." (cannot see) -----------------------------------------------------
+    // -- "neither see ..." -------------------------------------------------------------------
 
     @Test
     void tokenForTenantACannotGetTenantBsMapById() {
@@ -154,7 +154,7 @@ class TenantIsolationIntegrationTest implements TestPropertyProvider {
         assertEquals(List.of("acme-own-map"), maps.stream().map(BlueMapMapResponse::name).toList());
     }
 
-    // -- "... noch ändern" (cannot modify) --------------------------------------------------
+    // -- "... nor modify" --------------------------------------------------------------------
 
     @Test
     void tokenForTenantACannotTriggerARenderForTenantBsMap() {

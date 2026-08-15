@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { BlueMapHostingResponse } from '~/utils/apiTypes'
 
-// Design spec §11.2: "Hosting: die URLs, unter denen Karten erreichbar sind."
+// Design spec §11.2: "Hosting: the URLs under which maps are reachable."
 const props = defineProps<{ hostings: BlueMapHostingResponse[] }>()
 </script>
 

@@ -1,6 +1,6 @@
 /**
  * Pure formatting/decision logic for render progress display (design spec §11.2: "Renders...
- * für den laufenden Render Fortschritt in Prozent mit geschätzter Restzeit, live").
+ * percentage progress with estimated remaining time for the render in progress, live").
  *
  * Framework-free so it stays unit-testable without mounting a component -- see
  * tests/unit/tenant/renderProgress.spec.ts.

@@ -47,7 +47,7 @@ import net.onelitefeather.apus.api.security.Role;
  * <p><b>Tenant claim key: {@code organization}.</b> Not fixed anywhere else yet at the time of
  * writing (identity broker undecided, design spec §15) -- picked to match the vocabulary the
  * design spec itself already uses for this exact concept: {@code Tenant.spec.auth.organization}
- * (§8.1's example manifest) and "der Organisations-Claim im Token bestimmt den Mandanten"
+ * (§8.1's example manifest) and "the organization claim in the token determines the tenant"
  * (§10.3). This is the single place that constant is declared; nowhere else in this module may
  * duplicate the literal.
  */

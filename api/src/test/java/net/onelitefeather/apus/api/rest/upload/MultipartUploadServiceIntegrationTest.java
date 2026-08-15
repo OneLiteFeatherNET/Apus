@@ -46,8 +46,8 @@ import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 /**
  * Drives real HTTP requests against a real MinIO instance to answer, empirically rather than by
  * reading AWS SDK documentation, the question the phase 6 task brief poses: which of {@code POST
- * /api/uploads}'s stated limits ("eng begrenzt: auf das Staging-Präfix genau dieses Mandanten,
- * mit kurzer Gültigkeit und einer Größenbegrenzung") actually hold up against an adversarial
+ * /api/uploads}'s stated limits ("tightly scoped: to the staging prefix of exactly this tenant,
+ * with a short validity and a size limit") actually hold up against an adversarial
  * client, and which do not. See the phase 6 task report for how each result here is interpreted.
  *
  * <p>Excluded from {@code :api:test} (matches {@code TenantIsolationIntegrationTest}'s own
