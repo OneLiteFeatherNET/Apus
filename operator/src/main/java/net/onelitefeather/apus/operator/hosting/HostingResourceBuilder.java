@@ -60,6 +60,8 @@ import java.util.Optional;
 import net.onelitefeather.apus.operator.OperatorConfig;
 import net.onelitefeather.apus.operator.api.BlueMapHosting;
 import net.onelitefeather.apus.operator.api.Labels;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Turns a {@link BlueMapHosting} into the Kubernetes objects that make an already-rendered map
@@ -76,6 +78,8 @@ import net.onelitefeather.apus.operator.api.Labels;
  * already resolved {@code bucketSecretName} to a Secret Rook populated with S3 credentials.
  */
 public final class HostingResourceBuilder {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(HostingResourceBuilder.class);
 
     /** API group + version the owning {@link BlueMapHosting} is served under. */
     private static final String OWNER_API_VERSION = "bluemap.onelitefeather.net/v1alpha1";
@@ -168,6 +172,12 @@ public final class HostingResourceBuilder {
             OperatorConfig config) {
         String namespace = hosting.getMetadata().getNamespace();
         Map<String, String> labels = labels(hosting);
+        LOGGER.debug(
+                "building hosting deployment '{}' in namespace '{}' from image '{}' with {} config file(s)",
+                hosting.getMetadata().getName(),
+                namespace,
+                config.hostingImage(),
+                configFileNames.size());
 
         Container container = new ContainerBuilder()
                 .withName(CONTAINER_NAME)

@@ -23,6 +23,7 @@ import io.javaoperatorsdk.operator.api.reconciler.Context;
 import io.javaoperatorsdk.operator.api.reconciler.ControllerConfiguration;
 import io.javaoperatorsdk.operator.api.reconciler.Reconciler;
 import io.javaoperatorsdk.operator.api.reconciler.UpdateControl;
+import io.opentelemetry.api.common.Attributes;
 import java.time.Duration;
 import java.util.Map;
 import java.util.Objects;
@@ -33,7 +34,10 @@ import net.onelitefeather.apus.operator.api.Conditions;
 import net.onelitefeather.apus.operator.api.Labels;
 import net.onelitefeather.apus.operator.api.Tenant;
 import net.onelitefeather.apus.operator.rook.ObjectBucketClaim;
+import net.onelitefeather.apus.operator.telemetry.Tracing;
 import net.onelitefeather.apus.operator.tenant.TenantReconciler;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Turns a {@link BlueMapMap} into a bound S3 bucket, and mirrors that bucket's identity into
@@ -87,6 +91,8 @@ import net.onelitefeather.apus.operator.tenant.TenantReconciler;
 @ControllerConfiguration
 public class BlueMapMapReconciler implements Reconciler<BlueMapMap> {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger(BlueMapMapReconciler.class);
+
     /** Reason set on the {@code Ready} condition while Rook has not yet bound the claim. */
     public static final String BUCKET_PENDING_REASON = "BucketPending";
 
@@ -126,6 +132,14 @@ public class BlueMapMapReconciler implements Reconciler<BlueMapMap> {
 
     @Override
     public UpdateControl<BlueMapMap> reconcile(BlueMapMap map, Context<BlueMapMap> context) {
+        return Tracing.reconcile("BlueMapMap", Tracing.MAP, map, () -> doReconcile(map));
+    }
+
+    /**
+     * The reconciliation itself, split out of {@link #reconcile} so the span wrapping it stays a
+     * single readable line rather than an extra level of indentation over the whole method.
+     */
+    private UpdateControl<BlueMapMap> doReconcile(BlueMapMap map) {
         String namespace = map.getMetadata().getNamespace();
         String name = map.getMetadata().getName();
         String mapUid = map.getMetadata().getUid();
@@ -144,7 +158,13 @@ public class BlueMapMapReconciler implements Reconciler<BlueMapMap> {
             return conflict(map, "ObjectBucketClaim", name);
         }
 
-        Optional<ObjectBucketClaim> bound = bucketProvisioner.ensureBucket(map, cephUser);
+        // Its own span: creating the claim is one API call, but everything after it is Rook
+        // taking however long it takes to actually provision a bucket -- the single step in this
+        // reconciliation someone would ask "why is that map still pending" about.
+        Optional<ObjectBucketClaim> bound = Tracing.step(
+                "await object bucket claim",
+                Attributes.of(Tracing.MAP, name, Tracing.K8S_NAMESPACE_NAME, namespace),
+                () -> bucketProvisioner.ensureBucket(map, cephUser));
         if (bound.isEmpty()) {
             return pending(map, "waiting for Rook to bind the object bucket claim for map '" + name + "'");
         }
@@ -161,9 +181,17 @@ public class BlueMapMapReconciler implements Reconciler<BlueMapMap> {
             return pending(map, "bucket '" + bucketName + "' is bound but its endpoint is not published yet");
         }
 
+        // Only the transition is worth an info line: a bound map reconciles again on every
+        // resync, and "still bound" every few minutes per map is noise, not an event.
+        boolean newlyBound = !bucketName.equals(map.getStatus().getBucket().getName());
         map.getStatus().getBucket().setName(bucketName);
         map.getStatus().getBucket().setSecretName(secretName);
         map.getStatus().getBucket().setEndpoint(endpoint.get());
+        if (newlyBound) {
+            LOGGER.info("map '{}' in namespace '{}' is backed by bucket '{}'", name, namespace, bucketName);
+        } else {
+            LOGGER.debug("map '{}' is up to date (bucket '{}')", name, bucketName);
+        }
 
         Conditions.set(
                 map.getStatus().getConditions(),
@@ -220,6 +248,7 @@ public class BlueMapMapReconciler implements Reconciler<BlueMapMap> {
     }
 
     private static UpdateControl<BlueMapMap> pending(BlueMapMap map, String message) {
+        LOGGER.debug("map '{}' is not ready yet: {}", map.getMetadata().getName(), message);
         Conditions.set(map.getStatus().getConditions(), Conditions.ready(false, BUCKET_PENDING_REASON, message));
         return UpdateControl.patchStatus(map).rescheduleAfter(RECHECK_INTERVAL);
     }
@@ -231,6 +260,10 @@ public class BlueMapMapReconciler implements Reconciler<BlueMapMap> {
      * "Rook not (yet) installed" section, mirroring {@code TenantReconciler}.
      */
     private static UpdateControl<BlueMapMap> rookUnavailable(BlueMapMap map, String name) {
+        LOGGER.warn(
+                "map '{}': the ObjectBucketClaim CRD (objectbucket.io) is not registered on this cluster --"
+                        + " Rook is not installed or not ready yet, so no bucket can be provisioned",
+                name);
         Conditions.set(
                 map.getStatus().getConditions(),
                 Conditions.ready(
@@ -248,6 +281,11 @@ public class BlueMapMapReconciler implements Reconciler<BlueMapMap> {
      * reported in status -- see {@link TenantReconciler}'s identical {@code conflict()} method.
      */
     private static UpdateControl<BlueMapMap> conflict(BlueMapMap map, String resourceKind, String resourceName) {
+        LOGGER.warn(
+                "map '{}': existing {} '{}' is not labelled as owned by this map -- refusing to adopt it",
+                map.getMetadata().getName(),
+                resourceKind,
+                resourceName);
         Conditions.set(
                 map.getStatus().getConditions(),
                 Conditions.ready(

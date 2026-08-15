@@ -31,6 +31,7 @@ import io.javaoperatorsdk.operator.api.reconciler.Context;
 import io.javaoperatorsdk.operator.api.reconciler.ControllerConfiguration;
 import io.javaoperatorsdk.operator.api.reconciler.Reconciler;
 import io.javaoperatorsdk.operator.api.reconciler.UpdateControl;
+import io.opentelemetry.api.common.Attributes;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -51,6 +52,9 @@ import net.onelitefeather.apus.operator.api.Labels;
 import net.onelitefeather.apus.operator.api.Ref;
 import net.onelitefeather.apus.operator.api.Tenant;
 import net.onelitefeather.apus.operator.map.BlueMapConfigBuilder;
+import net.onelitefeather.apus.operator.telemetry.Tracing;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Turns a {@link BlueMapHosting} into a running, publicly reachable BlueMap webserver: a {@code
@@ -128,6 +132,8 @@ import net.onelitefeather.apus.operator.map.BlueMapConfigBuilder;
 @ControllerConfiguration
 public class BlueMapHostingReconciler implements Reconciler<BlueMapHosting> {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger(BlueMapHostingReconciler.class);
+
     /** Reason set when the namespace's owning tenant cannot be resolved. */
     public static final String TENANT_NOT_FOUND_REASON = "TenantNotFound";
 
@@ -183,6 +189,14 @@ public class BlueMapHostingReconciler implements Reconciler<BlueMapHosting> {
 
     @Override
     public UpdateControl<BlueMapHosting> reconcile(BlueMapHosting hosting, Context<BlueMapHosting> context) {
+        return Tracing.reconcile("BlueMapHosting", Tracing.HOSTING, hosting, () -> doReconcile(hosting));
+    }
+
+    /**
+     * The reconciliation itself, split out of {@link #reconcile} so the span wrapping it stays a
+     * single readable line rather than an extra level of indentation over the whole method.
+     */
+    private UpdateControl<BlueMapHosting> doReconcile(BlueMapHosting hosting) {
         String namespace = hosting.getMetadata().getNamespace();
         String name = hosting.getMetadata().getName();
 
@@ -212,6 +226,16 @@ public class BlueMapHostingReconciler implements Reconciler<BlueMapHosting> {
                             + " set");
         }
         if (!hostnameAllowed(hostname, allowedDomains)) {
+            // Security-relevant (design spec §8.1): a tenant tried to claim a hostname it is not
+            // permitted to serve. Worth more than the debug line pending() writes for the
+            // routine "not ready yet" cases.
+            LOGGER.warn(
+                    "hosting '{}' in namespace '{}': hostname '{}' is not covered by tenant '{}'s allowedDomains"
+                            + " -- no ingress and no deployment created",
+                    name,
+                    namespace,
+                    hostname,
+                    tenantName.get());
             return pending(
                     hosting,
                     HOSTNAME_NOT_ALLOWED_REASON,
@@ -272,35 +296,50 @@ public class BlueMapHostingReconciler implements Reconciler<BlueMapHosting> {
         Deployment deployment = HostingResourceBuilder.deployment(
                 hosting, configMapName, files.keySet(), bucketSecretName, config);
         stampConfigChecksum(deployment, checksum);
-        Deployment existingDeployment =
-                client.apps().deployments().inNamespace(namespace).withName(name).get();
-        if (!deploymentUpToDate(existingDeployment, deployment)) {
-            client.apps()
-                    .deployments()
-                    .inNamespace(namespace)
-                    .resource(deployment)
-                    .createOr(NonDeletingOperation::update);
-        }
 
-        client.services()
-                .inNamespace(namespace)
-                .resource(HostingResourceBuilder.service(hosting))
-                .createOr(NonDeletingOperation::update);
+        // One span for the whole write-out: four (or five, with TLS) API server writes that
+        // together are "stand this webserver up", and the step someone would ask about when a
+        // hosting takes a long time to appear.
+        Tracing.run(
+                "apply hosting resources",
+                Attributes.of(Tracing.HOSTING, name, Tracing.K8S_NAMESPACE_NAME, namespace),
+                () -> {
+                    Deployment existingDeployment =
+                            client.apps().deployments().inNamespace(namespace).withName(name).get();
+                    if (!deploymentUpToDate(existingDeployment, deployment)) {
+                        client.apps()
+                                .deployments()
+                                .inNamespace(namespace)
+                                .resource(deployment)
+                                .createOr(NonDeletingOperation::update);
+                        LOGGER.info(
+                                "hosting '{}' in namespace '{}': rolled the webserver deployment (config checksum"
+                                        + " {})",
+                                name,
+                                namespace,
+                                checksum);
+                    }
 
-        client.network()
-                .v1()
-                .ingresses()
-                .inNamespace(namespace)
-                .resource(HostingResourceBuilder.ingress(hosting))
-                .createOr(NonDeletingOperation::update);
-
-        if (tlsEnabled) {
-            HostingResourceBuilder.certificate(hosting)
-                    .ifPresent(certificate -> client.resources(Certificate.class)
+                    client.services()
                             .inNamespace(namespace)
-                            .resource(certificate)
-                            .createOr(NonDeletingOperation::update));
-        }
+                            .resource(HostingResourceBuilder.service(hosting))
+                            .createOr(NonDeletingOperation::update);
+
+                    client.network()
+                            .v1()
+                            .ingresses()
+                            .inNamespace(namespace)
+                            .resource(HostingResourceBuilder.ingress(hosting))
+                            .createOr(NonDeletingOperation::update);
+
+                    if (tlsEnabled) {
+                        HostingResourceBuilder.certificate(hosting)
+                                .ifPresent(certificate -> client.resources(Certificate.class)
+                                        .inNamespace(namespace)
+                                        .resource(certificate)
+                                        .createOr(NonDeletingOperation::update));
+                    }
+                });
 
         return updateReadiness(hosting, namespace, name);
     }
@@ -533,6 +572,13 @@ public class BlueMapHostingReconciler implements Reconciler<BlueMapHosting> {
         boolean ready = desiredReplicas == 0 || (readyReplicas != null && readyReplicas >= desiredReplicas);
 
         if (ready) {
+            if (!hosting.getStatus().isReady()) {
+                LOGGER.info(
+                        "hosting '{}' in namespace '{}' is serving at https://{}",
+                        name,
+                        namespace,
+                        hosting.getSpec().getHostname());
+            }
             hosting.getStatus().setReady(true);
             hosting.getStatus().setUrl("https://" + hosting.getSpec().getHostname());
             Conditions.set(
@@ -556,6 +602,7 @@ public class BlueMapHostingReconciler implements Reconciler<BlueMapHosting> {
      * gets bound, cert-manager comes up, ...) is retried instead of requiring a manual nudge.
      */
     private static UpdateControl<BlueMapHosting> pending(BlueMapHosting hosting, String reason, String message) {
+        LOGGER.debug("hosting '{}' is pending ({}): {}", hosting.getMetadata().getName(), reason, message);
         hosting.getStatus().setReady(false);
         hosting.getStatus().setUrl(null);
         Conditions.set(hosting.getStatus().getConditions(), Conditions.ready(false, reason, message));
@@ -568,6 +615,11 @@ public class BlueMapHostingReconciler implements Reconciler<BlueMapHosting> {
      * updated -- see {@code TenantReconciler}'s identical {@code conflict()} method.
      */
     private static UpdateControl<BlueMapHosting> conflict(BlueMapHosting hosting, String resourceKind, String resourceName) {
+        LOGGER.warn(
+                "hosting '{}': existing {} '{}' is not owned by this hosting -- refusing to adopt it",
+                hosting.getMetadata().getName(),
+                resourceKind,
+                resourceName);
         hosting.getStatus().setReady(false);
         hosting.getStatus().setUrl(null);
         Conditions.set(

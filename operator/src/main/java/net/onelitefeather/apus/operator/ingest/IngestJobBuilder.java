@@ -36,6 +36,8 @@ import net.onelitefeather.apus.operator.OperatorConfig;
 import net.onelitefeather.apus.operator.api.Labels;
 import net.onelitefeather.apus.operator.api.WorldIngest;
 import net.onelitefeather.apus.operator.api.WorldSource;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Turns a {@link WorldIngest} plus the {@link WorldSource} it targets into the Kubernetes {@link
@@ -72,6 +74,8 @@ import net.onelitefeather.apus.operator.api.WorldSource;
  * check, not instead of it.
  */
 public final class IngestJobBuilder {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(IngestJobBuilder.class);
 
     /** API group + version the owning {@link WorldIngest} is served under. */
     private static final String OWNER_API_VERSION = "bluemap.onelitefeather.net/v1alpha1";
@@ -128,6 +132,12 @@ public final class IngestJobBuilder {
      */
     public static Job build(WorldIngest ingest, WorldSource source, OperatorConfig config) {
         String namespace = ingest.getMetadata().getNamespace();
+        LOGGER.debug(
+                "building ingest job '{}' in namespace '{}' for source '{}' from image '{}'",
+                ingest.getMetadata().getName(),
+                namespace,
+                source.getMetadata().getName(),
+                config.ingestImage());
         Map<String, String> labels = labels(ingest, source);
 
         Container container = new ContainerBuilder()

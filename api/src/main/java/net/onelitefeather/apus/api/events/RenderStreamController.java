@@ -29,12 +29,16 @@ import io.micronaut.http.sse.Event;
 import io.micronaut.security.annotation.Secured;
 import io.micronaut.security.authentication.Authentication;
 import io.micronaut.security.rules.SecurityRule;
+import io.opentelemetry.api.trace.Tracer;
+import net.onelitefeather.apus.api.observability.StreamSpan;
 import net.onelitefeather.apus.api.security.ApusPrincipal;
 import net.onelitefeather.apus.api.security.ForbiddenException;
 import net.onelitefeather.apus.api.security.TenantResolver;
 import net.onelitefeather.apus.api.support.PrincipalResolver;
 import net.onelitefeather.apus.operator.api.BlueMapRender;
 import org.reactivestreams.Publisher;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * {@code GET /api/renders/{id}/events} and {@code GET /api/renders/{id}/logs} -- live progress
@@ -64,20 +68,25 @@ import org.reactivestreams.Publisher;
 @Secured(SecurityRule.IS_AUTHENTICATED)
 class RenderStreamController {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger(RenderStreamController.class);
+
     private final RenderRepository renderRepository;
     private final TenantResolver tenantResolver;
     private final LogSource logSource;
     private final PrincipalResolver principalResolver;
+    private final Tracer tracer;
 
     RenderStreamController(
             RenderRepository renderRepository,
             TenantResolver tenantResolver,
             LogSource logSource,
-            PrincipalResolver principalResolver) {
+            PrincipalResolver principalResolver,
+            Tracer tracer) {
         this.renderRepository = renderRepository;
         this.tenantResolver = tenantResolver;
         this.logSource = logSource;
         this.principalResolver = principalResolver;
+        this.tracer = tracer;
     }
 
     @Get(value = "/{id}/events", produces = MediaType.TEXT_EVENT_STREAM)
@@ -85,20 +94,32 @@ class RenderStreamController {
         BlueMapRender render = requireRender(authentication, id);
         String namespace = render.getMetadata().getNamespace();
         String resourceVersion = render.getMetadata().getResourceVersion();
+        String phase = render.getStatus().getPhase();
 
-        return new SseSource<Event<RenderProgress>>(sink -> {
+        return new SseSource<Event<RenderProgress>>(rawSink -> {
+            // Started here, not above: the wiring callback runs when a subscriber actually asks
+            // for data, so the span covers the stream's real lifetime rather than the request
+            // that set it up (docs/logging-and-tracing.md, "What to put in a span").
+            StreamSpan span = StreamSpan.start(tracer, "events", namespace, id, phase);
+            LOGGER.debug("progress stream opened for render '{}' in namespace '{}'", id, namespace);
+            SseSource.Sink<Event<RenderProgress>> sink = spanEnding(rawSink, span);
             SseSource.Sink<RenderProgress> progressSink = eventSink(sink);
             // Emitted from the same read requireRender already did -- no extra API call -- so a
             // viewer sees a value immediately instead of waiting for the next status change.
             progressSink.next(RenderProgress.from(render));
-            if (RenderPhases.isTerminal(render.getStatus().getPhase())) {
+            if (RenderPhases.isTerminal(phase)) {
                 progressSink.complete();
+                // Ended here rather than by the returned handle: SseSource only takes ownership
+                // of that handle once this callback returns, so a stream that ends inside it
+                // would otherwise leave the span open forever.
+                span.end();
                 return () -> {};
             }
             // Watching from this exact resourceVersion (not "from now") closes the gap between
             // the read above and the watch registration below: no update can land unobserved in
             // between.
-            return renderRepository.watch(namespace, id, resourceVersion, progressWatcher(progressSink));
+            return endingSpan(
+                    renderRepository.watch(namespace, id, resourceVersion, progressWatcher(progressSink)), span);
         });
     }
 
@@ -108,21 +129,28 @@ class RenderStreamController {
         String namespace = render.getMetadata().getNamespace();
         String jobName = render.getStatus().getJobName();
         String resourceVersion = render.getMetadata().getResourceVersion();
-        boolean terminal = RenderPhases.isTerminal(render.getStatus().getPhase());
+        String phase = render.getStatus().getPhase();
+        boolean terminal = RenderPhases.isTerminal(phase);
 
-        return new SseSource<Event<String>>(sink -> {
+        return new SseSource<Event<String>>(rawSink -> {
+            StreamSpan span = StreamSpan.start(tracer, "logs", namespace, id, phase);
+            SseSource.Sink<Event<String>> sink = spanEnding(rawSink, span);
             if (jobName == null || jobName.isBlank()) {
                 // No job has been created yet (e.g. still Pending) -- nothing to tail. A client
                 // sees an immediately-completed, empty stream and may retry once rendering starts.
+                LOGGER.debug("log stream for render '{}' in namespace '{}' has no job yet", id, namespace);
                 sink.complete();
+                span.end();
                 return () -> {};
             }
+            LOGGER.debug(
+                    "log stream opened for render '{}' (job '{}') in namespace '{}'", id, jobName, namespace);
             AutoCloseable logHandle = logSource.tail(namespace, jobName, eventSink(sink));
             if (terminal) {
-                return logHandle;
+                return endingSpan(logHandle, span);
             }
             AutoCloseable watchHandle = renderRepository.watch(namespace, id, resourceVersion, terminationWatcher(sink));
-            return combine(logHandle, watchHandle);
+            return endingSpan(combine(logHandle, watchHandle), span);
         });
     }
 
@@ -141,11 +169,59 @@ class RenderStreamController {
         try {
             namespace = tenantResolver.namespaceFor(principal);
         } catch (ForbiddenException e) {
+            // Recoverable and caller-visible, but not a failure of this service: a token with no
+            // tenant claim reached an endpoint that has no default tenant to fall back to.
+            LOGGER.warn("render stream denied: {}", e.getMessage());
             throw new HttpStatusException(HttpStatus.FORBIDDEN, e.getMessage());
         }
-        return renderRepository
-                .find(namespace, id)
-                .orElseThrow(() -> new HttpStatusException(HttpStatus.NOT_FOUND, "render '" + id + "' not found"));
+        String resolvedNamespace = namespace;
+        return renderRepository.find(namespace, id).orElseThrow(() -> {
+            // Not an error: "does not exist" and "belongs to another tenant" are the same,
+            // entirely ordinary 404 here (see the class Javadoc).
+            LOGGER.debug("no render '{}' in namespace '{}'", id, resolvedNamespace);
+            return new HttpStatusException(HttpStatus.NOT_FOUND, "render '" + id + "' not found");
+        });
+    }
+
+    /**
+     * Ends {@code span} when the stream's cleanup handle is closed -- which {@code SseSource}
+     * does exactly once, whether the producer finished, the producer failed, or the subscriber
+     * cancelled. Closing the underlying handle first, and ending the span in a {@code finally},
+     * keeps a failure to release a Kubernetes watch from also losing the span.
+     */
+    private static AutoCloseable endingSpan(AutoCloseable delegate, StreamSpan span) {
+        return () -> {
+            try {
+                delegate.close();
+            } finally {
+                span.end();
+            }
+        };
+    }
+
+    /**
+     * Marks {@code span} as failed when the producer errors the stream. Has to run <em>before</em>
+     * the value reaches {@code SseSource}, because that in turn closes the cleanup handle, which
+     * would otherwise end the span successfully first and win the race.
+     */
+    private static <T> SseSource.Sink<T> spanEnding(SseSource.Sink<T> downstream, StreamSpan span) {
+        return new SseSource.Sink<>() {
+            @Override
+            public void next(T value) {
+                downstream.next(value);
+            }
+
+            @Override
+            public void complete() {
+                downstream.complete();
+            }
+
+            @Override
+            public void error(Throwable throwable) {
+                span.endWithError(throwable);
+                downstream.error(throwable);
+            }
+        };
     }
 
     private static Watcher<BlueMapRender> progressWatcher(SseSource.Sink<RenderProgress> sink) {

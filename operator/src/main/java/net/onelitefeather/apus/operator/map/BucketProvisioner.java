@@ -25,6 +25,8 @@ import net.onelitefeather.apus.operator.OperatorConfig;
 import net.onelitefeather.apus.operator.api.BlueMapMap;
 import net.onelitefeather.apus.operator.api.Labels;
 import net.onelitefeather.apus.operator.rook.ObjectBucketClaim;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Provisions the S3 bucket a {@link BlueMapMap} stores its rendered output in, by creating a
@@ -53,6 +55,8 @@ import net.onelitefeather.apus.operator.rook.ObjectBucketClaim;
  * graceful condition.
  */
 public final class BucketProvisioner {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(BucketProvisioner.class);
 
     /**
      * S3 bucket names are limited to 63 characters (RFC-compliant DNS label rules); Rook/RGW
@@ -104,12 +108,23 @@ public final class BucketProvisioner {
             claim.getSpec().getAdditionalConfig().put("bucketOwner", cephUser);
 
             client.resources(ObjectBucketClaim.class).inNamespace(namespace).resource(claim).create();
+            LOGGER.info(
+                    "created object bucket claim '{}' in namespace '{}' for bucket '{}' owned by ceph user '{}'",
+                    name,
+                    namespace,
+                    bucketName,
+                    cephUser);
             return Optional.empty();
         }
 
         if ("Bound".equals(existing.getStatus().getPhase())) {
             return Optional.of(existing);
         }
+        LOGGER.debug(
+                "object bucket claim '{}' in namespace '{}' is in phase '{}', not Bound yet",
+                name,
+                namespace,
+                existing.getStatus().getPhase());
         return Optional.empty();
     }
 

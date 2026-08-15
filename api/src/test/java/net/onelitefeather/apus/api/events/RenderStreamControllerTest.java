@@ -30,6 +30,7 @@ import io.micronaut.http.HttpStatus;
 import io.micronaut.http.exceptions.HttpStatusException;
 import io.micronaut.http.sse.Event;
 import io.micronaut.security.authentication.Authentication;
+import io.opentelemetry.api.OpenTelemetry;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -139,7 +140,12 @@ class RenderStreamControllerTest {
         FakeRenderRepository repository = new FakeRenderRepository();
         repository.put("bluemap-acme", "render-1", render);
         RenderStreamController controller =
-                new RenderStreamController(repository, new TenantResolver(), new FakeLogSource(), new PrincipalResolver());
+                new RenderStreamController(
+                        repository,
+                        new TenantResolver(),
+                        new FakeLogSource(),
+                        new PrincipalResolver(),
+                        OpenTelemetry.noop().getTracer("test"));
 
         Publisher<Event<RenderProgress>> publisher = controller.events(VIEWER, "render-1");
         RecordingSubscriber<RenderProgress> subscriber = new RecordingSubscriber<>();
@@ -165,7 +171,12 @@ class RenderStreamControllerTest {
         FakeRenderRepository repository = new FakeRenderRepository();
         repository.put("bluemap-acme", "render-1", render);
         RenderStreamController controller =
-                new RenderStreamController(repository, new TenantResolver(), new FakeLogSource(), new PrincipalResolver());
+                new RenderStreamController(
+                        repository,
+                        new TenantResolver(),
+                        new FakeLogSource(),
+                        new PrincipalResolver(),
+                        OpenTelemetry.noop().getTracer("test"));
 
         RecordingSubscriber<RenderProgress> subscriber = new RecordingSubscriber<>();
         controller.events(VIEWER, "render-1").subscribe(subscriber);
@@ -184,7 +195,12 @@ class RenderStreamControllerTest {
         FakeRenderRepository repository = new FakeRenderRepository();
         repository.put("bluemap-acme", "render-1", render);
         RenderStreamController controller =
-                new RenderStreamController(repository, new TenantResolver(), new FakeLogSource(), new PrincipalResolver());
+                new RenderStreamController(
+                        repository,
+                        new TenantResolver(),
+                        new FakeLogSource(),
+                        new PrincipalResolver(),
+                        OpenTelemetry.noop().getTracer("test"));
 
         RecordingSubscriber<RenderProgress> subscriber = new RecordingSubscriber<>();
         controller.events(VIEWER, "render-1").subscribe(subscriber);
@@ -201,7 +217,12 @@ class RenderStreamControllerTest {
         // Exists, but only in a different tenant's namespace -- never looked up there.
         repository.put("bluemap-globex", "render-1", render("bluemap-globex", "render-1", "Rendering"));
         RenderStreamController controller =
-                new RenderStreamController(repository, new TenantResolver(), new FakeLogSource(), new PrincipalResolver());
+                new RenderStreamController(
+                        repository,
+                        new TenantResolver(),
+                        new FakeLogSource(),
+                        new PrincipalResolver(),
+                        OpenTelemetry.noop().getTracer("test"));
 
         HttpStatusException e =
                 assertThrows(HttpStatusException.class, () -> controller.events(VIEWER, "render-1"));
@@ -214,7 +235,12 @@ class RenderStreamControllerTest {
     void aPrincipalWithNoTenantClaimIsForbiddenBeforeAnyLookupHappens() {
         FakeRenderRepository repository = new FakeRenderRepository();
         RenderStreamController controller =
-                new RenderStreamController(repository, new TenantResolver(), new FakeLogSource(), new PrincipalResolver());
+                new RenderStreamController(
+                        repository,
+                        new TenantResolver(),
+                        new FakeLogSource(),
+                        new PrincipalResolver(),
+                        OpenTelemetry.noop().getTracer("test"));
         Authentication noTenant = Authentication.build("root", List.of("platform-admin"), Map.of());
 
         HttpStatusException e =
@@ -231,7 +257,12 @@ class RenderStreamControllerTest {
         FakeRenderRepository repository = new FakeRenderRepository();
         repository.put("bluemap-acme", "render-1", render);
         FakeLogSource logSource = new FakeLogSource();
-        RenderStreamController controller = new RenderStreamController(repository, new TenantResolver(), logSource, new PrincipalResolver());
+        RenderStreamController controller = new RenderStreamController(
+                repository,
+                new TenantResolver(),
+                logSource,
+                new PrincipalResolver(),
+                OpenTelemetry.noop().getTracer("test"));
 
         RecordingSubscriber<String> subscriber = new RecordingSubscriber<>();
         controller.logs(VIEWER, "render-1").subscribe(subscriber);
@@ -254,7 +285,12 @@ class RenderStreamControllerTest {
         FakeRenderRepository repository = new FakeRenderRepository();
         repository.put("bluemap-globex", "render-1", render("bluemap-globex", "render-1", "Rendering"));
         FakeLogSource logSource = new FakeLogSource();
-        RenderStreamController controller = new RenderStreamController(repository, new TenantResolver(), logSource, new PrincipalResolver());
+        RenderStreamController controller = new RenderStreamController(
+                repository,
+                new TenantResolver(),
+                logSource,
+                new PrincipalResolver(),
+                OpenTelemetry.noop().getTracer("test"));
 
         HttpStatusException e = assertThrows(HttpStatusException.class, () -> controller.logs(VIEWER, "render-1"));
 
@@ -268,7 +304,12 @@ class RenderStreamControllerTest {
         // vs. "does not exist at all" as two different outcomes.
         FakeRenderRepository repository = new FakeRenderRepository();
         RenderStreamController controller =
-                new RenderStreamController(repository, new TenantResolver(), new FakeLogSource(), new PrincipalResolver());
+                new RenderStreamController(
+                        repository,
+                        new TenantResolver(),
+                        new FakeLogSource(),
+                        new PrincipalResolver(),
+                        OpenTelemetry.noop().getTracer("test"));
 
         HttpStatusException e =
                 assertThrows(HttpStatusException.class, () -> controller.events(VIEWER, "does-not-exist"));
@@ -282,7 +323,12 @@ class RenderStreamControllerTest {
         FakeRenderRepository repository = new FakeRenderRepository();
         repository.put("bluemap-acme", "render-1", render);
         RenderStreamController controller =
-                new RenderStreamController(repository, new TenantResolver(), new FakeLogSource(), new PrincipalResolver());
+                new RenderStreamController(
+                        repository,
+                        new TenantResolver(),
+                        new FakeLogSource(),
+                        new PrincipalResolver(),
+                        OpenTelemetry.noop().getTracer("test"));
 
         RecordingSubscriber<RenderProgress> subscriber = new RecordingSubscriber<>();
         controller.events(VIEWER, "render-1").subscribe(subscriber);

@@ -21,6 +21,8 @@ import io.fabric8.kubernetes.api.model.Secret;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Reads a single decoded value out of a {@code Secret}, for the one case in this module that
@@ -35,6 +37,8 @@ import java.util.Base64;
  */
 public final class Secrets {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger(Secrets.class);
+
     private Secrets() {}
 
     /**
@@ -48,10 +52,15 @@ public final class Secrets {
         }
         Secret secret = client.secrets().inNamespace(namespace).withName(secretName).get();
         if (secret == null || secret.getData() == null) {
+            // Names only. A missing credentials Secret is a configuration problem someone has to
+            // see -- silently handing a connector a null credential just produces a confusing
+            // failure one layer down.
+            LOGGER.warn("secret '{}' in namespace '{}' does not exist or carries no data", secretName, namespace);
             return null;
         }
         String encoded = secret.getData().get(key);
         if (encoded == null) {
+            LOGGER.warn("secret '{}' in namespace '{}' has no key '{}'", secretName, namespace, key);
             return null;
         }
         return new String(Base64.getDecoder().decode(encoded), StandardCharsets.UTF_8);

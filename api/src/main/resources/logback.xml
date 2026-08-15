@@ -1,0 +1,55 @@
+<!--
+  Apus - render and host BlueMap maps on Kubernetes.
+  Copyright (C) 2026 OneLiteFeather and contributors
+
+  This program is free software: you can redistribute it and/or modify
+  it under the terms of the GNU Affero General Public License as published by
+  the Free Software Foundation, either version 3 of the License, or
+  (at your option) any later version.
+
+  This program is distributed in the hope that it will be useful,
+  but WITHOUT ANY WARRANTY; without even the implied warranty of
+  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+  GNU Affero General Public License for more details.
+
+  You should have received a copy of the GNU Affero General Public License
+  along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+  NOTE, and this is not cosmetic: docs/logging-and-tracing.md prints this file using a double
+  hyphen as a dash inside its XML comments. A double hyphen is not legal inside an XML comment,
+  so that exact text makes Logback abandon the whole configuration with a SAXParseException and
+  silently fall back to its BasicConfigurator: root at DEBUG, console only, no OTLP appender,
+  and none of the per-logger levels below. Nothing fails loudly, which is why
+  ObservabilityStartupTest#logbackIsTheConfiguredSlf4jBinding asserts the configuration was
+  actually applied. Every comment in this file therefore uses a single dash. Do not paste the
+  document's version back over it.
+-->
+<configuration>
+  <!-- Console: for a human reading `kubectl logs`. No JSON here on purpose, because nothing
+       parses this stream, so it can stay legible. -->
+  <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+    <encoder>
+      <pattern>%d{HH:mm:ss.SSS} %-5level %logger{36} - %msg%n</pattern>
+    </encoder>
+  </appender>
+
+  <!-- OTLP: the export path. Captures MDC and the code attributes so a log record can be
+       correlated with the span it occurred in. Until OpenTelemetryFactory hands this appender
+       the SDK (at context startup), and whenever the SDK is configured with no log exporter,
+       this appender costs nothing. -->
+  <appender name="OTEL" class="io.opentelemetry.instrumentation.logback.appender.v1_0.OpenTelemetryAppender">
+    <captureExperimentalAttributes>false</captureExperimentalAttributes>
+    <captureCodeAttributes>true</captureCodeAttributes>
+    <captureMdcAttributes>*</captureMdcAttributes>
+  </appender>
+
+  <root level="INFO">
+    <appender-ref ref="CONSOLE"/>
+    <appender-ref ref="OTEL"/>
+  </root>
+
+  <!-- Our own code at DEBUG is useful while troubleshooting and cheap; the Kubernetes
+       client at DEBUG is a firehose. -->
+  <logger name="net.onelitefeather.apus" level="INFO"/>
+  <logger name="io.fabric8.kubernetes.client" level="WARN"/>
+</configuration>

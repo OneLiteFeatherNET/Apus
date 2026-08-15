@@ -32,6 +32,7 @@ import io.javaoperatorsdk.operator.api.reconciler.Context;
 import io.javaoperatorsdk.operator.api.reconciler.ControllerConfiguration;
 import io.javaoperatorsdk.operator.api.reconciler.Reconciler;
 import io.javaoperatorsdk.operator.api.reconciler.UpdateControl;
+import io.opentelemetry.api.common.Attributes;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -40,6 +41,9 @@ import net.onelitefeather.apus.operator.api.Conditions;
 import net.onelitefeather.apus.operator.api.Labels;
 import net.onelitefeather.apus.operator.api.Tenant;
 import net.onelitefeather.apus.operator.rook.CephObjectStoreUser;
+import net.onelitefeather.apus.operator.telemetry.Tracing;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Turns a Tenant into the ground a tenant stands on: a namespace, compute limits and a Ceph
@@ -87,6 +91,8 @@ import net.onelitefeather.apus.operator.rook.CephObjectStoreUser;
 @ControllerConfiguration
 public class TenantReconciler implements Reconciler<Tenant> {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger(TenantReconciler.class);
+
     public static final String TENANT_LABEL = Labels.TENANT;
     public static final String TENANT_UID_LABEL = Labels.TENANT_UID;
 
@@ -122,6 +128,14 @@ public class TenantReconciler implements Reconciler<Tenant> {
 
     @Override
     public UpdateControl<Tenant> reconcile(Tenant tenant, Context<Tenant> context) {
+        return Tracing.reconcile("Tenant", Tracing.TENANT, tenant, () -> doReconcile(tenant));
+    }
+
+    /**
+     * The reconciliation itself, split out of {@link #reconcile} so the span wrapping it stays a
+     * single readable line rather than an extra level of indentation over the whole method.
+     */
+    private UpdateControl<Tenant> doReconcile(Tenant tenant) {
         String namespace = namespaceFor(tenant);
         String cephUser = cephUserFor(tenant);
         String tenantName = tenant.getMetadata().getName();
@@ -163,6 +177,70 @@ public class TenantReconciler implements Reconciler<Tenant> {
 
         OwnerReference ownerReference = tenantOwnerReference(tenant);
 
+        // Two nested spans, because these are the two halves of provisioning that can be slow or
+        // fail independently of each other: the namespace and everything scoped to it, and the
+        // Ceph user carrying the storage quota (which lives in Rook's namespace and is a
+        // different API server round-trip against a CRD that may not even be registered).
+        Tracing.run(
+                "provision tenant namespace",
+                Attributes.of(Tracing.TENANT, tenantName, Tracing.K8S_NAMESPACE_NAME, namespace),
+                () -> provisionNamespace(tenant, namespace, tenantName, tenantUid, ownerReference, existingPushToken));
+
+        if (rookAvailable) {
+            Tracing.run(
+                    "provision ceph object store user",
+                    Attributes.of(Tracing.TENANT, tenantName),
+                    () -> provisionCephUser(tenant, cephUser, tenantName, tenantUid));
+        }
+
+        tenant.getStatus().setNamespace(namespace);
+
+        if (rookAvailable) {
+            tenant.getStatus().setObjectStoreUser(cephUser);
+            Conditions.set(
+                    tenant.getStatus().getConditions(),
+                    Conditions.ready(true, "Provisioned", "namespace and storage user exist"));
+            if (existingNamespace == null) {
+                LOGGER.info(
+                        "provisioned tenant '{}': namespace '{}', ceph object store user '{}'",
+                        tenantName,
+                        namespace,
+                        cephUser);
+            } else {
+                LOGGER.debug("tenant '{}' is up to date (namespace '{}')", tenantName, namespace);
+            }
+        } else {
+            // Leave status.objectStoreUser unset: no CephObjectStoreUser was actually created,
+            // and reporting the deterministic name here would claim a resource exists that
+            // does not.
+            Conditions.set(
+                    tenant.getStatus().getConditions(),
+                    Conditions.ready(
+                            false,
+                            ROOK_UNAVAILABLE_REASON,
+                            "namespace and quota provisioned; CephObjectStoreUser CRD (ceph.rook.io) is not"
+                                    + " registered on this cluster -- Rook is not installed or not ready yet"));
+            LOGGER.warn(
+                    "tenant '{}': namespace '{}' provisioned, but the CephObjectStoreUser CRD is not registered"
+                            + " on this cluster -- no storage user until Rook is ready",
+                    tenantName,
+                    namespace);
+        }
+
+        return UpdateControl.patchStatus(tenant);
+    }
+
+    /**
+     * Creates (or updates) everything scoped to the tenant's own namespace: the namespace itself,
+     * the one-off push-token Secret, the compute quota and the limit range.
+     */
+    private void provisionNamespace(
+            Tenant tenant,
+            String namespace,
+            String tenantName,
+            String tenantUid,
+            OwnerReference ownerReference,
+            Secret existingPushToken) {
         client.namespaces()
                 .resource(new NamespaceBuilder()
                         .withNewMetadata()
@@ -193,6 +271,12 @@ public class TenantReconciler implements Reconciler<Tenant> {
                             .withStringData(Map.of(PushTokenSecrets.TOKEN_KEY, PushTokenSecrets.generate()))
                             .build())
                     .create();
+            // The Secret's name only -- the token itself never reaches a log line, a span
+            // attribute or CR status (design spec §12, see the class Javadoc).
+            LOGGER.info(
+                    "created the world:push token secret '{}' for tenant '{}'",
+                    PushTokenSecrets.SECRET_NAME,
+                    tenantName);
         }
         tenant.getStatus().setPushTokenSecret(PushTokenSecrets.SECRET_NAME);
 
@@ -224,47 +308,29 @@ public class TenantReconciler implements Reconciler<Tenant> {
                         .endMetadata()
                         .build())
                 .createOr(NonDeletingOperation::update);
+    }
 
-        if (rookAvailable) {
-            CephObjectStoreUser user = new CephObjectStoreUser();
-            user.getMetadata().setName(cephUser);
-            user.getMetadata().setNamespace(config.rookNamespace());
-            user.getMetadata().setLabels(tenantLabels(tenantName, tenantUid));
-            user.getSpec().setStore(config.cephObjectStore());
-            user.getSpec().setDisplayName(cephUser);
-            user.getSpec().getQuotas().setMaxSize(tenant.getSpec().getStorage().getQuota());
-            user.getSpec().getQuotas().setMaxObjects(tenant.getSpec().getStorage().getMaxObjects());
-            // No ownerReference here: the user lives in the Rook namespace, not the tenant's own
-            // namespace, and Kubernetes garbage collection of a namespaced dependent owned by a
-            // cluster-scoped resource across namespaces is not something this operator relies on.
-            // The tenant/UID labels checked above are what actually prevents cross-tenant reuse.
-            client.resources(CephObjectStoreUser.class)
-                    .inNamespace(config.rookNamespace())
-                    .resource(user)
-                    .createOr(NonDeletingOperation::update);
-        }
-
-        tenant.getStatus().setNamespace(namespace);
-
-        if (rookAvailable) {
-            tenant.getStatus().setObjectStoreUser(cephUser);
-            Conditions.set(
-                    tenant.getStatus().getConditions(),
-                    Conditions.ready(true, "Provisioned", "namespace and storage user exist"));
-        } else {
-            // Leave status.objectStoreUser unset: no CephObjectStoreUser was actually created,
-            // and reporting the deterministic name here would claim a resource exists that
-            // does not.
-            Conditions.set(
-                    tenant.getStatus().getConditions(),
-                    Conditions.ready(
-                            false,
-                            ROOK_UNAVAILABLE_REASON,
-                            "namespace and quota provisioned; CephObjectStoreUser CRD (ceph.rook.io) is not"
-                                    + " registered on this cluster -- Rook is not installed or not ready yet"));
-        }
-
-        return UpdateControl.patchStatus(tenant);
+    /**
+     * Creates (or updates) the Ceph object-store user carrying this tenant's storage quota. Only
+     * called once the caller has established that Rook's CRD is registered at all.
+     */
+    private void provisionCephUser(Tenant tenant, String cephUser, String tenantName, String tenantUid) {
+        CephObjectStoreUser user = new CephObjectStoreUser();
+        user.getMetadata().setName(cephUser);
+        user.getMetadata().setNamespace(config.rookNamespace());
+        user.getMetadata().setLabels(tenantLabels(tenantName, tenantUid));
+        user.getSpec().setStore(config.cephObjectStore());
+        user.getSpec().setDisplayName(cephUser);
+        user.getSpec().getQuotas().setMaxSize(tenant.getSpec().getStorage().getQuota());
+        user.getSpec().getQuotas().setMaxObjects(tenant.getSpec().getStorage().getMaxObjects());
+        // No ownerReference here: the user lives in the Rook namespace, not the tenant's own
+        // namespace, and Kubernetes garbage collection of a namespaced dependent owned by a
+        // cluster-scoped resource across namespaces is not something this operator relies on.
+        // The tenant/UID labels checked above are what actually prevents cross-tenant reuse.
+        client.resources(CephObjectStoreUser.class)
+                .inNamespace(config.rookNamespace())
+                .resource(user)
+                .createOr(NonDeletingOperation::update);
     }
 
     /**
@@ -287,6 +353,11 @@ public class TenantReconciler implements Reconciler<Tenant> {
      * contents of) someone else's resource.
      */
     private static UpdateControl<Tenant> conflict(Tenant tenant, String resourceKind, String resourceName) {
+        LOGGER.warn(
+                "tenant '{}': existing {} '{}' is not labelled as owned by this tenant -- refusing to adopt it",
+                tenant.getMetadata().getName(),
+                resourceKind,
+                resourceName);
         Conditions.set(
                 tenant.getStatus().getConditions(),
                 Conditions.ready(

@@ -1,0 +1,28 @@
+<configuration>
+  <!-- Console: for a human reading `kubectl logs`. No JSON here on purpose -- nothing
+       parses this stream, so it can stay legible. -->
+  <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+    <encoder>
+      <pattern>%d{HH:mm:ss.SSS} %-5level %logger{36} - %msg%n</pattern>
+    </encoder>
+  </appender>
+
+  <!-- OTLP: the export path. Captures MDC and the code attributes so a log record can be
+       correlated with the span it occurred in. With no OTEL_EXPORTER_OTLP_ENDPOINT set,
+       the SDK is a no-op and this appender costs nothing. -->
+  <appender name="OTEL" class="io.opentelemetry.instrumentation.logback.appender.v1_0.OpenTelemetryAppender">
+    <captureExperimentalAttributes>false</captureExperimentalAttributes>
+    <captureCodeAttributes>true</captureCodeAttributes>
+    <captureMdcAttributes>*</captureMdcAttributes>
+  </appender>
+
+  <root level="INFO">
+    <appender-ref ref="CONSOLE"/>
+    <appender-ref ref="OTEL"/>
+  </root>
+
+  <!-- Our own code at DEBUG is useful while troubleshooting and cheap; the Kubernetes
+       client at DEBUG is a firehose. -->
+  <logger name="net.onelitefeather.apus" level="INFO"/>
+  <logger name="io.fabric8.kubernetes.client" level="WARN"/>
+</configuration>

@@ -39,6 +39,8 @@ import net.onelitefeather.apus.api.support.PrincipalResolver;
 import net.onelitefeather.apus.operator.api.BlueMapMap;
 import net.onelitefeather.apus.operator.api.BlueMapRender;
 import net.onelitefeather.apus.operator.api.Ref;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * {@code GET /api/maps}, {@code GET /api/maps/{id}}, and {@code POST /api/maps/{id}/render} --
@@ -55,6 +57,8 @@ import net.onelitefeather.apus.operator.api.Ref;
 @Controller("/api/maps")
 @Secured(SecurityRule.IS_AUTHENTICATED)
 public class BlueMapMapController {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(BlueMapMapController.class);
 
     private final BlueMapMapRepository mapRepository;
     private final BlueMapRenderRepository renderRepository;
@@ -113,23 +117,34 @@ public class BlueMapMapController {
         render.getSpec().setForce(request != null && request.force());
 
         BlueMapRender created = renderRepository.create(namespace, render);
+        LOGGER.info(
+                "render '{}' triggered for map '{}' in namespace '{}' (force={})",
+                created.getMetadata().getName(),
+                id,
+                namespace,
+                render.getSpec().isForce());
         return HttpResponse.created(BlueMapRenderResponse.from(created));
     }
 
     private BlueMapMap findOwnMap(String namespace, String id) {
-        return mapRepository
-                .find(namespace, id)
-                .orElseThrow(() -> new NotFoundException("no map '" + id + "' in namespace '" + namespace + "'"));
+        return mapRepository.find(namespace, id).orElseThrow(() -> {
+            // "Does not exist" and "belongs to another tenant" are deliberately the same, entirely
+            // ordinary 404 (see the class Javadoc) -- neither is an error worth alerting on.
+            LOGGER.debug("no map '{}' in namespace '{}'", id, namespace);
+            return new NotFoundException("no map '" + id + "' in namespace '" + namespace + "'");
+        });
     }
 
     private void requireRead(ApusPrincipal principal) {
         if (!TenantAccess.canRead(principal)) {
+            LOGGER.warn("principal '{}' denied read access to /api/maps: no tenant role", principal.subject());
             throw new ForbiddenException("principal '" + principal.subject() + "' has no tenant role");
         }
     }
 
     private void requireWrite(ApusPrincipal principal) {
         if (!principal.canWrite()) {
+            LOGGER.warn("principal '{}' denied write access to /api/maps", principal.subject());
             throw new ForbiddenException("principal '" + principal.subject() + "' is not tenant-owner/tenant-operator");
         }
     }

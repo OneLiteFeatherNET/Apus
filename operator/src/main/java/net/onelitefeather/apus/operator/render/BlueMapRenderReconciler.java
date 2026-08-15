@@ -31,6 +31,7 @@ import io.javaoperatorsdk.operator.api.reconciler.Context;
 import io.javaoperatorsdk.operator.api.reconciler.ControllerConfiguration;
 import io.javaoperatorsdk.operator.api.reconciler.Reconciler;
 import io.javaoperatorsdk.operator.api.reconciler.UpdateControl;
+import io.opentelemetry.api.common.Attributes;
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -47,6 +48,9 @@ import net.onelitefeather.apus.operator.OperatorConfig;
 import net.onelitefeather.apus.operator.api.BlueMapMap;
 import net.onelitefeather.apus.operator.api.BlueMapRender;
 import net.onelitefeather.apus.operator.api.Conditions;
+import net.onelitefeather.apus.operator.telemetry.Tracing;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Turns a {@link BlueMapRender} into a running render {@link Job} (via {@link RenderJobBuilder}),
@@ -104,6 +108,8 @@ import net.onelitefeather.apus.operator.api.Conditions;
  */
 @ControllerConfiguration
 public class BlueMapRenderReconciler implements Reconciler<BlueMapRender> {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(BlueMapRenderReconciler.class);
 
     /** Reason set on the {@code Ready} condition while the referenced map is not bound yet. */
     public static final String MAP_NOT_READY_REASON = "MapNotReady";
@@ -168,6 +174,14 @@ public class BlueMapRenderReconciler implements Reconciler<BlueMapRender> {
 
     @Override
     public UpdateControl<BlueMapRender> reconcile(BlueMapRender render, Context<BlueMapRender> context) {
+        return Tracing.reconcile("BlueMapRender", Tracing.RENDER, render, () -> doReconcile(render));
+    }
+
+    /**
+     * The reconciliation itself, split out of {@link #reconcile} so the span wrapping it stays a
+     * single readable line rather than an extra level of indentation over the whole method.
+     */
+    private UpdateControl<BlueMapRender> doReconcile(BlueMapRender render) {
         String currentPhase = render.getStatus().getPhase();
         if (currentPhase != null && TERMINAL_PHASES.contains(currentPhase)) {
             return UpdateControl.noUpdate();
@@ -209,9 +223,24 @@ public class BlueMapRenderReconciler implements Reconciler<BlueMapRender> {
                     "another render for map '" + mapName + "' is already active (concurrencyPolicy: Forbid)");
         }
 
-        String bucketSecretName = map.getStatus().getBucket().getSecretName();
-        Job job = RenderJobBuilder.build(render, map, bucketSecretName, config);
-        client.batch().v1().jobs().inNamespace(namespace).resource(job).createOr(NonDeletingOperation::update);
+        // Its own span: building the job is cheap, but submitting it is an API server write
+        // that can be rejected (admission webhooks, quota) or simply be slow, and it is the
+        // moment a render actually starts costing cluster resources.
+        Tracing.run(
+                "create render job",
+                Attributes.of(
+                        Tracing.RENDER, renderName, Tracing.MAP, mapName, Tracing.K8S_NAMESPACE_NAME, namespace),
+                () -> {
+                    String bucketSecretName = map.getStatus().getBucket().getSecretName();
+                    Job job = RenderJobBuilder.build(render, map, bucketSecretName, config);
+                    client.batch()
+                            .v1()
+                            .jobs()
+                            .inNamespace(namespace)
+                            .resource(job)
+                            .createOr(NonDeletingOperation::update);
+                });
+        LOGGER.info("submitted render job '{}' for map '{}' in namespace '{}'", renderName, mapName, namespace);
 
         render.getStatus().setJobName(renderName);
         render.getStatus().setPhase(RENDERING_PHASE);
@@ -247,12 +276,17 @@ public class BlueMapRenderReconciler implements Reconciler<BlueMapRender> {
         if (pod != null) {
             Optional<String> quotaMessage = quotaExceededMessage(pod);
             if (quotaMessage.isPresent()) {
+                LOGGER.warn(
+                        "render '{}' in namespace '{}' hit the tenant's storage quota and will not be retried",
+                        renderName,
+                        namespace);
                 onQuotaExceeded(render, quotaMessage.get());
                 return UpdateControl.patchStatus(render);
             }
         }
 
         if (isJobSucceeded(job)) {
+            LOGGER.info("render '{}' in namespace '{}' completed", renderName, namespace);
             render.getStatus().setPhase(SUCCEEDED_PHASE);
             render.getStatus().setCompletionTime(Instant.now().toString());
             Conditions.set(
@@ -261,6 +295,10 @@ public class BlueMapRenderReconciler implements Reconciler<BlueMapRender> {
             return UpdateControl.patchStatus(render);
         }
         if (isJobFailed(job)) {
+            LOGGER.error(
+                    "render '{}' in namespace '{}' failed: the render job exhausted its retries",
+                    renderName,
+                    namespace);
             render.getStatus().setPhase(FAILED_PHASE);
             render.getStatus().setCompletionTime(Instant.now().toString());
             Conditions.set(
@@ -270,7 +308,21 @@ public class BlueMapRenderReconciler implements Reconciler<BlueMapRender> {
         }
 
         if (pod != null) {
-            progressFetcher.fetch(pod).flatMap(ProgressPoller::parse).ifPresent(progress -> applyProgress(render, progress));
+            // Its own span: an HTTP round-trip to the render pod's telemetry addon, over the
+            // pod network, with its own timeout -- the one part of a polling reconcile that
+            // waits on something outside the API server.
+            Pod polled = pod;
+            Tracing.run(
+                    "poll render progress",
+                    Attributes.of(
+                            Tracing.RENDER,
+                            renderName,
+                            Tracing.K8S_POD_NAME,
+                            polled.getMetadata() == null ? "" : String.valueOf(polled.getMetadata().getName())),
+                    () -> progressFetcher
+                            .fetch(polled)
+                            .flatMap(ProgressPoller::parse)
+                            .ifPresent(progress -> applyProgress(render, progress)));
         }
 
         render.getStatus().setPhase(RENDERING_PHASE);
@@ -492,6 +544,7 @@ public class BlueMapRenderReconciler implements Reconciler<BlueMapRender> {
     }
 
     private static UpdateControl<BlueMapRender> pending(BlueMapRender render, String reason, String message) {
+        LOGGER.debug("render '{}' is pending ({}): {}", render.getMetadata().getName(), reason, message);
         render.getStatus().setPhase(PENDING_PHASE);
         Conditions.set(render.getStatus().getConditions(), Conditions.ready(false, reason, message));
         return UpdateControl.patchStatus(render).rescheduleAfter(RECHECK_INTERVAL);
@@ -503,6 +556,11 @@ public class BlueMapRenderReconciler implements Reconciler<BlueMapRender> {
      * updated -- see {@code TenantReconciler}'s identical {@code conflict()} method.
      */
     private static UpdateControl<BlueMapRender> conflict(BlueMapRender render, String resourceKind, String resourceName) {
+        LOGGER.warn(
+                "render '{}': existing {} '{}' is not owned by this render -- refusing to adopt it",
+                render.getMetadata().getName(),
+                resourceKind,
+                resourceName);
         render.getStatus().setPhase(PENDING_PHASE);
         Conditions.set(
                 render.getStatus().getConditions(),

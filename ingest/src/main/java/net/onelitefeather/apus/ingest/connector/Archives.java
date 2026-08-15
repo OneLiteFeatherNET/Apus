@@ -28,6 +28,8 @@ import java.util.function.Predicate;
 import java.util.zip.GZIPInputStream;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Extraction helpers for the archive formats a world source may hand back: ZIP and gzip-compressed
@@ -47,6 +49,8 @@ import java.util.zip.ZipInputStream;
  * written its way past the limit.
  */
 public final class Archives {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(Archives.class);
 
     /** Config key: total bytes across every extracted entry before extraction aborts. See {@link Limits}. */
     public static final String CONFIG_MAX_TOTAL_BYTES = "archiveMaxTotalBytes";
@@ -138,6 +142,7 @@ public final class Archives {
                 zip.closeEntry();
             }
         }
+        LOGGER.info("unpacked {} zip entries ({} bytes) into {}", entries, totalBytes[0], targetDir);
     }
 
     /**
@@ -174,6 +179,9 @@ public final class Archives {
                 }
             }
         }
+        // Entries the include predicate rejected are not counted: for a Pterodactyl backup that is
+        // the whole server minus the world, and reporting it as "extracted" would be a lie.
+        LOGGER.info("unpacked {} tar entries ({} bytes) into {}", entries, totalBytes[0], targetDir);
     }
 
     /**

@@ -19,6 +19,8 @@ package net.onelitefeather.apus.api.security;
 
 import jakarta.inject.Singleton;
 import java.util.Objects;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Maps a caller to the single namespace it may act in. This is the only place in the {@code
@@ -43,6 +45,8 @@ import java.util.Objects;
 public final class TenantResolver {
 
     /** Must match {@code TenantReconciler.namespaceFor}'s prefix -- see the class Javadoc. */
+    private static final Logger LOGGER = LoggerFactory.getLogger(TenantResolver.class);
+
     private static final String NAMESPACE_PREFIX = "bluemap-";
 
     /**
@@ -55,6 +59,9 @@ public final class TenantResolver {
         Objects.requireNonNull(principal, "principal must not be null");
         String tenant = principal.tenant();
         if (tenant == null) {
+            // Logged here rather than only at each controller so the reason is visible even for
+            // the call sites that translate this into an HTTP status without a message.
+            LOGGER.warn("principal '{}' carries no tenant claim", principal.subject());
             throw new ForbiddenException(
                     "principal '" + principal.subject() + "' carries no tenant claim; there is no default tenant");
         }

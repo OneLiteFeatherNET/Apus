@@ -22,10 +22,14 @@ import jakarta.inject.Singleton;
 import java.util.List;
 import java.util.Optional;
 import net.onelitefeather.apus.operator.api.WorldSource;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /** {@link WorldSourceRepository} backed by a real {@link KubernetesClient}. */
 @Singleton
 public class FabricWorldSourceRepository implements WorldSourceRepository {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(FabricWorldSourceRepository.class);
 
     private final KubernetesClient client;
 
@@ -46,6 +50,7 @@ public class FabricWorldSourceRepository implements WorldSourceRepository {
 
     @Override
     public WorldSource create(String namespace, WorldSource source) {
+        LOGGER.debug("creating WorldSource '{}' in namespace '{}'", source.getMetadata().getName(), namespace);
         return client.resources(WorldSource.class).inNamespace(namespace).resource(source).create();
     }
 }

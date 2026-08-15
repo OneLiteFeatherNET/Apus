@@ -21,6 +21,8 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import net.onelitefeather.apus.ingest.BundlePath;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.CommonPrefix;
 import software.amazon.awssdk.services.s3.model.Delete;
@@ -45,6 +47,8 @@ import software.amazon.awssdk.services.s3.model.S3Object;
  * level deep is enough to enumerate every version without inspecting individual object keys.
  */
 public final class AwsBundleStore implements BundleStore {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(AwsBundleStore.class);
 
     /** S3's own limit on how many keys a single {@code DeleteObjects} call may name. */
     private static final int DELETE_BATCH_SIZE = 1000;
@@ -99,6 +103,15 @@ public final class AwsBundleStore implements BundleStore {
         for (S3Object object : client.listObjectsV2Paginator(listRequest).contents()) {
             keys.add(ObjectIdentifier.builder().key(object.key()).build());
         }
+
+        // Deleting a bundle version is irreversible and driven by a retention policy rather
+        // than by anyone asking for it -- exactly the kind of thing that must be visible in the
+        // log afterwards.
+        LOGGER.info(
+                "retention: deleting {} object(s) of bundle version '{}' from bucket '{}'",
+                keys.size(),
+                prefix,
+                bundleBucket);
 
         for (int start = 0; start < keys.size(); start += DELETE_BATCH_SIZE) {
             List<ObjectIdentifier> batch = keys.subList(start, Math.min(start + DELETE_BATCH_SIZE, keys.size()));

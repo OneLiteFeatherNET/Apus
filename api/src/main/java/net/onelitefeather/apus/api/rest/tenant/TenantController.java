@@ -35,6 +35,8 @@ import net.onelitefeather.apus.api.security.ForbiddenException;
 import net.onelitefeather.apus.api.support.PrincipalResolver;
 import net.onelitefeather.apus.operator.api.Tenant;
 import net.onelitefeather.apus.operator.api.TenantSpec;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * {@code GET /api/tenants}, {@code POST /api/tenants}, and {@code PATCH /api/tenants/{name}} --
@@ -58,6 +60,8 @@ import net.onelitefeather.apus.operator.api.TenantSpec;
 @Controller("/api/tenants")
 @Secured(SecurityRule.IS_AUTHENTICATED)
 public class TenantController {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(TenantController.class);
 
     private final TenantRepository repository;
     private final PrincipalResolver principalResolver;
@@ -97,6 +101,7 @@ public class TenantController {
         }
 
         Tenant created = repository.create(tenant);
+        LOGGER.info("tenant '{}' created", created.getMetadata().getName());
         return HttpResponse.created(TenantResponse.from(created));
     }
 
@@ -111,7 +116,11 @@ public class TenantController {
     public HttpResponse<TenantResponse> update(
             Authentication authentication, @PathVariable String name, @Body UpdateTenantRequest request) {
         requirePlatformAdmin(authentication);
-        Tenant tenant = repository.findByName(name).orElseThrow(() -> new NotFoundException("no tenant '" + name + "'"));
+        Tenant tenant = repository.findByName(name).orElseThrow(() -> {
+            // An ordinary 404, not a failure -- see NotFoundException's Javadoc.
+            LOGGER.debug("no tenant '{}' to update", name);
+            return new NotFoundException("no tenant '" + name + "'");
+        });
 
         TenantSpec spec = tenant.getSpec();
         if (request.storageQuota() != null) {
@@ -125,12 +134,16 @@ public class TenantController {
         }
 
         Tenant updated = repository.update(tenant);
+        LOGGER.info("tenant '{}' updated", name);
         return HttpResponse.ok(TenantResponse.from(updated));
     }
 
     private ApusPrincipal requirePlatformAdmin(Authentication authentication) {
         ApusPrincipal principal = principalResolver.resolve(authentication);
         if (!principal.isPlatformAdmin()) {
+            // The subject is an identifier, never a credential -- the token itself is never
+            // logged (docs/logging-and-tracing.md, "Attributes and secrets").
+            LOGGER.warn("principal '{}' denied platform-admin access to /api/tenants", principal.subject());
             throw new ForbiddenException(
                     "principal '" + principal.subject() + "' is not a platform-admin");
         }

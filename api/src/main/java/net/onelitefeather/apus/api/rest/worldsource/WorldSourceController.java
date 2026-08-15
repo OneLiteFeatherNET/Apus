@@ -37,6 +37,8 @@ import net.onelitefeather.apus.api.support.PrincipalResolver;
 import net.onelitefeather.apus.operator.api.Ref;
 import net.onelitefeather.apus.operator.api.WorldSource;
 import net.onelitefeather.apus.operator.api.WorldSourceSpec;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * {@code GET /api/sources} and {@code POST /api/sources} -- the caller's own tenant only (design
@@ -50,6 +52,8 @@ import net.onelitefeather.apus.operator.api.WorldSourceSpec;
 @Controller("/api/sources")
 @Secured(SecurityRule.IS_AUTHENTICATED)
 public class WorldSourceController {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(WorldSourceController.class);
 
     private static final Set<String> VALID_TYPES = Set.of("s3", "pterodactyl", "upload", "push");
 
@@ -135,17 +139,26 @@ public class WorldSourceController {
         }
 
         WorldSource created = repository.create(namespace, source);
+        // The source's type and name only; an s3/pterodactyl source's credentials live in a
+        // referenced Secret and are never read, let alone logged, here.
+        LOGGER.info(
+                "world source '{}' of type '{}' created in namespace '{}'",
+                created.getMetadata().getName(),
+                request.type(),
+                namespace);
         return HttpResponse.created(WorldSourceResponse.from(created));
     }
 
     private void requireRead(ApusPrincipal principal) {
         if (!TenantAccess.canRead(principal)) {
+            LOGGER.warn("principal '{}' denied read access to /api/sources: no tenant role", principal.subject());
             throw new ForbiddenException("principal '" + principal.subject() + "' has no tenant role");
         }
     }
 
     private void requireWrite(ApusPrincipal principal) {
         if (!principal.canWrite()) {
+            LOGGER.warn("principal '{}' denied write access to /api/sources", principal.subject());
             throw new ForbiddenException("principal '" + principal.subject() + "' is not tenant-owner/tenant-operator");
         }
     }

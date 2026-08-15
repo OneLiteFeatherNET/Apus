@@ -30,6 +30,8 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Preferred {@link LogSource} (design spec §11.1): reads log lines out of Loki, which Alloy
@@ -56,6 +58,8 @@ import java.util.List;
  */
 final class LokiLogSource implements LogSource {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger(LokiLogSource.class);
+
     private static final Duration POLL_INTERVAL = Duration.ofSeconds(2);
 
     /** Replayed once at subscribe time, so a viewer opening the stream mid-render sees recent context. */
@@ -73,6 +77,7 @@ final class LokiLogSource implements LogSource {
 
     @Override
     public AutoCloseable tail(String namespace, String jobName, SseSource.Sink<String> sink) {
+        LOGGER.debug("tailing Loki for job '{}' in namespace '{}'", jobName, namespace);
         String query = "{namespace=\"" + namespace + "\", pod=~\"" + jobName + ".*\"}";
         Thread poller =
                 Thread.ofVirtual().name("loki-tail-" + jobName).start(() -> poll(query, sink));
@@ -98,6 +103,9 @@ final class LokiLogSource implements LogSource {
             // interruption as something other than InterruptedException; sink is a no-op past
             // stream end either way (SseSource.SingleSubscription.done), so reporting it here
             // even after cancellation is harmless.
+            // The subscriber sees this as a failed stream, which makes it an error by the
+            // contract's definition ("something failed in a way the caller sees").
+            LOGGER.error("Loki log tail failed", e);
             sink.error(e);
             return;
         }

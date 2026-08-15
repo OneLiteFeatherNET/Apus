@@ -36,6 +36,8 @@ import net.onelitefeather.apus.operator.OperatorConfig;
 import net.onelitefeather.apus.operator.api.BlueMapMap;
 import net.onelitefeather.apus.operator.api.BlueMapRender;
 import net.onelitefeather.apus.operator.api.Labels;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Turns a {@link BlueMapRender} plus the {@link BlueMapMap} it targets into the Kubernetes
@@ -53,6 +55,8 @@ import net.onelitefeather.apus.operator.api.Labels;
  * for why that class still exists despite nothing calling it yet.
  */
 public final class RenderJobBuilder {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(RenderJobBuilder.class);
 
     /** API group + version the owning {@link BlueMapRender} is served under. */
     private static final String OWNER_API_VERSION = "bluemap.onelitefeather.net/v1alpha1";
@@ -103,6 +107,12 @@ public final class RenderJobBuilder {
      */
     public static Job build(BlueMapRender render, BlueMapMap map, String bucketSecretName, OperatorConfig config) {
         String namespace = render.getMetadata().getNamespace();
+        LOGGER.debug(
+                "building render job '{}' in namespace '{}' for map '{}' from image '{}'",
+                render.getMetadata().getName(),
+                namespace,
+                map.getMetadata().getName(),
+                config.runnerImage());
         Map<String, String> labels = labels(render, map);
 
         Container container = new ContainerBuilder()

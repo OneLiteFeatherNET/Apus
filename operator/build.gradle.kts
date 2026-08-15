@@ -27,6 +27,26 @@ dependencies {
     implementation(platform(libs.aws.sdk.bom))
     implementation(libs.aws.sdk.s3)
 
+    // Logging and tracing -- the contract all three long-running services share is
+    // docs/logging-and-tracing.md. Console output for a human reading `kubectl logs`, the same
+    // events and the spans below shipped through OTLP for the pipeline.
+    //
+    // logback-classic is an `implementation` dependency rather than `runtimeOnly` on purpose:
+    // OpenTelemetryAppender extends Logback's own UnsynchronizedAppenderBase, so javac needs the
+    // Logback types on the compile classpath to resolve the OpenTelemetryAppender.install(..)
+    // call in ApusOperator at all.
+    implementation(libs.slf4j.api)
+    implementation(libs.logback.classic)
+
+    implementation(platform(libs.opentelemetry.bom))
+    implementation(libs.opentelemetry.api)
+    implementation(libs.opentelemetry.sdk)
+    implementation(libs.opentelemetry.exporter.otlp)
+    implementation(libs.opentelemetry.sdk.autoconfigure)
+
+    implementation(platform(libs.opentelemetry.instrumentation.bom))
+    implementation(libs.opentelemetry.logback.appender)
+
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
     testRuntimeOnly(libs.junit.platform.launcher)
@@ -36,6 +56,13 @@ dependencies {
     testImplementation(platform(libs.testcontainers.bom))
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.k3s)
+
+    // InMemorySpanExporter, so a test can assert on the spans a reconciliation actually produced
+    // rather than on the fact that some tracing code was called. Ships in the same
+    // io.opentelemetry BOM already imported above, hence no version and no catalog entry of its
+    // own -- the BOM is the single place the OpenTelemetry version is pinned.
+    testImplementation(platform(libs.opentelemetry.bom))
+    testImplementation("io.opentelemetry:opentelemetry-sdk-testing")
 }
 
 // Dedicated source set for the CRD generator entry point (CrdGeneratorMain). The fabric8

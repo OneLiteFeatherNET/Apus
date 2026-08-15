@@ -29,11 +29,15 @@ import net.onelitefeather.apus.api.security.ApusPrincipal;
 import net.onelitefeather.apus.api.security.ForbiddenException;
 import net.onelitefeather.apus.api.security.TenantResolver;
 import net.onelitefeather.apus.api.support.PrincipalResolver;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /** {@code GET /api/hostings} -- read-only, the caller's own tenant only. */
 @Controller("/api/hostings")
 @Secured(SecurityRule.IS_AUTHENTICATED)
 public class BlueMapHostingController {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(BlueMapHostingController.class);
 
     private final BlueMapHostingRepository repository;
     private final PrincipalResolver principalResolver;
@@ -50,6 +54,7 @@ public class BlueMapHostingController {
     public HttpResponse<List<BlueMapHostingResponse>> list(Authentication authentication) {
         ApusPrincipal principal = principalResolver.resolve(authentication);
         if (!TenantAccess.canRead(principal)) {
+            LOGGER.warn("principal '{}' denied read access to /api/hostings: no tenant role", principal.subject());
             throw new ForbiddenException("principal '" + principal.subject() + "' has no tenant role");
         }
         String namespace = tenantResolver.namespaceFor(principal);

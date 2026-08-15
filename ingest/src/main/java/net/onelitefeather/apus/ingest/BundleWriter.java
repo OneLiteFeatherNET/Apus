@@ -17,6 +17,11 @@
  */
 package net.onelitefeather.apus.ingest;
 
+import io.opentelemetry.api.OpenTelemetry;
+import io.opentelemetry.api.trace.Span;
+import io.opentelemetry.api.trace.StatusCode;
+import io.opentelemetry.api.trace.Tracer;
+import io.opentelemetry.context.Scope;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
@@ -32,6 +37,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Writes one version of a world bundle to S3.
@@ -46,16 +53,30 @@ import java.util.regex.Pattern;
  */
 public final class BundleWriter {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger(BundleWriter.class);
+
     private static final Pattern REGION_FILE_NAME = Pattern.compile("r\\.(-?\\d+)\\.(-?\\d+)\\.mca");
     private static final int SCHEMA_VERSION = 1;
     private static final String DIGEST_ALGORITHM = "SHA-256";
 
     private final S3Client s3;
     private final String bucket;
+    private final Tracer tracer;
 
+    /** Writes without tracing -- for callers (and tests) that have no SDK to hand. */
     public BundleWriter(S3Client s3, String bucket) {
+        this(s3, bucket, OpenTelemetry.noop().getTracer(IngestTelemetry.SCOPE_NAME));
+    }
+
+    /**
+     * The load phase is where a long run usually spends its time, so this class opens the {@code
+     * ingest load} span itself rather than receiving one: it is the only place that knows how many
+     * regions and bytes each dimension actually cost.
+     */
+    public BundleWriter(S3Client s3, String bucket, Tracer tracer) {
         this.s3 = s3;
         this.bucket = bucket;
+        this.tracer = tracer;
     }
 
     /**
@@ -132,6 +153,36 @@ public final class BundleWriter {
             String minecraftVersion,
             WorldLayoutLike layout,
             ProgressSink progress) {
+        Span span = tracer.spanBuilder("ingest load")
+                .setAttribute("apus.tenant", tenant)
+                .setAttribute("apus.source.name", sourceName)
+                .setAttribute("apus.world.id", worldId)
+                .setAttribute("apus.bundle.version", version)
+                .startSpan();
+        try (Scope ignored = span.makeCurrent()) {
+            return writeBundle(
+                    span, tenant, sourceName, worldId, version, sourceType, sourceRef, minecraftVersion, layout,
+                    progress);
+        } catch (RuntimeException e) {
+            span.recordException(e);
+            span.setStatus(StatusCode.ERROR, String.valueOf(e.getMessage()));
+            throw e;
+        } finally {
+            span.end();
+        }
+    }
+
+    private String writeBundle(
+            Span loadSpan,
+            String tenant,
+            String sourceName,
+            String worldId,
+            String version,
+            String sourceType,
+            String sourceRef,
+            String minecraftVersion,
+            WorldLayoutLike layout,
+            ProgressSink progress) {
         String bundlePath = BundlePath.of(tenant, sourceName, worldId, version);
 
         Map<String, List<RegionFile>> filesByDimension = new LinkedHashMap<>();
@@ -171,35 +222,57 @@ public final class BundleWriter {
         for (Map.Entry<String, List<RegionFile>> entry : filesByDimension.entrySet()) {
             String dimensionId = entry.getKey();
             String dimensionPath = bundlePath + "/dimensions/" + dimensionId;
-            List<int[]> regions = new ArrayList<>();
-            for (RegionFile file : entry.getValue()) {
-                byte[] content = readFully(file.path());
-                digest.update(content);
-                s3.putObject(bucket, dimensionPath + "/region/" + file.path().getFileName(), content);
-                regions.add(new int[] {file.x(), file.z()});
-                sizeBytes += content.length;
-                bytesDone += content.length;
-                if (progress != null) {
-                    progress.update(bytesDone, totalBytes);
+            // One span per dimension: which of the three took the time is the first thing anyone
+            // asks about a slow load, and the answer is not visible anywhere else.
+            Span dimensionSpan = tracer.spanBuilder("ingest dimension " + dimensionId)
+                    .setAttribute("apus.dimension", dimensionId)
+                    .startSpan();
+            long dimensionStartBytes = bytesDone;
+            try (Scope ignored = dimensionSpan.makeCurrent()) {
+                List<int[]> regions = new ArrayList<>();
+                for (RegionFile file : entry.getValue()) {
+                    byte[] content = readFully(file.path());
+                    digest.update(content);
+                    s3.putObject(bucket, dimensionPath + "/region/" + file.path().getFileName(), content);
+                    regions.add(new int[] {file.x(), file.z()});
+                    sizeBytes += content.length;
+                    bytesDone += content.length;
+                    if (progress != null) {
+                        progress.update(bytesDone, totalBytes);
+                    }
                 }
-            }
-            dimensionInfos.add(
-                    new BundleManifest.DimensionInfo(dimensionId, dimensionPath, regions, regions.size()));
+                dimensionInfos.add(
+                        new BundleManifest.DimensionInfo(dimensionId, dimensionPath, regions, regions.size()));
 
-            bytesDone = writeSidecarFiles(
-                    dimensionPath + "/" + ENTITIES_DIR,
-                    entityFilesByDimension.get(dimensionId),
-                    digest,
-                    progress,
-                    bytesDone,
-                    totalBytes);
-            bytesDone = writeSidecarFiles(
-                    dimensionPath + "/" + POI_DIR,
-                    poiFilesByDimension.get(dimensionId),
-                    digest,
-                    progress,
-                    bytesDone,
-                    totalBytes);
+                bytesDone = writeSidecarFiles(
+                        dimensionPath + "/" + ENTITIES_DIR,
+                        entityFilesByDimension.get(dimensionId),
+                        digest,
+                        progress,
+                        bytesDone,
+                        totalBytes);
+                bytesDone = writeSidecarFiles(
+                        dimensionPath + "/" + POI_DIR,
+                        poiFilesByDimension.get(dimensionId),
+                        digest,
+                        progress,
+                        bytesDone,
+                        totalBytes);
+
+                dimensionSpan.setAttribute("apus.dimension.regions", regions.size());
+                dimensionSpan.setAttribute("apus.dimension.bytes", bytesDone - dimensionStartBytes);
+                LOGGER.debug(
+                        "wrote dimension {}: {} regions, {} bytes",
+                        dimensionId,
+                        regions.size(),
+                        bytesDone - dimensionStartBytes);
+            } catch (RuntimeException e) {
+                dimensionSpan.recordException(e);
+                dimensionSpan.setStatus(StatusCode.ERROR, String.valueOf(e.getMessage()));
+                throw e;
+            } finally {
+                dimensionSpan.end();
+            }
         }
 
         if (levelDat != null && levelDatSize > 0) {
@@ -224,11 +297,37 @@ public final class BundleWriter {
                 sizeBytes,
                 new BundleManifest.Checksums(DIGEST_ALGORITHM, toHex(digest.digest())));
 
+        int regionCount = dimensionInfos.stream()
+                .mapToInt(BundleManifest.DimensionInfo::regionCount)
+                .sum();
+        loadSpan.setAttribute("apus.bundle.path", bundlePath);
+        loadSpan.setAttribute("apus.bundle.regions", regionCount);
+        loadSpan.setAttribute("apus.bundle.bytes", bytesDone);
+
         // The manifest is the commit point: written last, and only after every region file
         // above succeeded. If any putObject or file read above threw, execution never reaches
-        // this line, and no manifest exists for this bundle version.
-        s3.putObject(bucket, bundlePath + "/manifest.json", manifest.toJson().getBytes(StandardCharsets.UTF_8));
+        // this line, and no manifest exists for this bundle version. It gets its own span for the
+        // same reason: a run whose manifest write is the step that failed is a run that wrote
+        // everything and committed nothing.
+        Span manifestSpan = tracer.spanBuilder("ingest manifest")
+                .setAttribute("apus.bundle.path", bundlePath)
+                .startSpan();
+        try (Scope ignored = manifestSpan.makeCurrent()) {
+            s3.putObject(bucket, bundlePath + "/manifest.json", manifest.toJson().getBytes(StandardCharsets.UTF_8));
+        } catch (RuntimeException e) {
+            manifestSpan.recordException(e);
+            manifestSpan.setStatus(StatusCode.ERROR, String.valueOf(e.getMessage()));
+            throw e;
+        } finally {
+            manifestSpan.end();
+        }
 
+        LOGGER.info(
+                "wrote bundle {} ({} dimensions, {} regions, {} bytes)",
+                bundlePath,
+                dimensionInfos.size(),
+                regionCount,
+                bytesDone);
         return bundlePath;
     }
 

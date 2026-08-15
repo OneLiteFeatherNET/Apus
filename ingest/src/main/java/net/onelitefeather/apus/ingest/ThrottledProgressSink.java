@@ -17,38 +17,44 @@
  */
 package net.onelitefeather.apus.ingest;
 
-import java.io.PrintStream;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Locale;
 import java.util.function.Supplier;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
- * A {@link BundleWriter.ProgressSink} that prints a plain-text progress line to a stream, at most
- * once per {@code minInterval}, plus unconditionally on the final update.
+ * A {@link BundleWriter.ProgressSink} that logs a plain-text progress line, at most once per
+ * {@code minInterval}, plus unconditionally on the final update.
  *
  * <p>The ingest job is short-lived and has no HTTP server (unlike {@code runner}'s telemetry
- * addon) -- see {@code ingest/README.md} for why a periodic stdout line was chosen instead. {@link
+ * addon) -- see {@code ingest/README.md} for why a periodic log line was chosen instead. {@link
  * BundleWriter} may call {@link #update} once per region file, which for a large world can be
  * thousands of times in quick succession; without throttling that would flood the job's log
  * output without adding useful information.
+ *
+ * <p>The line's wording is a contract, not cosmetics: the operator scrapes {@code progress: NN.N%
+ * (done/total bytes)} back out of this pod's log to move the {@code WorldIngest}'s status forward
+ * while the job runs (see its {@code IngestLogProgress}). The surrounding Logback layout may
+ * change freely; that substring may not.
  */
 final class ThrottledProgressSink implements BundleWriter.ProgressSink {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger(ThrottledProgressSink.class);
+
     private final Duration minInterval;
     private final Supplier<Instant> clock;
-    private final PrintStream out;
     private Instant lastReported;
 
     ThrottledProgressSink(Duration minInterval) {
-        this(minInterval, Instant::now, System.out);
+        this(minInterval, Instant::now);
     }
 
-    /** Visible for tests to inject a fake clock and capture output without a real sleep. */
-    ThrottledProgressSink(Duration minInterval, Supplier<Instant> clock, PrintStream out) {
+    /** Visible for tests to inject a fake clock, so throttling can be exercised without sleeping. */
+    ThrottledProgressSink(Duration minInterval, Supplier<Instant> clock) {
         this.minInterval = minInterval;
         this.clock = clock;
-        this.out = out;
         this.lastReported = null;
     }
 
@@ -62,7 +68,8 @@ final class ThrottledProgressSink implements BundleWriter.ProgressSink {
             return;
         }
         double percent = bytesTotal > 0 ? (100.0 * bytesDone / bytesTotal) : 100.0;
-        out.printf(Locale.ROOT, "[apus-ingest] progress: %.1f%% (%d/%d bytes)%n", percent, bytesDone, bytesTotal);
+        LOGGER.info(
+                "progress: {}% ({}/{} bytes)", String.format(Locale.ROOT, "%.1f", percent), bytesDone, bytesTotal);
         lastReported = now;
     }
 }

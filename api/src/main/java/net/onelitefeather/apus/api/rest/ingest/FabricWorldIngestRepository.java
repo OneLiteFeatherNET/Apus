@@ -20,10 +20,14 @@ package net.onelitefeather.apus.api.rest.ingest;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import jakarta.inject.Singleton;
 import net.onelitefeather.apus.operator.api.WorldIngest;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /** {@link WorldIngestRepository} backed by a real {@link KubernetesClient}. */
 @Singleton
 public class FabricWorldIngestRepository implements WorldIngestRepository {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(FabricWorldIngestRepository.class);
 
     private final KubernetesClient client;
 
@@ -33,6 +37,7 @@ public class FabricWorldIngestRepository implements WorldIngestRepository {
 
     @Override
     public WorldIngest create(String namespace, WorldIngest ingest) {
+        LOGGER.debug("creating WorldIngest for world '{}' in namespace '{}'", ingest.getSpec().getWorldName(), namespace);
         return client.resources(WorldIngest.class).inNamespace(namespace).resource(ingest).create();
     }
 }

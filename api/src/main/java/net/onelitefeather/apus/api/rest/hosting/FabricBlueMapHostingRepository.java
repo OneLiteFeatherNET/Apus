@@ -21,10 +21,14 @@ import io.fabric8.kubernetes.client.KubernetesClient;
 import jakarta.inject.Singleton;
 import java.util.List;
 import net.onelitefeather.apus.operator.api.BlueMapHosting;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /** {@link BlueMapHostingRepository} backed by a real {@link KubernetesClient}. */
 @Singleton
 public class FabricBlueMapHostingRepository implements BlueMapHostingRepository {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(FabricBlueMapHostingRepository.class);
 
     private final KubernetesClient client;
 
@@ -34,6 +38,7 @@ public class FabricBlueMapHostingRepository implements BlueMapHostingRepository 
 
     @Override
     public List<BlueMapHosting> list(String namespace) {
+        LOGGER.debug("listing BlueMapHostings in namespace '{}'", namespace);
         return client.resources(BlueMapHosting.class).inNamespace(namespace).list().getItems();
     }
 }
