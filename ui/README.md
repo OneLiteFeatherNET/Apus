@@ -138,11 +138,10 @@ that, a deploy strands browsers on HTML referencing hashed assets the new build 
 ships. `tests/server/nitro.spec.ts` spawns the built server and holds it; it needs a build, so
 it runs as `pnpm test:server`.
 
-Full documentation — why Nitro rather than nginx or `vite preview`, the measured memory and
-dependency trade-offs, the complete variable and chart-value reference, and the operational
-how-to — lives in Outline:
-[Apus UI — Auslieferung & Runtime-Konfiguration](https://outline.onelitefeather.dev/doc/apus-ui-auslieferung-runtime-konfiguration-FMiR3F2bIQ)
-(space *Entwicklung*).
+Why Nitro rather than nginx or `vite preview`, the measured memory and dependency trade-offs,
+the full variable and chart-value reference and the operational how-to are documented
+internally: engineering wiki, space *Entwicklung*, "Apus UI — Auslieferung &
+Runtime-Konfiguration".
 
 ### Why no server-side session
 
