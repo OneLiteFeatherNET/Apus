@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/OneLiteFeatherNET/Apus/compare/apus-v0.4.1...apus-v0.5.0) (2026-08-15)
+
+
+### Features
+
+* **ui:** serve the dashboard with Nitro on distroless and make it configurable at runtime ([#47](https://github.com/OneLiteFeatherNET/Apus/issues/47)) ([962377a](https://github.com/OneLiteFeatherNET/Apus/commit/962377a0996c3f57ed09be5ed74d0e4010d3b1f2))
+
 ## [0.4.1](https://github.com/OneLiteFeatherNET/Apus/compare/apus-v0.4.0...apus-v0.4.1) (2026-08-15)
 
 
