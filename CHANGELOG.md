@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/OneLiteFeatherNET/Apus/compare/apus-v0.3.1...apus-v0.4.0) (2026-08-15)
+
+
+### Features
+
+* **observability:** OpenTelemetry tracing and SLF4J logging ([#45](https://github.com/OneLiteFeatherNET/Apus/issues/45)) ([92c7f22](https://github.com/OneLiteFeatherNET/Apus/commit/92c7f22851ccfaa66e99a18abd6ff9e6ceeab40f))
+
 ## [0.3.1](https://github.com/OneLiteFeatherNET/Apus/compare/apus-v0.3.0...apus-v0.3.1) (2026-08-15)
 
 
