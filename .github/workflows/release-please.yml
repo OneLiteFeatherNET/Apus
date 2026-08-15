@@ -3,6 +3,18 @@ name: release-please
 on:
   push:
     branches: [main]
+  # Re-publish path for a version that was already released. release-please fires exactly
+  # once per version, so without this there is no way to rebuild and re-push the six images
+  # and the two charts (e.g. after a registry loss or a base-image CVE) short of faking a
+  # release commit. A dispatch run publishes artifacts only -- it never touches
+  # release-please's manifest, tags or release PRs.
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to rebuild and push, without a leading 'v' (e.g. 0.3.0). Empty = the current root version from .release-please-manifest.json."
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: write
@@ -12,20 +24,68 @@ jobs:
   release-please:
     runs-on: ubuntu-latest
     outputs:
-      # The root package is the one exception to the `<path>--<key>` output naming:
-      # release-please-action's setPathOutput() emits the bare key when the package path
-      # is ".", so `.--release_created` is always empty and every image publish silently
-      # skipped. Only the two component packages carry a prefix.
-      root-released: ${{ steps.release.outputs.release_created }}
-      root-version: ${{ steps.release.outputs.version }}
+      # Both come from the resolve step rather than straight from release-please, because
+      # they have two sources: release-please on push, the dispatch input on a manual run.
+      # Funnelling them through one step keeps every downstream gate a plain
+      # `root-released == 'true'` check that needs to know nothing about the event.
+      root-released: ${{ steps.resolve.outputs.released }}
+      root-version: ${{ steps.resolve.outputs.version }}
+      # The component packages keep their `<path>--<key>` prefix (see the resolve step for
+      # why the root package does not) and are intentionally left empty on a manual
+      # dispatch -- see the note on the two Maven jobs at the bottom of this file.
       telemetry-released: ${{ steps.release.outputs['telemetry-addon--release_created'] }}
       paper-released: ${{ steps.release.outputs['paper-worldpush--release_created'] }}
     steps:
       - id: release
+        # Never on a manual dispatch: release-please would open or update a release PR for
+        # the next version, which is the exact opposite of re-publishing an existing one.
+        # Skipped steps produce empty outputs, which the resolve step below relies on.
+        if: github.event_name == 'push'
         uses: googleapis/release-please-action@v5
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+      - uses: actions/checkout@v5
+        # Only the dispatch path needs a working tree, to read the manifest fallback below.
+        # release-please-action works purely through the API and needs no checkout.
+        if: github.event_name == 'workflow_dispatch'
+      - id: resolve
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          # The root package is the one exception to the `<path>--<key>` output naming:
+          # release-please-action's setPathOutput() emits the bare key when the package path
+          # is ".", so `.--release_created` is always empty and every image publish silently
+          # skipped. Only the two component packages carry a prefix.
+          RELEASE_CREATED: ${{ steps.release.outputs.release_created }}
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+          # Empty for any event other than workflow_dispatch.
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if [ "${EVENT_NAME}" = "workflow_dispatch" ]; then
+            version="${INPUT_VERSION}"
+            if [ -z "${version}" ]; then
+              # The manifest is release-please's own record of the current version, so the
+              # default re-publishes exactly what the last release produced.
+              version="$(jq -er '."."' .release-please-manifest.json)"
+            fi
+            # A leading "v" or a tag name would be accepted everywhere downstream and quietly
+            # produce wrong artifacts: docker/metadata-action's semver patterns would yield
+            # nothing usable and the chart would be packaged under a name no one pulls.
+            if ! printf '%s' "${version}" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)*$'; then
+              echo "::error::'${version}' is not a bare semver version (expected e.g. 0.3.0, no leading 'v')" >&2
+              exit 1
+            fi
+            # The dispatch itself is the publish signal; there is no release-please run to ask.
+            released=true
+          else
+            version="${RELEASE_VERSION}"
+            # Empty when release-please created no release, which keeps every publish gate
+            # false. Passed through verbatim rather than normalised, so a push that released
+            # nothing can never turn into a publish.
+            released="${RELEASE_CREATED}"
+          fi
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          echo "released=${released}" >> "${GITHUB_OUTPUT}"
 
   build-context:
     needs: release-please
@@ -203,7 +263,13 @@ jobs:
           trap 'rm -f "${config}"' EXIT
           refs=()
           for chart in apus-operator apus-platform; do
-            helm package "deploy/charts/${chart}"
+            # --version/--app-version instead of trusting Chart.yaml: `helm package` names the
+            # .tgz after the chart's own version, and on a manual dispatch the checked-out
+            # Chart.yaml can name a different version than the one being published. That would
+            # break the `${chart}-${VERSION}.tgz` filename below and, worse, ship a chart whose
+            # appVersion -- which every image tag in the templates falls back to -- points at
+            # images from another release. On the push path both values are already identical.
+            helm package "deploy/charts/${chart}" --version "${VERSION}" --app-version "${VERSION}"
             log="${RUNNER_TEMP}/helm-push-${chart}.log"
             # `helm push` prints its "Digest: sha256:..." line to stderr, so 2>&1 is what
             # makes it readable at all. The default shell for a `run:` block without an
@@ -270,6 +336,18 @@ jobs:
               "${ref}" > /dev/null
           done <<< "${CHART_REFS}"
 
+  # The two Maven jobs below are deliberately NOT reachable from a manual dispatch: their
+  # gates read the component outputs, which stay empty when release-please does not run.
+  # Two reasons, both deliberate:
+  #   - telemetry-addon and paper-worldpush are separate release-please packages on their own
+  #     version tracks (0.2.0 while the root is at 0.3.0). The dispatch input is a *root*
+  #     version and names nothing publishable in either component.
+  #   - Re-publishing an existing version to a Maven repository is either rejected outright or
+  #     overwrites an artifact consumers have already resolved and cached, which breaks build
+  #     reproducibility after the fact. An OCI registry re-push is recoverable in a way a
+  #     mutated Maven release is not.
+  # A component that genuinely needs re-publishing wants its own dispatch input and its own
+  # version, not this one.
   publish-telemetry-addon:
     needs: release-please
     if: needs.release-please.outputs.telemetry-released == 'true'
