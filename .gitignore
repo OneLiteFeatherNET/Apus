@@ -12,7 +12,10 @@ runner/vendor/
 ui/node_modules/
 ui/.nuxt/
 ui/.output/
-ui/dist/
+# No trailing slash: `nuxt generate` leaves dist as a *symlink* to .output/public, and git
+# matches a trailing-slash pattern against directories only -- so `ui/dist/` left the symlink
+# showing up as untracked after every local build.
+ui/dist
 ui/coverage/
 ui/.env
 # Local marker @nuxt/test-utils writes recording which version last ran -- see

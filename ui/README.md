@@ -21,9 +21,11 @@ corepack enable   # or: npm install -g pnpm
 pnpm install
 pnpm dev           # local dev server
 pnpm build          # production build (static SPA output, see nuxt.config.ts)
-pnpm test           # vitest, unit tests
-pnpm lint            # eslint, includes eslint-plugin-vuejs-accessibility
-pnpm typecheck        # vue-tsc
+pnpm generate        # the same output the container image ships, into .output/public
+pnpm serve            # serve .output/public exactly as the image does (see below)
+pnpm test              # vitest, unit tests
+pnpm lint               # eslint, includes eslint-plugin-vuejs-accessibility
+pnpm typecheck           # vue-tsc
 ```
 
 Copy `.env.example` to `.env` for local development and fill in the three variables (API base
@@ -59,8 +61,9 @@ table was built.
 Nuxt 4's actual current default: an `app/` directory holds everything client-side
 (`app/pages`, `app/components`, `app/composables`, `app/layouts`, `app/middleware`,
 `app/plugins`, `app/utils`, `app.vue`). There is no `server/` directory — this is a pure SPA
-with no Nitro API routes of its own; the only thing Nitro does here is serve the built static
-assets (see "Why no server-side session" below).
+with no Nitro API routes of its own; Nitro only ever runs at build time, to write the static
+output. At runtime nothing of it is left — the container serves the generated files with
+`serve.mjs` (see "Serving the built SPA" and "Why no server-side session" below).
 
 ```text
 app/
@@ -86,6 +89,7 @@ app/
     role.ts                           -- UI-side role helpers (convenience only, see below)
     jwt.ts                             -- decodeJwtPayload(): unverified, display-only decode
 tests/unit/                       -- vitest; mirrors app/utils/, one spec file per module
+serve.mjs                         -- the container's static file server (see below)
 ```
 
 `app/utils/*` is deliberately framework-agnostic (no `useRuntimeConfig`, no `$fetch`, no
@@ -102,12 +106,55 @@ and `useApiClient` themselves are thin enough (a few lines of wiring) that they 
 indirectly through the pure functions they call, per the task brief's "pure presentation needs
 no tests" — the composables' own logic content is effectively zero.
 
+## Serving the built SPA
+
+`ui/Dockerfile` builds `.output/public` and copies it, plus `serve.mjs`, into
+`gcr.io/distroless/nodejs24-debian12:nonroot`. `serve.mjs` is a ~200-line static file server
+with **no dependencies**: the runtime image is a Node binary, the generated assets and that one
+file — there is no `node_modules` in it, and no shell or package manager either.
+
+Run it locally exactly as the container does:
+
+```bash
+pnpm generate && pnpm serve        # http://localhost:8080, PORT/HOST override the defaults
+```
+
+### Why not nginx, `vite preview`, or a Nitro server
+
+- **nginx** (what this replaced) dragged OpenSSL, PCRE, zlib, a shell and a package manager
+  into an image whose only job is handing out ~2 MB of pre-built files. Every CVE in any of
+  them was reported against the UI image, none of them for code this deployment executes:
+  nothing here terminates TLS, rewrites requests or proxies anything. It also needed a
+  writable filesystem for its pid and cache, which is why the chart could not set
+  `readOnlyRootFilesystem: true`. It now can.
+- **`vite preview` / `nuxt preview`** is a development preview server. Serving production
+  traffic with it would mean shipping vite, rollup and esbuild — this module's largest
+  dependency tree — inside the runtime image. That *adds* attack surface rather than removing
+  it, and upstream documents it as not intended for production.
+- **A Nitro `node-server` build** would work, but it puts per-request server code back into
+  the deployment, and this SPA's whole auth design (below) rests on there being none. Static
+  files are the only thing the UI pod is allowed to do, so that is the only thing `serve.mjs`
+  can do — it has no route table to extend.
+
+The one real cost of the swap is memory: a Node process is ~50 MiB before it serves anything
+and peaks near 100 MiB at concurrency 100, where nginx idled at a few MiB. The image caps V8's
+old space (`NODE_OPTIONS=--max-old-space-size=64`) so the footprint does not depend on the
+node's RAM, and `ui.resources` in the `apus-platform` chart is set to match — change the two
+together.
+
+Behaviour matches the retired `nginx.conf` — SPA fallback to `index.html`, immutable caching
+for the hashed `/_nuxt/` assets, `no-store` for HTML — with three deliberate differences,
+each marked "vs nginx" in `serve.mjs`: a miss that names a file type stays a 404 instead of
+answering with HTML, unhashed extras revalidate instead of being heuristically cached, and
+`Range` is not honoured (nothing served here is seekable). `tests/unit/serve.spec.ts` spawns
+the real `node serve.mjs` and covers all of it, including path traversal and SIGTERM.
+
 ### Why no server-side session
 
-`ssr: false` plus a static/`node-server`-served SPA output means there is no reliable backend
+`ssr: false` plus a statically served SPA output means there is no reliable backend
 component to hold a confidential OIDC client or a session cookie behind — the deploy target for
-this module (per the design spec, presumably a plain Deployment serving static files, mirroring
-how `BlueMapHosting` serves rendered maps) may not run any per-request server code at all. That
+this module is a plain Deployment serving static files (see "Serving the built SPA" above),
+mirroring how `BlueMapHosting` serves rendered maps, and runs no per-request server code. That
 ruled out `nuxt-oidc-auth` (built around a server-side session) and shaped the client-only,
 public-client design in `useAuth.ts` below.
 

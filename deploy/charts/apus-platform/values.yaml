@@ -63,22 +63,27 @@ ui:
   replicaCount: 2
   podSecurityContext:
     runAsNonRoot: true
-    # The unprivileged nginx image runs as uid 101, not 10001 like the Java images.
-    runAsUser: 101
+    # The distroless :nonroot base runs as uid 65532, not 10001 like the Java images.
+    runAsUser: 65532
     seccompProfile:
       type: RuntimeDefault
   securityContext:
     allowPrivilegeEscalation: false
-    # nginx writes its cache and pid below /tmp and /var/cache; not read-only.
-    readOnlyRootFilesystem: false
+    # The Node static server only reads from the image; unlike nginx (which wrote its pid and
+    # cache below /tmp and /var/cache) it needs no writable path anywhere.
+    readOnlyRootFilesystem: true
     capabilities:
       drop: ["ALL"]
   resources:
     requests:
       cpu: 50m
-      memory: 64Mi
+      # Higher than the 64Mi/128Mi that fitted nginx: a Node process costs ~50Mi before it
+      # serves anything, and measured at concurrency 100 it peaks around 100Mi (with the
+      # image's own --max-old-space-size=64 cap; see ui/Dockerfile). 128Mi would have been an
+      # OOMKill under load, not a tight fit.
+      memory: 96Mi
     limits:
-      memory: 128Mi
+      memory: 256Mi
   podAnnotations: {}
   podLabels: {}
   nodeSelector: {}

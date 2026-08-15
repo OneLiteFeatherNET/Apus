@@ -8,8 +8,8 @@ metadata:
 spec:
   replicas: {{ .Values.ui.replicaCount }}
   strategy:
-    # The UI is a stateless static SPA served by nginx -- no local state to lose by running
-    # old and new pods side by side.
+    # The UI is a stateless static SPA served straight out of its image -- no local state to
+    # lose by running old and new pods side by side.
     type: RollingUpdate
   selector:
     matchLabels:
@@ -37,8 +37,8 @@ spec:
           securityContext:
             {{- toYaml .Values.ui.securityContext | nindent 12 }}
           ports:
-            # The unprivileged nginx base image (nginxinc/nginx-unprivileged) listens on
-            # 8080 and runs as uid 101, not 80/root like the stock image.
+            # ui/serve.mjs defaults to 8080 (PORT overrides it) and the distroless :nonroot
+            # base runs as uid 65532, so nothing here ever needs a privileged port.
             - name: http
               containerPort: 8080
               protocol: TCP
