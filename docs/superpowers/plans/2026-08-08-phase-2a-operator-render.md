@@ -1,36 +1,36 @@
-# Apus Phase 2a — Operator und Render-Pfad: Implementierungsplan
+# Apus Phase 2a — Operator and Render Path: Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Ein Kubernetes-Operator, der `Tenant`, `BlueMapMap` und `BlueMapRender` verwaltet: Mandanten-Namespaces mit Quotas anlegen, S3-Buckets über Rook provisionieren, BlueMap-Konfiguration erzeugen und Render-Jobs mit dem Runner-Image aus Phase 1 starten — inklusive Fortschritt im Status der Custom Resource.
+**Goal:** A Kubernetes operator that manages `Tenant`, `BlueMapMap`, and `BlueMapRender`: creating tenant namespaces with quotas, provisioning S3 buckets through Rook, generating BlueMap configuration, and starting render jobs with the runner image from Phase 1 — including progress tracking in the custom resource's status.
 
-**Architecture:** Java 25 mit Java Operator SDK 5.5.1 auf Fabric8-Client 7.8.0. Micronaut liefert nur DI, Konfiguration und Health; der Operator selbst wird über einen `StartupEvent`-Listener hochgefahren, da es für Micronaut keine JOSDK-Integration gibt. CRDs werden zur Bauzeit aus den Java-Klassen erzeugt (`crd-generator-api-v2` in einer eigenen Gradle-Task). S3 wird nicht selbst verwaltet, sondern an Rook delegiert: Der Operator legt `CephObjectStoreUser` und `ObjectBucketClaim` an und wartet auf die von Rook erzeugten Secrets.
+**Architecture:** Java 25 with Java Operator SDK 5.5.1 on Fabric8 client 7.8.0. Micronaut only supplies DI, configuration, and health; the operator itself is bootstrapped through a `StartupEvent` listener, since there is no JOSDK integration for Micronaut. CRDs are generated from the Java classes at build time (`crd-generator-api-v2` in a dedicated Gradle task). S3 is not managed by us directly but delegated to Rook: the operator creates a `CephObjectStoreUser` and an `ObjectBucketClaim` and waits for the Secrets that Rook produces.
 
 **Tech Stack:** Java 25, Gradle 9.4.1, JOSDK 5.5.1, Fabric8 7.8.0, Micronaut, JUnit Jupiter, Fabric8 `KubernetesMockServer`, Testcontainers (k3s).
 
 ## Global Constraints
 
-- **Java-Toolchain 25**, wie das bestehende `telemetry-addon`-Modul. JOSDK kompiliert gegen Java 17, läuft aber auf 25.
-- **Exakte Koordinaten** (real gegen Maven Central geprüft):
+- **Java toolchain 25**, same as the existing `telemetry-addon` module. JOSDK compiles against Java 17 but runs on 25.
+- **Exact coordinates** (verified against Maven Central):
   - `io.javaoperatorsdk:operator-framework:5.5.1`
-  - `io.javaoperatorsdk:operator-framework-junit:5.5.1` — **nicht** `operator-framework-junit-5`, das ist bei 5.2.5 eingefroren
-  - `io.fabric8:crd-generator-api-v2:7.8.0` und `io.fabric8:crd-generator-collector:7.8.0`
-  - `io.fabric8:kubernetes-junit-jupiter:7.8.0` (Mock-Server)
-  - Der Fabric8-Client kommt transitiv über JOSDK in 7.8.0 — nicht separat pinnen, sonst driftet er.
-- **Nicht verwenden:** `io.fabric8:crd-generator-apt` (seit 7.0.0 deprecated) und `io.fabric8.crd.generator.CRDGenerator` (v1, deprecated). Der v2-Weg ist `io.fabric8.crdv2.generator.CRDGenerator`.
-- **API-Gruppe:** `bluemap.onelitefeather.net`, Version `v1alpha1`.
-- **Java-Basispaket:** `net.onelitefeather.apus.operator`.
-- **Der Operator arbeitet strikt namespace-lokal.** Eine namespaced CR darf ausschließlich Ressourcen ihres eigenen Namespace referenzieren. Referenzen über Namespace-Grenzen werden bei der Validierung abgelehnt — das ist die Mandantentrennung aus §10.1 der Spec.
-- **Zugangsdaten erscheinen niemals** in CR-Status, Events oder Logs (§12 der Spec).
-- **Löschverhalten:** Das Löschen einer `BlueMapMap` löscht keine Daten. Nur bei `spec.purgeOnDelete: true` räumt ein Finalizer auf (§9.4 der Spec).
-- AGPL-Header über Spotless, Conventional Commits, **keine** Claude-Attribution, Bezeichner und Javadoc auf Englisch.
+  - `io.javaoperatorsdk:operator-framework-junit:5.5.1` — **not** `operator-framework-junit-5`, which is frozen at 5.2.5
+  - `io.fabric8:crd-generator-api-v2:7.8.0` and `io.fabric8:crd-generator-collector:7.8.0`
+  - `io.fabric8:kubernetes-junit-jupiter:7.8.0` (mock server)
+  - The Fabric8 client comes in transitively through JOSDK at 7.8.0 — do not pin it separately, or it will drift.
+- **Do not use:** `io.fabric8:crd-generator-apt` (deprecated since 7.0.0) and `io.fabric8.crd.generator.CRDGenerator` (v1, deprecated). The v2 route is `io.fabric8.crdv2.generator.CRDGenerator`.
+- **API group:** `bluemap.onelitefeather.net`, version `v1alpha1`.
+- **Java base package:** `net.onelitefeather.apus.operator`.
+- **The operator works strictly namespace-local.** A namespaced CR may only reference resources in its own namespace. Cross-namespace references are rejected during validation — this is the tenant separation from §10.1 of the spec.
+- **Credentials must never appear** in CR status, events, or logs (§12 of the spec).
+- **Deletion behaviour:** Deleting a `BlueMapMap` does not delete any data. Only when `spec.purgeOnDelete: true` does a finalizer clean up (§9.4 of the spec).
+- AGPL header via Spotless, Conventional Commits, **no** Claude attribution, identifiers and Javadoc in English.
 
-### Verifizierte JOSDK-Fakten
+### Verified JOSDK facts
 
 ```java
-// Operator bauen — Operator(KubernetesClient) ist package-private!
+// Building the operator — Operator(KubernetesClient) is package-private!
 Operator operator = new Operator(o -> o.withKubernetesClient(client));
-RegisteredController<?> c = operator.register(reconciler);   // wirft OperatorException
+RegisteredController<?> c = operator.register(reconciler);   // throws OperatorException
 operator.start();                                            // public synchronized void
 operator.stop();
 
@@ -43,8 +43,8 @@ public class FooReconciler implements Reconciler<Foo> {
     }
 }
 
-// Custom Resource — ohne `implements Namespaced` ist sie cluster-scoped.
-// Die Status-Subresource ist aktiv, sobald ein Status-Typ als zweiter Parameter steht.
+// Custom Resource — without `implements Namespaced` it is cluster-scoped.
+// The status subresource is active as soon as a status type is given as the second parameter.
 @Group("bluemap.onelitefeather.net")
 @Version("v1alpha1")
 @Kind("BlueMapMap")
@@ -54,9 +54,9 @@ public class BlueMapMap extends CustomResource<BlueMapMapSpec, BlueMapMapStatus>
         implements Namespaced {}
 ```
 
-### Verifizierte Rook-Ressourcen
+### Verified Rook resources
 
-Aus dem bestehenden Cluster (`Kubernetes-FLUX`):
+From the existing cluster (`Kubernetes-FLUX`):
 
 ```yaml
 apiVersion: objectbucket.io/v1alpha1
@@ -72,12 +72,12 @@ kind: CephObjectStoreUser
 spec:
   store: feather-s3
   displayName: <name>
-  quotas: { maxSize: 500Gi, maxObjects: 5000000 }   # §10.2 der Spec
+  quotas: { maxSize: 500Gi, maxObjects: 5000000 }   # §10.2 of the spec
 ```
 
-Rook erzeugt zur `ObjectBucketClaim` im **selben Namespace** ein Secret (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`) und eine ConfigMap (`BUCKET_HOST`, `BUCKET_NAME`, `BUCKET_PORT`), jeweils benannt wie die Claim.
+For the `ObjectBucketClaim`, Rook creates a Secret (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`) and a ConfigMap (`BUCKET_HOST`, `BUCKET_NAME`, `BUCKET_PORT`) in the **same namespace**, each named after the claim.
 
-Für beide CRDs gibt es keine fertigen Java-Modelle. Wir definieren schlanke eigene `CustomResource`-Klassen mit genau den Feldern, die wir brauchen — typsicher, weil der Reconciler den Provisioning-Status auswerten muss.
+Neither CRD has a ready-made Java model. We define our own lean `CustomResource` classes with exactly the fields we need — type-safe, because the reconciler has to evaluate the provisioning status.
 
 ---
 
@@ -88,82 +88,82 @@ operator/
 ├── build.gradle.kts                      JOSDK, CRD-Generierung, Micronaut
 └── src/
     ├── main/java/net/onelitefeather/apus/operator/
-    │   ├── ApusOperator.java             StartupEvent-Listener, registriert Reconciler
-    │   ├── api/                          Custom Resources (reine Datenklassen)
+    │   ├── ApusOperator.java             StartupEvent listener, registers reconcilers
+    │   ├── api/                          Custom Resources (plain data classes)
     │   │   ├── Tenant.java  TenantSpec.java  TenantStatus.java
     │   │   ├── BlueMapMap.java  BlueMapMapSpec.java  BlueMapMapStatus.java
     │   │   ├── BlueMapRender.java  BlueMapRenderSpec.java  BlueMapRenderStatus.java
-    │   │   └── Conditions.java           Gemeinsame Condition-Helfer
-    │   ├── rook/                          Fremde CRDs, schlank modelliert
+    │   │   └── Conditions.java           Shared condition helpers
+    │   ├── rook/                          Foreign CRDs, modelled leanly
     │   │   ├── ObjectBucketClaim.java  ObjectBucketClaimSpec.java  ObjectBucketClaimStatus.java
     │   │   └── CephObjectStoreUser.java  CephObjectStoreUserSpec.java  CephObjectStoreUserStatus.java
     │   ├── tenant/TenantReconciler.java
     │   ├── map/
     │   │   ├── BlueMapMapReconciler.java
-    │   │   ├── BucketProvisioner.java    Legt OBC an, wartet auf Secret/ConfigMap
-    │   │   └── BlueMapConfigBuilder.java Erzeugt core.conf / maps/*.conf / storages/s3.conf
+    │   │   ├── BucketProvisioner.java    Creates the OBC, waits for Secret/ConfigMap
+    │   │   └── BlueMapConfigBuilder.java Generates core.conf / maps/*.conf / storages/s3.conf
     │   ├── render/
     │   │   ├── BlueMapRenderReconciler.java
-    │   │   ├── RenderJobBuilder.java     Baut den k8s-Job aus dem Runner-Image
-    │   │   └── ProgressPoller.java       Liest /progress vom Pod, füllt den Status
-    │   └── schedule/RenderScheduler.java Cron und onNewBundle → erzeugt BlueMapRender
+    │   │   ├── RenderJobBuilder.java     Builds the k8s Job from the runner image
+    │   │   └── ProgressPoller.java       Reads /progress from the pod, fills the status
+    │   └── schedule/RenderScheduler.java Cron and onNewBundle → creates a BlueMapRender
     └── test/java/net/onelitefeather/apus/operator/…
 ```
 
-**Warum diese Aufteilung:** Die Klassen unter `api/` sind reine Datenhalter ohne Logik und ohne Kubernetes-Zugriff — sie sind die Schnittstelle, die auch Phase 5 (API/UI) nutzt. `BlueMapConfigBuilder` und `RenderJobBuilder` sind reine Funktionen von CR nach Kubernetes-Objekt und damit ohne Cluster testbar; nur die Reconciler brauchen einen Client.
+**Why this layout:** The classes under `api/` are pure data holders with no logic and no Kubernetes access — they are the interface that Phase 5 (API/UI) also uses. `BlueMapConfigBuilder` and `RenderJobBuilder` are pure functions from CR to Kubernetes object and therefore testable without a cluster; only the reconcilers need a client.
 
 ---
 
-## Parallelisierung
+## Parallelization
 
-Der Zuschnitt ist bewusst darauf ausgelegt, die Mitte parallel bearbeitbar zu machen.
-Der Trick: **Alle Datenklassen entstehen vorab in Task 2.** Solange Datenklassen und die
-Logik, die sie nutzt, in derselben Aufgabe stecken, hängt alles an allem — sind sie
-vorgezogen, berühren die drei Folgeaufgaben komplett getrennte Dateien.
+The cut is deliberately designed to make the middle parallelizable.
+The trick: **all data classes are created up front, in Task 2.** As long as data classes and
+the logic that uses them sit in the same task, everything depends on everything — pulled
+forward, the three follow-on tasks touch completely disjoint files.
 
-| Gruppe | Aufgaben | Ausführung |
+| Group | Tasks | Execution |
 | --- | --- | --- |
-| A | Task 1 — Modul und CRD-Generierung | sequenziell (Fundament) |
-| B | Task 2 — vollständiges Datenmodell | sequenziell (alle bauen darauf) |
-| C | Task 3, Task 4, Task 5 | **parallel**, je eigener Worktree |
-| D | Task 6 — Render-Reconciler | sequenziell (braucht Task 5) |
-| E | Task 7 — Einstiegspunkt | sequenziell (verdrahtet alle Reconciler) |
-| F | Task 8 — Integrationstest | sequenziell |
+| A | Task 1 — module and CRD generation | sequential (foundation) |
+| B | Task 2 — complete data model | sequential (everything builds on it) |
+| C | Task 3, Task 4, Task 5 | **parallel**, each in its own worktree |
+| D | Task 6 — render reconciler | sequential (needs Task 5) |
+| E | Task 7 — entrypoint | sequential (wires up all reconcilers) |
+| F | Task 8 — integration test | sequential |
 
-**Warum Task 6 und 7 nicht mitlaufen:** Task 6 baut auf der Signatur von
-`RenderJobBuilder` aus Task 5 auf, Task 7 verdrahtet alle Reconciler. Parallel gebaut
-müssten beide gegen Schnittstellen programmieren, die sich noch ändern — die Nacharbeit
-fräße den Zeitgewinn wieder auf.
+**Why Task 6 and 7 don't run alongside the rest:** Task 6 builds on the signature of
+`RenderJobBuilder` from Task 5, and Task 7 wires up every reconciler. Built in parallel,
+both would have to program against interfaces that are still changing — the rework would
+eat the time saved right back up.
 
-**Dateien der parallelen Gruppe C** (nachweislich disjunkt):
+**Files of the parallel Group C** (verifiably disjoint):
 
-- Task 3: `tenant/TenantReconciler.java` + zugehöriger Test
-- Task 4: `map/BucketProvisioner.java`, `map/BlueMapConfigBuilder.java` + Tests
-- Task 5: `render/RenderJobBuilder.java` + Test
+- Task 3: `tenant/TenantReconciler.java` + its test
+- Task 4: `map/BucketProvisioner.java`, `map/BlueMapConfigBuilder.java` + tests
+- Task 5: `render/RenderJobBuilder.java` + test
 
-Keine der drei Aufgaben ändert eine Datei einer anderen oder die Build-Dateien.
+None of the three tasks changes a file belonging to another, or the build files.
 
 ---
 
-### Task 1: Operator-Modul und CRD-Generierung
+### Task 1: Operator module and CRD generation
 
 **Files:**
 
-- Modify: `settings.gradle.kts` (Modul `operator` und neue Katalog-Einträge)
+- Modify: `settings.gradle.kts` (module `operator` and new catalog entries)
 - Create: `operator/build.gradle.kts`
-- Create: `operator/src/main/java/net/onelitefeather/apus/operator/api/Tenant.java` (Minimalfassung, damit es etwas zu generieren gibt)
+- Create: `operator/src/main/java/net/onelitefeather/apus/operator/api/Tenant.java` (minimal version, so there's something to generate from)
 - Create: `operator/src/main/java/net/onelitefeather/apus/operator/api/TenantSpec.java`
 - Create: `operator/src/main/java/net/onelitefeather/apus/operator/api/TenantStatus.java`
 - Test: `operator/src/test/java/net/onelitefeather/apus/operator/CrdGenerationTest.java`
 
 **Interfaces:**
 
-- Consumes: nichts
-- Produces: Katalog-Aliase `libs.josdk`, `libs.josdk.junit`, `libs.crd.generator.api.v2`, `libs.crd.generator.collector`, `libs.fabric8.junit`; Gradle-Task `generateCrds`, die YAML nach `operator/build/crds/` schreibt; die Klasse `net.onelitefeather.apus.operator.api.Tenant`
+- Consumes: nothing
+- Produces: catalog aliases `libs.josdk`, `libs.josdk.junit`, `libs.crd.generator.api.v2`, `libs.crd.generator.collector`, `libs.fabric8.junit`; the Gradle task `generateCrds`, which writes YAML to `operator/build/crds/`; the class `net.onelitefeather.apus.operator.api.Tenant`
 
-- [ ] **Step 1: Katalog-Einträge ergänzen**
+- [ ] **Step 1: Add the catalog entries**
 
-In `settings.gradle.kts` im `versionCatalogs`-Block ergänzen:
+Add to the `versionCatalogs` block in `settings.gradle.kts`:
 
 ```kotlin
             version("josdk", "5.5.1")
@@ -176,13 +176,13 @@ In `settings.gradle.kts` im `versionCatalogs`-Block ergänzen:
             library("fabric8.junit", "io.fabric8", "kubernetes-junit-jupiter").versionRef("fabric8")
 ```
 
-Und die Include-Zeile erweitern:
+And extend the include line:
 
 ```kotlin
 include("telemetry-addon", "runner", "operator")
 ```
 
-- [ ] **Step 2: Die Custom Resource anlegen, damit die Generierung etwas vorfindet**
+- [ ] **Step 2: Create the custom resource so the generator has something to find**
 
 `api/TenantSpec.java`:
 
@@ -286,7 +286,7 @@ public class TenantStatus {
 }
 ```
 
-`api/Tenant.java` — beachte: **kein** `implements Namespaced`, denn `Tenant` ist cluster-scoped (§8.1 der Spec):
+`api/Tenant.java` — note: **no** `implements Namespaced`, because `Tenant` is cluster-scoped (§8.1 of the spec):
 
 ```java
 package net.onelitefeather.apus.operator.api;
@@ -310,9 +310,9 @@ import io.fabric8.kubernetes.model.annotation.Version;
 public class Tenant extends CustomResource<TenantSpec, TenantStatus> {}
 ```
 
-- [ ] **Step 3: `operator/build.gradle.kts` schreiben**
+- [ ] **Step 3: Write `operator/build.gradle.kts`**
 
-Der Weg über `crd-generator-api-v2` ist der von Fabric8 empfohlene; der frühere Annotation-Processor ist seit 7.0.0 deprecated.
+The route through `crd-generator-api-v2` is the one Fabric8 recommends; the earlier annotation processor has been deprecated since 7.0.0.
 
 ```kotlin
 plugins {
@@ -328,8 +328,8 @@ dependencies {
     testImplementation(libs.fabric8.junit)
 }
 
-// Separate Konfiguration für den Generator, damit seine Abhängigkeiten
-// nicht im Laufzeit-Classpath des Operators landen.
+// Separate configuration for the generator, so its dependencies don't
+// end up on the operator's runtime classpath.
 val crdGenerator: Configuration by configurations.creating
 
 dependencies {
@@ -365,18 +365,18 @@ application {
 }
 ```
 
-> **Zu verifizieren in Step 5:** Der Hauptklassenname des Generator-CLI (`io.fabric8.crdv2.generator.cli.CRDGeneratorCLI`) und seine Argumentnamen stammen aus der Recherche, nicht aus einer Ausführung. Stimmt der Aufruf nicht, ermittle die echte Einstiegsklasse aus dem Jar und korrigiere Plan und Build:
+> **To verify in Step 5:** The generator CLI's main class name (`io.fabric8.crdv2.generator.cli.CRDGeneratorCLI`) and its argument names come from research, not from an actual run. If the invocation doesn't work, determine the real entry point class from the jar and correct both plan and build:
 >
 > ```bash
 > ./gradlew :operator:dependencies --configuration crdGenerator | grep crd-generator
 > unzip -l ~/.gradle/caches/modules-2/files-2.1/io.fabric8/crd-generator-api-v2/7.8.0/*/crd-generator-api-v2-7.8.0.jar | grep -iE "cli|Main"
 > ```
 >
-> Alternativ funktioniert immer der programmatische Weg: eine kleine Java-Klasse im `buildSrc` oder eine `JavaExec`-Task auf eine eigene Generator-Hauptklasse, die `new CRDGenerator().customResourceClasses(...).inOutputDir(dir).detailedGenerate()` aufruft. Wähle den Weg, der real funktioniert, und dokumentiere ihn.
+> Alternatively, the programmatic route always works: a small Java class in `buildSrc`, or a `JavaExec` task pointed at your own generator main class that calls `new CRDGenerator().customResourceClasses(...).inOutputDir(dir).detailedGenerate()`. Pick whichever route actually works and document it.
 
-- [ ] **Step 4: Den fehlschlagenden Test schreiben**
+- [ ] **Step 4: Write the failing test**
 
-Dieser Test prüft, dass die Generierung wirklich lief und ein CRD mit den erwarteten Eigenschaften erzeugt hat — insbesondere `scope: Cluster`, den häufigsten Fehler bei `Tenant`.
+This test verifies that the generation actually ran and produced a CRD with the expected properties — in particular `scope: Cluster`, the most common mistake with `Tenant`.
 
 `CrdGenerationTest.java`:
 
@@ -444,7 +444,7 @@ class CrdGenerationTest {
 }
 ```
 
-Damit der Test das Verzeichnis findet, in `operator/build.gradle.kts` ergänzen:
+So the test can find the directory, add to `operator/build.gradle.kts`:
 
 ```kotlin
 tasks.test {
@@ -453,19 +453,19 @@ tasks.test {
 }
 ```
 
-- [ ] **Step 5: Test ausführen und Fehlschlag prüfen**
+- [ ] **Step 5: Run the test and confirm it fails**
 
 Run: `./gradlew :operator:test`
-Expected: FAIL — entweder weil die Generator-Task nicht startet (falscher Hauptklassenname, siehe Hinweis in Step 3) oder weil noch kein CRD erzeugt wurde.
+Expected: FAIL — either because the generator task doesn't start (wrong main class name, see the note in Step 3) or because no CRD has been generated yet.
 
-Arbeite den Hinweis aus Step 3 ab, bis die Generierung läuft.
+Work through the note from Step 3 until generation runs.
 
-- [ ] **Step 6: Test ausführen und Erfolg prüfen**
+- [ ] **Step 6: Run the test and confirm it passes**
 
 Run: `./gradlew :operator:test`
-Expected: PASS (3 Tests)
+Expected: PASS (3 tests)
 
-Sieh dir das erzeugte YAML einmal an, damit du weißt, was der Operator ausliefert:
+Take a look at the generated YAML, so you know what the operator ships:
 
 ```bash
 cat operator/build/crds/*.yml | head -40
@@ -481,14 +481,14 @@ git commit -m "build(operator): add operator module with crd generation"
 
 ---
 
-### Task 2: Vollständiges Datenmodell
+### Task 2: Complete data model
 
-Diese Aufgabe legt **alle** Datenklassen an, die die parallele Gruppe C braucht — Rook-Modelle,
-die beiden verbleibenden Custom Resources, die gemeinsamen Hilfsklassen und die
-Betriebskonfiguration. Danach berühren Task 3, 4 und 5 keine gemeinsame Datei mehr.
+This task creates **all** the data classes that the parallel Group C needs — Rook models,
+the two remaining custom resources, the shared helper classes, and the operational
+configuration. After this, Task 3, 4, and 5 no longer touch any shared file.
 
-Alle Klassen hier sind reine Datenhalter ohne Kubernetes-Zugriff und ohne Logik. Sie sind
-zugleich die Schnittstelle, die Phase 5 (API und UI) später wiederverwendet.
+All classes here are pure data holders with no Kubernetes access and no logic. They are
+also the interface that Phase 5 (API and UI) will later reuse.
 
 **Files:**
 
@@ -506,39 +506,39 @@ zugleich die Schnittstelle, die Phase 5 (API und UI) später wiederverwendet.
 - Test: `operator/src/test/java/net/onelitefeather/apus/operator/rook/RookResourceSerialisationTest.java`
 - Test: `operator/src/test/java/net/onelitefeather/apus/operator/api/ApusResourceTest.java`
 - Test: `operator/src/test/java/net/onelitefeather/apus/operator/OperatorConfigTest.java`
-- Modify: `operator/src/test/java/net/onelitefeather/apus/operator/CrdGenerationTest.java` (Zusicherungen für die beiden neuen CRDs)
+- Modify: `operator/src/test/java/net/onelitefeather/apus/operator/CrdGenerationTest.java` (assertions for the two new CRDs)
 
 **Interfaces:**
 
-- Consumes: `Tenant` und die CRD-Generierung aus Task 1
+- Consumes: `Tenant` and the CRD generation from Task 1
 - Produces:
 
 ```java
-// Beide sind namespaced.
+// Both are namespaced.
 ObjectBucketClaim:  spec.bucketName, spec.storageClassName,
-                    spec.additionalConfig (Map<String,String>, u.a. "bucketOwner")
+                    spec.additionalConfig (Map<String,String>, incl. "bucketOwner")
                     status.phase   // "Bound", "Pending", "Failed"
 CephObjectStoreUser: spec.store, spec.displayName,
                      spec.quotas.maxSize, spec.quotas.maxObjects, spec.quotas.maxBuckets
                      status.phase
 ```
 
-Die Rook-Klassen dürfen **nicht** in die CRD-Generierung geraten — sie modellieren fremde CRDs, die Rook mitbringt. Der Generator scannt nach `@Group`, also müssen sie über den Ausschluss in `CrdGeneratorMain` bzw. eine Paketbeschränkung draußen bleiben. Task 1 hat dafür bereits eine Zusicherung (`generatesNoForeignCrds`) — sie muss grün bleiben.
+The Rook classes must **not** end up in our CRD generation — they model foreign CRDs that Rook brings along. The generator scans for `@Group`, so they need to be kept out via the exclusion in `CrdGeneratorMain`, or a package restriction. Task 1 already has an assertion for this (`generatesNoForeignCrds`) — it must stay green.
 
-Zusätzlich entstehen hier:
+The following are also created here:
 
 ```java
-// api/Ref.java — bewusst OHNE namespace-Feld.
-// §10.1 der Spec verbietet Referenzen über Namespace-Grenzen; was es nicht gibt,
-// kann auch nicht falsch gesetzt werden.
+// api/Ref.java — deliberately WITHOUT a namespace field.
+// §10.1 of the spec forbids references across namespace boundaries; what
+// doesn't exist can't be set wrong either.
 public class Ref { String name; }
 
 // api/Conditions.java
 public static Condition ready(boolean ready, String reason, String message);
-public static void set(List<Condition> conditions, Condition condition);  // ersetzt gleichnamige
+public static void set(List<Condition> conditions, Condition condition);  // replaces one of the same name
 
 // api/BlueMapMap — namespaced, @Kind("BlueMapMap"), @Plural("bluemapmaps"), @ShortNames("bmmap")
-// BlueMapMapSpec — alle Gruppen im Feld initialisiert, damit nie auf null geprüft werden muss:
+// BlueMapMapSpec — every group initialised in the field, so nothing ever needs a null check:
 Source source = new Source();                     // Ref sourceRef; String world; String dimension
 Trigger trigger = new Trigger();                  // boolean onNewBundle; String schedule;
                                                   // String concurrencyPolicy = "Forbid"
@@ -546,9 +546,9 @@ BlueMapSettings bluemap = new BlueMapSettings();  // String version; String mine
                                                   // Map<String,String> configOverrides
 Storage storage = new Storage();                  // String bucketClaim = "auto"; String prefix
 Resources resources = new Resources();            // String cpu; String memory
-int shards = 1;                                   // > 1 erst ab Phase 4
+int shards = 1;                                   // > 1 only from Phase 4 onward
 int historyLimit = 10;
-boolean purgeOnDelete = false;                    // §9.4: Löschen vernichtet keine Renderarbeit
+boolean purgeOnDelete = false;                    // §9.4: deleting must not destroy render work
 // BlueMapMapStatus:
 Bucket bucket = new Bucket();                     // String name; String endpoint; String secretName
 LatestRender latestRender = new LatestRender();   // String name; String phase
@@ -567,22 +567,22 @@ List<Condition> conditions = new ArrayList<>();
 // OperatorConfig — site-specific settings the operator cannot derive
 public record OperatorConfig(String rookNamespace, String cephObjectStore,
                              String bucketStorageClass, String runnerImage) {
-    public static OperatorConfig defaults();                             // feather-core-Werte
+    public static OperatorConfig defaults();                             // feather-core values
     public static OperatorConfig fromEnvironment(Function<String,String> env);
 }
 ```
 
-Umgebungsvariablen für `fromEnvironment`: `APUS_ROOK_NAMESPACE`, `APUS_CEPH_OBJECT_STORE`,
+Environment variables for `fromEnvironment`: `APUS_ROOK_NAMESPACE`, `APUS_CEPH_OBJECT_STORE`,
 `APUS_BUCKET_STORAGE_CLASS`, `APUS_RUNNER_IMAGE`. Defaults: `rook-ceph-fr01`, `feather-s3`,
 `ceph-bucket-fr01`, `apus/runner:dev`.
 
-Warum `OperatorConfig` hierher gehört und nicht in einen Reconciler: Alle drei Aufgaben der
-parallelen Gruppe brauchen es. Läge es in einer davon, würden drei Agenten es gleichzeitig
-und unterschiedlich anlegen.
+Why `OperatorConfig` belongs here rather than in a reconciler: all three tasks of the
+parallel group need it. If it lived in one of them, three agents would create it
+simultaneously and differently.
 
-- [ ] **Step 1: Den fehlschlagenden Test schreiben**
+- [ ] **Step 1: Write the failing test**
 
-Der Test prüft, dass unsere Modelle exakt das YAML erzeugen, das der Cluster erwartet. Er ist gegen die real im Cluster vorhandenen Manifeste formuliert.
+The test verifies that our models produce exactly the YAML the cluster expects. It is written against the manifests that actually exist in the cluster.
 
 `RookResourceSerialisationTest.java`:
 
@@ -658,12 +658,12 @@ class RookResourceSerialisationTest {
 }
 ```
 
-- [ ] **Step 2: Test ausführen und Fehlschlag prüfen**
+- [ ] **Step 2: Run the test and confirm it fails**
 
 Run: `./gradlew :operator:test --tests '*RookResourceSerialisationTest*'`
-Expected: FAIL, „cannot find symbol: class ObjectBucketClaim"
+Expected: FAIL, "cannot find symbol: class ObjectBucketClaim"
 
-- [ ] **Step 3: `ObjectBucketClaim` implementieren**
+- [ ] **Step 3: Implement `ObjectBucketClaim`**
 
 ```java
 package net.onelitefeather.apus.operator.rook;
@@ -762,7 +762,7 @@ public class ObjectBucketClaimStatus {
 }
 ```
 
-- [ ] **Step 4: `CephObjectStoreUser` implementieren**
+- [ ] **Step 4: Implement `CephObjectStoreUser`**
 
 ```java
 package net.onelitefeather.apus.operator.rook;
@@ -887,15 +887,15 @@ public class CephObjectStoreUserStatus {
 }
 ```
 
-- [ ] **Step 5: Test ausführen und Erfolg prüfen**
+- [ ] **Step 5: Run the test and confirm it passes**
 
 Run: `./gradlew :operator:test --tests '*RookResourceSerialisationTest*'`
-Expected: PASS (3 Tests)
+Expected: PASS (3 tests)
 
-- [ ] **Step 6: Sicherstellen, dass die Rook-Modelle nicht in unsere CRDs geraten**
+- [ ] **Step 6: Make sure the Rook models don't end up in our CRDs**
 
 Run: `./gradlew :operator:generateCrds && ls operator/build/crds/`
-Expected: Nur CRDs der Gruppe `bluemap.onelitefeather.net`. Erscheinen dort `objectbucketclaims` oder `cephobjectstoreusers`, schränke die Klassenauswahl des Generators explizit auf das Paket `net.onelitefeather.apus.operator.api` ein und ergänze eine Zusicherung dafür in `CrdGenerationTest`:
+Expected: only CRDs from the `bluemap.onelitefeather.net` group. If `objectbucketclaims` or `cephobjectstoreusers` show up there, restrict the generator's class selection explicitly to the `net.onelitefeather.apus.operator.api` package and add an assertion for it in `CrdGenerationTest`:
 
 ```java
     @Test
@@ -908,13 +908,13 @@ Expected: Nur CRDs der Gruppe `bluemap.onelitefeather.net`. Erscheinen dort `obj
     }
 ```
 
-- [ ] **Step 7: Die beiden verbleibenden Custom Resources anlegen**
+- [ ] **Step 7: Create the two remaining custom resources**
 
-`Ref`, `Conditions`, `BlueMapMap` (+Spec, +Status) und `BlueMapRender` (+Spec, +Status) nach
-der oben festgelegten Feldstruktur. Beide Ressourcen sind **namespaced**, tragen also
-`implements Namespaced` — anders als `Tenant`.
+`Ref`, `Conditions`, `BlueMapMap` (+Spec, +Status), and `BlueMapRender` (+Spec, +Status) following
+the field structure laid out above. Both resources are **namespaced**, so they carry
+`implements Namespaced` — unlike `Tenant`.
 
-Schreibe dazu `api/ApusResourceTest.java` mit diesen Zusicherungen:
+Write `api/ApusResourceTest.java` with these assertions:
 
 ```java
     @Test
@@ -952,21 +952,20 @@ Schreibe dazu `api/ApusResourceTest.java` mit diesen Zusicherungen:
     }
 ```
 
-- [ ] **Step 8: `OperatorConfig` anlegen**
+- [ ] **Step 8: Create `OperatorConfig`**
 
-Nach der oben festgelegten Signatur, mit `OperatorConfigTest`, der Defaults und
-Umgebungsauswertung prüft.
+Following the signature laid out above, with `OperatorConfigTest` checking the defaults and
+environment evaluation.
 
-- [ ] **Step 9: Die CRD-Zusicherungen erweitern**
+- [ ] **Step 9: Extend the CRD assertions**
 
-`CrdGenerationTest` prüft bislang nur `Tenant`. Ergänze — mit derselben strukturierten
-Lademethode, die Task 1 eingeführt hat — je einen Test, dass `bluemapmaps` und
-`bluemaprenders` erzeugt werden und **`scope: Namespaced`** tragen. Genau diese Zusicherung
-macht den früheren Textvergleich-Test wertlos gewesen und ist der Grund, warum er
-umgestellt wurde.
+`CrdGenerationTest` so far only checks `Tenant`. Add — using the same structured loading
+method Task 1 introduced — a test each verifying that `bluemapmaps` and `bluemaprenders`
+are generated and carry **`scope: Namespaced`**. This exact assertion is what made the
+earlier text-comparison test worthless, and is the reason it was replaced.
 
 Run: `./gradlew :operator:clean :operator:test`
-Expected: PASS, und `operator/build/crds/` enthält jetzt drei CRDs.
+Expected: PASS, and `operator/build/crds/` now contains three CRDs.
 
 - [ ] **Step 10: Commit**
 
@@ -978,12 +977,12 @@ git commit -m "feat(operator): add the full apus and rook data model"
 
 ---
 
-### Task 3: Tenant-Reconciler *(parallel mit Task 4 und 5)*
+### Task 3: Tenant reconciler *(parallel with Task 4 and 5)*
 
-> Diese Aufgabe läuft gleichzeitig mit Task 4 und Task 5 in einem eigenen Worktree.
-> Sie legt **ausschließlich** die unten genannten Dateien an. Alle Datenklassen,
-> `Conditions` und `OperatorConfig` stammen aus Task 2 und werden unverändert benutzt —
-> lege sie nicht erneut an und ändere sie nicht.
+> This task runs concurrently with Task 4 and Task 5, in its own worktree.
+> It creates **only** the files listed below. All data classes,
+> `Conditions`, and `OperatorConfig` come from Task 2 and are used unchanged —
+> do not recreate or modify them.
 
 **Files:**
 
@@ -992,7 +991,7 @@ git commit -m "feat(operator): add the full apus and rook data model"
 
 **Interfaces:**
 
-- Consumes (alle aus Task 2 bzw. 1, unverändert zu benutzen): `Tenant`, `TenantSpec`, `TenantStatus`, `CephObjectStoreUser`, `Conditions.ready(...)`, `Conditions.set(...)`, `OperatorConfig.defaults()`
+- Consumes (all from Task 2 or 1, to be used unchanged): `Tenant`, `TenantSpec`, `TenantStatus`, `CephObjectStoreUser`, `Conditions.ready(...)`, `Conditions.set(...)`, `OperatorConfig.defaults()`
 - Produces:
 
 ```java
@@ -1004,11 +1003,11 @@ public class TenantReconciler implements Reconciler<Tenant> {
 }
 ```
 
-Der Reconciler erzeugt aus einem `Tenant`: Namespace `bluemap-<name>`, `ResourceQuota`, `LimitRange` und einen `CephObjectStoreUser` mit der Quota.
+From a `Tenant`, the reconciler creates: namespace `bluemap-<name>`, a `ResourceQuota`, a `LimitRange`, and a `CephObjectStoreUser` carrying the quota.
 
-- [ ] **Step 1: Den fehlschlagenden Test schreiben**
+- [ ] **Step 1: Write the failing test**
 
-Der Fabric8-Mock-Server erlaubt echte Client-Aufrufe ohne Cluster.
+The Fabric8 mock server allows real client calls without a cluster.
 
 `TenantReconcilerTest.java`:
 
@@ -1104,15 +1103,15 @@ class TenantReconcilerTest {
 }
 ```
 
-- [ ] **Step 2: Test ausführen und Fehlschlag prüfen**
+- [ ] **Step 2: Run the test and confirm it fails**
 
 Run: `./gradlew :operator:test --tests '*TenantReconcilerTest*'`
-Expected: FAIL, „cannot find symbol: class TenantReconciler"
+Expected: FAIL, "cannot find symbol: class TenantReconciler"
 
-- [ ] **Step 3: (entfällt — `OperatorConfig` und `Conditions` stammen aus Task 2)**
+- [ ] **Step 3: (skipped — `OperatorConfig` and `Conditions` come from Task 2)**
 
-Die folgenden Codeblöcke stehen nur noch als Referenz hier, damit du weißt, womit du
-arbeitest. Lege sie **nicht** erneut an.
+The code blocks below are shown only as a reference, so you know what you're
+working with. Do **not** create them again.
 
 `api/Conditions.java`:
 
@@ -1150,7 +1149,7 @@ public final class Conditions {
 }
 ```
 
-`OperatorConfig.java` im Paket `net.onelitefeather.apus.operator`:
+`OperatorConfig.java` in the package `net.onelitefeather.apus.operator`:
 
 ```java
 package net.onelitefeather.apus.operator;
@@ -1171,7 +1170,7 @@ public record OperatorConfig(
 }
 ```
 
-- [ ] **Step 4: `TenantReconciler` implementieren**
+- [ ] **Step 4: Implement `TenantReconciler`**
 
 ```java
 package net.onelitefeather.apus.operator.tenant;
@@ -1281,12 +1280,12 @@ public class TenantReconciler implements Reconciler<Tenant> {
 }
 ```
 
-- [ ] **Step 5: Test ausführen und Erfolg prüfen**
+- [ ] **Step 5: Run the test and confirm it passes**
 
 Run: `./gradlew :operator:test --tests '*TenantReconcilerTest*'`
-Expected: PASS (5 Tests)
+Expected: PASS (5 tests)
 
-Schlägt `serverSideApply()` im Mock-Server fehl, weiche auf `createOr(NonDeletingOperation::update)` aus und passe Plan wie Code an — der Mock-Server unterstützt nicht jede Apply-Semantik.
+If `serverSideApply()` fails on the mock server, fall back to `createOr(NonDeletingOperation::update)` and adjust both plan and code accordingly — the mock server doesn't support every apply semantic.
 
 - [ ] **Step 6: Commit**
 
@@ -1298,12 +1297,12 @@ git commit -m "feat(operator): reconcile tenants into namespaces with quotas"
 
 ---
 
-### Task 4: BlueMapMap — Bucket und Konfiguration *(parallel mit Task 3 und 5)*
+### Task 4: BlueMapMap — bucket and configuration *(parallel with Task 3 and 5)*
 
-> Diese Aufgabe läuft gleichzeitig mit Task 3 und Task 5 in einem eigenen Worktree.
-> `BlueMapMap`, `BlueMapMapSpec`, `BlueMapMapStatus`, `ObjectBucketClaim` und
-> `OperatorConfig` stammen aus Task 2 — benutze sie unverändert, lege sie nicht erneut an.
-> Berühre keine Datei aus Task 3 (`tenant/`) oder Task 5 (`render/`).
+> This task runs concurrently with Task 3 and Task 5, in its own worktree.
+> `BlueMapMap`, `BlueMapMapSpec`, `BlueMapMapStatus`, `ObjectBucketClaim`, and
+> `OperatorConfig` come from Task 2 — use them unchanged, do not recreate them.
+> Do not touch any file from Task 3 (`tenant/`) or Task 5 (`render/`).
 
 **Files:**
 
@@ -1336,13 +1335,13 @@ public final class BlueMapConfigBuilder {
 }
 ```
 
-**Wichtig — das `s3.conf`-Format ist in Phase 1 verifiziert worden** (§9.2 der Spec). Nutze exakt diese Schlüssel:
+**Important — the `s3.conf` format was verified in Phase 1** (§9.2 of the spec). Use exactly these keys:
 `storage-type: "themeinerlp:s3"`, `bucket-name`, `region`, `access-key-id`, `secret-access-key`, `endpoint-url`, `compression`, `root-path`, `force-path-style`.
-`core.conf` braucht zwingend `accept-download: true`, sonst schlägt **jeder** Render fehl.
+`core.conf` must have `accept-download: true`, or **every** render fails.
 
-Zugangsdaten kommen **nicht** in die ConfigMap. Sie werden im Pod aus dem von Rook erzeugten Secret als Umgebungsvariablen gemountet; der Runner-Entrypoint schreibt sie beim Start in die Konfiguration. Genau dafür existiert der Umgebungsvariablen-Vertrag aus Phase 1.
+Credentials do **not** go into the ConfigMap. They are mounted into the pod as environment variables from the Secret Rook produces; the runner's entrypoint writes them into the configuration at startup. This is exactly what the environment-variable contract from Phase 1 exists for.
 
-- [ ] **Step 1: Den fehlschlagenden Test für den Konfigurationsbau schreiben**
+- [ ] **Step 1: Write the failing test for the configuration build**
 
 ```java
 package net.onelitefeather.apus.operator.map;
@@ -1415,14 +1414,14 @@ class BlueMapConfigBuilderTest {
 }
 ```
 
-- [ ] **Step 2: Test ausführen und Fehlschlag prüfen**
+- [ ] **Step 2: Run the test and confirm it fails**
 
 Run: `./gradlew :operator:test --tests '*BlueMapConfigBuilderTest*'`
-Expected: FAIL, „cannot find symbol"
+Expected: FAIL, "cannot find symbol"
 
-- [ ] **Step 3: Die Spec-Klassen und den Builder implementieren**
+- [ ] **Step 3: Implement the spec classes and the builder**
 
-Private Felder mit Gettern und Settern, verschachtelte statische Klassen für Gruppen — wie `TenantSpec` in Task 1. **Alle Gruppen werden im Feld direkt initialisiert** (`= new Source()`), damit Reconciler und Tests nie gegen `null` prüfen müssen. Diese Struktur ist bindend, weil Task 5 direkt darauf zugreift:
+Private fields with getters and setters, nested static classes for groups — like `TenantSpec` in Task 1. **Every group is initialised directly in the field** (`= new Source()`), so reconcilers and tests never have to check against `null`. This structure is binding, because Task 5 accesses it directly:
 
 ```java
 // BlueMapMapSpec
@@ -1433,23 +1432,23 @@ BlueMapSettings bluemap = new BlueMapSettings();  // version(String), minecraftV
                                                   // configOverrides(Map<String,String>)
 Storage storage = new Storage();              // bucketClaim(String, Default "auto"), prefix(String)
 Resources resources = new Resources();        // cpu(String), memory(String)
-int shards = 1;                               // > 1 erst ab Phase 4
+int shards = 1;                               // > 1 only from Phase 4 onward
 int historyLimit = 10;
-boolean purgeOnDelete = false;                // §9.4: Löschen vernichtet keine Renderarbeit
+boolean purgeOnDelete = false;                // §9.4: deleting must not destroy render work
 
 // BlueMapMapStatus
 Bucket bucket = new Bucket();                 // name(String), endpoint(String), secretName(String)
 LatestRender latestRender = new LatestRender(); // name(String), phase(String)
 List<Condition> conditions = new ArrayList<>();
 
-// Ref (im Paket api, von mehreren Specs genutzt)
-String name;                                  // absichtlich ohne namespace-Feld:
-                                              // §10.1 verbietet Referenzen über Namespace-Grenzen
+// Ref (in the api package, used by several specs)
+String name;                                  // deliberately without a namespace field:
+                                              // §10.1 forbids references across namespace boundaries
 ```
 
-`Ref` bewusst ohne Namespace-Feld: Die Mandantentrennung aus §10.1 der Spec verlangt, dass eine CR nur Ressourcen ihres eigenen Namespace referenziert. Was es nicht gibt, kann auch nicht falsch gesetzt werden.
+`Ref` deliberately has no namespace field: the tenant separation from §10.1 of the spec requires that a CR only reference resources in its own namespace. What doesn't exist can't be set wrong.
 
-`BlueMapRenderSpec` (Task 5) analog: `Ref mapRef`, `String bundleUrl`, `String bundleVersion`, `boolean force`.
+`BlueMapRenderSpec` (Task 5) analogously: `Ref mapRef`, `String bundleUrl`, `String bundleVersion`, `boolean force`.
 `BlueMapRenderStatus`: `String phase`, `Progress progress` (percent, currentMap, etaSeconds, degraded), `String jobName`, `String startTime`, `String completionTime`, `List<Condition> conditions`.
 
 `BlueMapConfigBuilder.java`:
@@ -1529,12 +1528,12 @@ public final class BlueMapConfigBuilder {
 }
 ```
 
-- [ ] **Step 4: Test ausführen und Erfolg prüfen**
+- [ ] **Step 4: Run the test and confirm it passes**
 
 Run: `./gradlew :operator:test --tests '*BlueMapConfigBuilderTest*'`
-Expected: PASS (4 Tests)
+Expected: PASS (4 tests)
 
-- [ ] **Step 5: Den fehlschlagenden Test für die Bucket-Provisionierung schreiben**
+- [ ] **Step 5: Write the failing test for bucket provisioning**
 
 ```java
 package net.onelitefeather.apus.operator.map;
@@ -1610,10 +1609,10 @@ class BucketProvisionerTest {
 }
 ```
 
-- [ ] **Step 6: `BucketProvisioner` implementieren, Test grün bekommen**
+- [ ] **Step 6: Implement `BucketProvisioner`, get the test green**
 
 Run: `./gradlew :operator:test --tests '*BucketProvisionerTest*'`
-Expected: PASS (3 Tests)
+Expected: PASS (3 tests)
 
 - [ ] **Step 7: Commit**
 
@@ -1625,13 +1624,13 @@ git commit -m "feat(operator): provision map buckets through rook and build blue
 
 ---
 
-### Task 5: BlueMapRender — Job-Erzeugung *(parallel mit Task 3 und 4)*
+### Task 5: BlueMapRender — job creation *(parallel with Task 3 and 4)*
 
-> Diese Aufgabe läuft gleichzeitig mit Task 3 und Task 4 in einem eigenen Worktree.
-> `BlueMapRender`, `BlueMapMap` und `OperatorConfig` stammen aus Task 2 — benutze sie
-> unverändert. Berühre keine Datei aus Task 3 (`tenant/`) oder Task 4 (`map/`).
-> Insbesondere: `BlueMapMapStatus.getBucket()` ist bereits vorhanden und wird von Task 4
-> befüllt; für deinen Test setzt du die Werte selbst.
+> This task runs concurrently with Task 3 and Task 4, in its own worktree.
+> `BlueMapRender`, `BlueMapMap`, and `OperatorConfig` come from Task 2 — use them
+> unchanged. Do not touch any file from Task 3 (`tenant/`) or Task 4 (`map/`).
+> In particular: `BlueMapMapStatus.getBucket()` already exists and is filled in by Task 4;
+> for your own test, set the values yourself.
 
 **Files:**
 
@@ -1640,7 +1639,7 @@ git commit -m "feat(operator): provision map buckets through rook and build blue
 
 **Interfaces:**
 
-- Consumes (alle aus Task 2, unverändert): `BlueMapMap`, `BlueMapRender`, `OperatorConfig`
+- Consumes (all from Task 2, unchanged): `BlueMapMap`, `BlueMapRender`, `OperatorConfig`
 - Produces:
 
 ```java
@@ -1650,11 +1649,11 @@ public final class RenderJobBuilder {
 }
 ```
 
-Der Job muss den **Umgebungsvariablen-Vertrag aus Phase 1** exakt bedienen (§7.4 der Spec). Pflichtvariablen: `APUS_MAP_ID`, `APUS_DIMENSION`, `APUS_MC_VERSION`, `APUS_WORLD_S3_URL`, `APUS_MAP_BUCKET`, `APUS_S3_ENDPOINT`, `APUS_S3_ACCESS_KEY`, `APUS_S3_SECRET_KEY`. Fehlt eine, bricht der Container ab.
+The job must fulfil the **environment-variable contract from Phase 1** exactly (§7.4 of the spec). Mandatory variables: `APUS_MAP_ID`, `APUS_DIMENSION`, `APUS_MC_VERSION`, `APUS_WORLD_S3_URL`, `APUS_MAP_BUCKET`, `APUS_S3_ENDPOINT`, `APUS_S3_ACCESS_KEY`, `APUS_S3_SECRET_KEY`. If any is missing, the container aborts.
 
-Zugangsdaten kommen über `secretKeyRef` aus dem von Rook erzeugten Secret — niemals als Klartext im Job-Manifest.
+Credentials come from the Secret Rook creates via `secretKeyRef` — never as plaintext in the job manifest.
 
-- [ ] **Step 1: Den fehlschlagenden Test schreiben**
+- [ ] **Step 1: Write the failing test**
 
 ```java
 package net.onelitefeather.apus.operator.render;
@@ -1757,10 +1756,10 @@ class RenderJobBuilderTest {
 }
 ```
 
-- [ ] **Step 2: Test ausführen, Fehlschlag prüfen, `RenderJobBuilder` implementieren**
+- [ ] **Step 2: Run the test, confirm it fails, implement `RenderJobBuilder`**
 
 Run: `./gradlew :operator:test --tests '*RenderJobBuilderTest*'`
-Expected: zunächst FAIL, nach der Implementierung PASS (4 Tests)
+Expected: FAIL first, then PASS after the implementation (4 tests)
 
 - [ ] **Step 3: Commit**
 
@@ -1772,7 +1771,7 @@ git commit -m "feat(operator): build render jobs against the phase 1 env contrac
 
 ---
 
-### Task 6: Render-Reconciler mit Fortschritt und Nebenläufigkeitssperre
+### Task 6: Render reconciler with progress and a concurrency lock
 
 **Files:**
 
@@ -1795,14 +1794,14 @@ public final class ProgressPoller {
 }
 ```
 
-Zwei Verhaltensweisen sind hier entscheidend und in der Spec begründet:
+Two behaviours here are decisive and grounded in the spec:
 
-- **`concurrencyPolicy: Forbid` ist Default** (§7.3): Zwei gleichzeitige Renders auf denselben Map-Storage können die Karte inkonsistent hinterlassen. Der Reconciler startet keinen Job, solange ein anderer `BlueMapRender` derselben Map in einer aktiven Phase steht.
-- **Ein überschrittenes Speicherlimit wird nicht wiederholt** (§12): Die Condition `StorageQuotaExceeded` beendet den Render endgültig, statt endlos gegen die Wand zu laufen.
+- **`concurrencyPolicy: Forbid` is the default** (§7.3): two concurrent renders against the same map storage can leave the map inconsistent. The reconciler does not start a job while another `BlueMapRender` of the same map is in an active phase.
+- **An exceeded storage limit is not retried** (§12): the `StorageQuotaExceeded` condition ends the render for good, instead of running endlessly into a wall.
 
-- [ ] **Step 1: Den fehlschlagenden Test für den Fortschritts-Parser schreiben**
+- [ ] **Step 1: Write the failing test for the progress parser**
 
-Das JSON-Format stammt aus Phase 1 und ist dort durch einen Contract-Test abgesichert.
+The JSON format comes from Phase 1, where it is secured by a contract test.
 
 ```java
 package net.onelitefeather.apus.operator.render;
@@ -1855,12 +1854,12 @@ class ProgressPollerTest {
 }
 ```
 
-- [ ] **Step 2: Test ausführen, Fehlschlag prüfen, `ProgressPoller.parse` implementieren**
+- [ ] **Step 2: Run the test, confirm it fails, implement `ProgressPoller.parse`**
 
 Run: `./gradlew :operator:test --tests '*ProgressPollerTest*'`
-Expected: zunächst FAIL, danach PASS (3 Tests)
+Expected: FAIL first, then PASS (3 tests)
 
-- [ ] **Step 3: Den fehlschlagenden Test für den Reconciler schreiben**
+- [ ] **Step 3: Write the failing test for the reconciler**
 
 ```java
 package net.onelitefeather.apus.operator.render;
@@ -1923,7 +1922,7 @@ class BlueMapRenderReconcilerTest {
 }
 ```
 
-- [ ] **Step 4: Reconciler implementieren, Tests grün bekommen**
+- [ ] **Step 4: Implement the reconciler, get the tests green**
 
 Run: `./gradlew :operator:test --tests '*BlueMapRenderReconciler*'`
 Expected: PASS
@@ -1938,7 +1937,7 @@ git commit -m "feat(operator): reconcile renders with progress and a concurrency
 
 ---
 
-### Task 7: Operator-Einstiegspunkt
+### Task 7: Operator entrypoint
 
 **Files:**
 
@@ -1947,10 +1946,10 @@ git commit -m "feat(operator): reconcile renders with progress and a concurrency
 
 **Interfaces:**
 
-- Consumes: alle Reconciler
-- Produces: ausführbare Hauptklasse; `OperatorConfig` aus Umgebungsvariablen
+- Consumes: all reconcilers
+- Produces: an executable main class; `OperatorConfig` from environment variables
 
-Für Micronaut gibt es keine JOSDK-Integration. Der Operator wird deshalb selbst gebaut und gestartet; Micronaut liefert nur Konfiguration und Health, falls es später gebraucht wird. Für Phase 2a genügt eine schlanke `main`-Methode — das vermeidet eine Abhängigkeit, die nichts trägt.
+There is no JOSDK integration for Micronaut. The operator is therefore built and started by itself; Micronaut only supplies configuration and health, should that be needed later. For Phase 2a, a lean `main` method is enough — that avoids a dependency that would carry no weight.
 
 ```java
 Operator operator = new Operator(o -> o.withKubernetesClient(client));
@@ -1960,7 +1959,7 @@ operator.register(new BlueMapRenderReconciler(client, config));
 operator.start();
 ```
 
-- [ ] **Step 1: Test schreiben, der die Konfiguration aus der Umgebung prüft**
+- [ ] **Step 1: Write a test that checks the configuration read from the environment**
 
 ```java
 package net.onelitefeather.apus.operator;
@@ -1996,7 +1995,7 @@ class ApusOperatorTest {
 }
 ```
 
-- [ ] **Step 2: Implementieren, Tests grün bekommen, committen**
+- [ ] **Step 2: Implement, get the tests green, commit**
 
 ```bash
 ./gradlew spotlessApply
@@ -2006,22 +2005,22 @@ git commit -m "feat(operator): add the operator entrypoint"
 
 ---
 
-### Task 8: Integrationstest gegen einen echten Cluster
+### Task 8: Integration test against a real cluster
 
 **Files:**
 
 - Create: `operator/src/test/java/net/onelitefeather/apus/operator/OperatorIntegrationTest.java`
-- Modify: `operator/build.gradle.kts` (eigene `integrationTest`-Task, wie im `runner`-Modul)
+- Modify: `operator/build.gradle.kts` (its own `integrationTest` task, as in the `runner` module)
 
-Die Container-Tests des `runner`-Moduls sind bewusst aus `build` herausgelöst. Halte es hier genauso.
+The `runner` module's container tests are deliberately split out of `build`. Do the same here.
 
-Der Test startet einen k3s-Container über Testcontainers, wendet die generierten CRDs an, legt einen `Tenant` an und prüft, dass Namespace und Quota entstehen.
+The test starts a k3s container via Testcontainers, applies the generated CRDs, creates a `Tenant`, and verifies that the namespace and quota are created.
 
-- [ ] **Step 1: Testcontainers-k3s-Abhängigkeit ergänzen**
+- [ ] **Step 1: Add the Testcontainers k3s dependency**
 
 In `settings.gradle.kts`: `library("testcontainers.k3s", "org.testcontainers", "k3s").withoutVersion()`
 
-- [ ] **Step 2: Den Integrationstest schreiben**
+- [ ] **Step 2: Write the integration test**
 
 ```java
 package net.onelitefeather.apus.operator;
@@ -2098,9 +2097,9 @@ class OperatorIntegrationTest {
 }
 ```
 
-Der `CephObjectStoreUser`-Teil schlägt auf k3s fehl, weil Rook dort nicht installiert ist. Fange das im Reconciler sauber ab (fehlende CRD ist kein Absturz, sondern eine Condition) oder überspringe diesen Teil im Integrationstest mit einer klaren Begründung im Code.
+The `CephObjectStoreUser` part fails on k3s because Rook isn't installed there. Catch that cleanly in the reconciler (a missing CRD is not a crash, but a condition) or skip this part in the integration test with a clear justification in the code.
 
-- [ ] **Step 3: `integrationTest`-Task einrichten und Test grün bekommen**
+- [ ] **Step 3: Set up the `integrationTest` task and get the test green**
 
 Run: `./gradlew :operator:integrationTest`
 Expected: PASS
@@ -2115,10 +2114,10 @@ git commit -m "test(operator): verify crds and tenant reconciliation on a real c
 
 ---
 
-## Abschluss Phase 2a
+## Conclusion of Phase 2a
 
-Danach gilt: Ein `kubectl apply` eines `Tenant` erzeugt Namespace, Quota und Ceph-User; eine `BlueMapMap` erzeugt Bucket und Konfiguration; ein `BlueMapRender` startet einen Job mit dem Runner-Image aus Phase 1 und führt dessen Fortschritt im Status mit.
+Once this is done: a `kubectl apply` of a `Tenant` creates a namespace, quota, and Ceph user; a `BlueMapMap` creates a bucket and configuration; a `BlueMapRender` starts a job with the runner image from Phase 1 and tracks its progress in the status.
 
-**Nicht Teil von 2a** (folgt in Phase 2b): `WorldSource`, `WorldIngest` und der ETL-Layer mit seinen Connectoren. Bis dahin wird `BlueMapRender.spec.bundleUrl` direkt gesetzt, statt aus einem Bundle-Manifest aufgelöst zu werden.
+**Not part of 2a** (follows in Phase 2b): `WorldSource`, `WorldIngest`, and the ETL layer with its connectors. Until then, `BlueMapRender.spec.bundleUrl` is set directly, rather than being resolved from a bundle manifest.
 
-**Nicht Teil von Phase 2** (folgt in Phase 3): `BlueMapHosting`.
+**Not part of Phase 2** (follows in Phase 3): `BlueMapHosting`.

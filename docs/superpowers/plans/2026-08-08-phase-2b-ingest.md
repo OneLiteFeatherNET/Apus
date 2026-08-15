@@ -1,84 +1,84 @@
-# Apus Phase 2b — Ingest und ETL: Implementierungsplan
+# Apus Phase 2b — Ingest and ETL: Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Welt-Daten aus heterogenen Quellen in ein einheitliches, versioniertes World Bundle in S3 überführen, sodass der Render-Pfad aus Phase 2a sie ohne Kenntnis der Herkunft verarbeiten kann.
+**Goal:** Bring world data from heterogeneous sources into a single, versioned World Bundle in S3, so that the rendering path from Phase 2a can process it without knowing where it came from.
 
-**Architecture:** Nur der Extract-Schritt ist quellenspezifisch; Transform (Layout-Erkennung) und Load (Bundle-Writer) sind gemeinsam. Ein neuer Connector kostet damit eine Implementierung von zwei Methoden. Zwei neue Custom Resources (`WorldSource`, `WorldIngest`) reihen sich in das Muster aus Phase 2a ein: Vorlage erzeugt Ausführungen. Der eigentliche Ingest läuft als Kubernetes-Job mit einem eigenen Container-Image, analog zum Runner aus Phase 1.
+**Architecture:** Only the Extract step is source-specific; Transform (layout detection) and Load (bundle writer) are shared. A new connector therefore costs an implementation of two methods. Two new Custom Resources (`WorldSource`, `WorldIngest`) fall in line with the pattern from Phase 2a: a template produces runs. The actual ingest runs as a Kubernetes Job with its own container image, analogous to the runner from Phase 1.
 
-**Tech Stack:** Java 25, Gradle, JOSDK 5.5.1, Fabric8 7.8.0, JUnit Jupiter, Testcontainers (MinIO), Fabric8 Mock-Server.
+**Tech Stack:** Java 25, Gradle, JOSDK 5.5.1, Fabric8 7.8.0, JUnit Jupiter, Testcontainers (MinIO), Fabric8 Mock Server.
 
 ## Global Constraints
 
-- **Java-Toolchain 25**, Basispaket `net.onelitefeather.apus.ingest` (neues Modul `ingest`) bzw. `net.onelitefeather.apus.operator.api` für die CRDs.
-- API-Gruppe `bluemap.onelitefeather.net`, Version `v1alpha1`. Beide neuen Ressourcen sind **namespaced**.
-- Koordinaten wie in Phase 2a; der Fabric8-Client kommt transitiv über JOSDK.
-- **Das Bundle-Manifest ist der Vertrag** (§5 der Spec). Es wird **zuletzt** geschrieben — es ist der Commit-Punkt. Ohne Manifest existiert ein Bundle nicht und wird nie gerendert. Damit gibt es keine halb entpackten Welten im Render-Pfad.
-- **Bundles sind unveränderlich.** Neue Welt-Daten erzeugen eine neue Version, nie eine Änderung an einer bestehenden.
-- **Die Regionsliste gehört ins Manifest.** Sie kostet beim Ingest nichts, weil ohnehin jede `.mca`-Datei angefasst wird, und ist die Grundlage für das Sharding aus Phase 4 sowie für genaue Fortschrittsberechnung.
-- **Dimensionen werden logisch benannt** (`overworld`, `the_nether`, `the_end`), unabhängig davon, ob die Quelle Vanilla- oder Bukkit-Layout hatte.
-- **Eigentümerprüfung**: Vor dem Verändern einer bestehenden Ressource ist zu prüfen, ob sie zur eigenen Custom Resource gehört (Name **und** UID). Fremde oder ungekennzeichnete Ressourcen führen zu einer Konflikt-Condition. Das war ein Sicherheitsbefund in Phase 2a und darf sich nicht wiederholen.
-- **Gemeinsame `Labels`-Klasse** aus Phase 2a für alle erzeugten Ressourcen.
-- Zugangsdaten niemals in Status, Events oder Logs.
-- AGPL-Header über Spotless, Conventional Commits, **keine** Claude-Attribution, Bezeichner und Javadoc auf Englisch.
+- **Java toolchain 25**, base package `net.onelitefeather.apus.ingest` (new module `ingest`) or `net.onelitefeather.apus.operator.api` for the CRDs.
+- API group `bluemap.onelitefeather.net`, version `v1alpha1`. Both new resources are **namespaced**.
+- Coordinates as in Phase 2a; the Fabric8 client comes in transitively via JOSDK.
+- **The bundle manifest is the contract** (§5 of the spec). It is written **last** — it is the commit point. Without a manifest, a bundle does not exist and is never rendered. This means there are no half-unpacked worlds in the rendering path.
+- **Bundles are immutable.** New world data produces a new version, never a change to an existing one.
+- **The region list belongs in the manifest.** It costs nothing extra during ingest, since every `.mca` file is touched anyway, and it's the basis for the sharding in Phase 4 as well as for accurate progress calculation.
+- **Dimensions are named logically** (`overworld`, `the_nether`, `the_end`), regardless of whether the source had a vanilla or Bukkit layout.
+- **Ownership check**: before modifying an existing resource, check whether it belongs to your own Custom Resource (name **and** UID). Foreign or unlabeled resources produce a conflict condition. This was a security finding in Phase 2a and must not happen again.
+- **Shared `Labels` class** from Phase 2a for all resources created.
+- Credentials never in status, events, or logs.
+- AGPL header via Spotless, Conventional Commits, **no** Claude attribution, identifiers and Javadoc in English.
 
-### Was aus Phase 1 und 2a bereits existiert und zu benutzen ist
+### What already exists from Phase 1 and 2a, and is to be used
 
 - `net.onelitefeather.apus.operator.api.Labels`, `Conditions`, `Ref`, `OperatorConfig`
-- Das Eigentümer-Prüfmuster in `TenantReconciler` und `BlueMapMapReconciler`
-- `client.supports(...)` als Prüfung auf fehlende fremde CRDs
-- Die CRD-Generierung erfasst neue Ressourcen unter `net.onelitefeather.apus.operator.api` automatisch
-- `BlueMapRender.spec.bundleUrl` erwartet eine `s3://`-URL auf ein Bundle-Verzeichnis
+- The ownership-check pattern in `TenantReconciler` and `BlueMapMapReconciler`
+- `client.supports(...)` as a check for missing foreign CRDs
+- CRD generation automatically picks up new resources under `net.onelitefeather.apus.operator.api`
+- `BlueMapRender.spec.bundleUrl` expects an `s3://` URL pointing to a bundle directory
 
 ---
 
 ## File Structure
 
 ```text
-ingest/                                   neues Modul, Container-Image analog zu runner/
+ingest/                                   new module, container image analogous to runner/
 ├── build.gradle.kts
 ├── Dockerfile
 └── src/
     ├── main/java/net/onelitefeather/apus/ingest/
-    │   ├── IngestMain.java               Einstiegspunkt des Jobs
-    │   ├── WorldLayout.java              Erkanntes Layout + Dimensions-Zuordnung
-    │   ├── LayoutDetector.java           Erkennt vanilla / bukkit / nested
-    │   ├── BundleManifest.java           Datenmodell des Manifests
-    │   ├── BundleWriter.java             Schreibt Bundle nach S3, Manifest zuletzt
-    │   ├── S3Client.java                 Schmale S3-Fassade (Upload, List, Head)
+    │   ├── IngestMain.java               Job entry point
+    │   ├── WorldLayout.java              Detected layout + dimension mapping
+    │   ├── LayoutDetector.java           Detects vanilla / bukkit / nested
+    │   ├── BundleManifest.java           Manifest data model
+    │   ├── BundleWriter.java             Writes bundle to S3, manifest last
+    │   ├── S3Client.java                 Narrow S3 facade (Upload, List, Head)
     │   └── connector/
-    │       ├── WorldSourceConnector.java Schnittstelle: discover / fetch
+    │       ├── WorldSourceConnector.java Interface: discover / fetch
     │       ├── SourceVersion.java
-    │       ├── S3SourceConnector.java    Pull aus einem Bucket-Prefix
-    │       └── PterodactylConnector.java Pull über die Panel-API
+    │       ├── S3SourceConnector.java    Pull from a bucket prefix
+    │       └── PterodactylConnector.java Pull via the panel API
     └── test/java/...
 
 operator/src/main/java/net/onelitefeather/apus/operator/
 ├── api/WorldSource.java  WorldSourceSpec.java  WorldSourceStatus.java
 ├── api/WorldIngest.java  WorldIngestSpec.java  WorldIngestStatus.java
 └── ingest/
-    ├── WorldSourceReconciler.java        Poll-Zeitplan → erzeugt WorldIngest
-    ├── WorldIngestReconciler.java        erzeugt den Ingest-Job, führt Fortschritt
-    └── IngestJobBuilder.java             baut den Job aus dem ingest-Image
+    ├── WorldSourceReconciler.java        Poll schedule → creates WorldIngest
+    ├── WorldIngestReconciler.java        creates the ingest job, tracks progress
+    └── IngestJobBuilder.java             builds the job from the ingest image
 ```
 
-**Warum ein eigenes Modul:** Der Ingest läuft als Job im Cluster, nicht im Operator-Prozess. Ein großes `tar.gz` zu streamen und Gigabyte an Region-Dateien zu schreiben gehört nicht in einen Operator, der viele Ressourcen gleichzeitig betreut. `LayoutDetector`, `BundleManifest` und die Connectoren sind reine Logik und ohne Cluster testbar.
+**Why a separate module:** ingest runs as a Job in the cluster, not in the operator process. Streaming a large `tar.gz` and writing gigabytes of region files doesn't belong in an operator that manages many resources at once. `LayoutDetector`, `BundleManifest`, and the connectors are pure logic and testable without a cluster.
 
 ---
 
-## Parallelisierung
+## Parallelization
 
-Dasselbe Muster wie in Phase 2a: Datenmodell zuerst, dann berühren die Folgeaufgaben getrennte Dateien.
+The same pattern as in Phase 2a: data model first, then the follow-on tasks touch separate files.
 
-| Gruppe | Aufgaben | Ausführung |
+| Group | Tasks | Execution |
 | --- | --- | --- |
-| A | Task 1 — Modul und Datenmodell | sequenziell |
-| B | Task 2, Task 3, Task 4 | **parallel**, je eigener Worktree |
-| C | Task 5 — Ingest-Einstiegspunkt und Image | sequenziell |
-| D | Task 6 — Reconciler | sequenziell |
-| E | Task 7 — Integrationstest | sequenziell |
+| A | Task 1 — Module and data model | sequential |
+| B | Task 2, Task 3, Task 4 | **parallel**, each in its own worktree |
+| C | Task 5 — Ingest entry point and image | sequential |
+| D | Task 6 — Reconciler | sequential |
+| E | Task 7 — Integration test | sequential |
 
-**Dateien der parallelen Gruppe** (disjunkt):
+**Files in the parallel group** (disjoint):
 
 - Task 2: `LayoutDetector.java`, `WorldLayout.java` + Tests
 - Task 3: `BundleManifest.java`, `BundleWriter.java`, `S3Client.java` + Tests
@@ -86,27 +86,27 @@ Dasselbe Muster wie in Phase 2a: Datenmodell zuerst, dann berühren die Folgeauf
 
 ---
 
-### Task 1: Modul, CRDs und gemeinsames Datenmodell
+### Task 1: Module, CRDs, and shared data model
 
 **Files:**
 
-- Modify: `settings.gradle.kts` (Modul `ingest`, Katalog-Einträge für den S3-Client)
+- Modify: `settings.gradle.kts` (module `ingest`, catalog entries for the S3 client)
 - Create: `ingest/build.gradle.kts`
 - Create: `operator/src/main/java/.../api/WorldSource.java`, `WorldSourceSpec.java`, `WorldSourceStatus.java`
 - Create: `operator/src/main/java/.../api/WorldIngest.java`, `WorldIngestSpec.java`, `WorldIngestStatus.java`
 - Test: `operator/src/test/java/.../api/IngestResourceTest.java`
 - Modify: `operator/src/test/java/.../CrdGenerationTest.java`
 
-**Interfaces — bindend, drei Folgeaufgaben bauen darauf:**
+**Interfaces — binding, three follow-on tasks build on these:**
 
 ```java
-// WorldSourceSpec — alle Gruppen im Feld initialisiert, wie in Phase 2a
+// WorldSourceSpec — every group initialized in the field, as in Phase 2a
 String type;                              // "s3" | "pterodactyl" | "upload" | "push"
 S3Source s3 = new S3Source();             // String endpoint; String bucket; String prefix;
                                           // Ref credentialsSecretRef
 Pterodactyl pterodactyl = new Pterodactyl();  // String panelUrl; String serverId;
                                               // Ref credentialsSecretRef; String select = "latest"
-String poll;                              // Cron-Ausdruck, nur für Pull-Typen; null = nur manuell
+String poll;                              // cron expression, only for pull types; null = manual only
 List<WorldSelector> worlds = new ArrayList<>();  // String name; String layout = "auto"
 Retention retention = new Retention();    // int keepVersions = 5
 
@@ -129,13 +129,13 @@ String jobName; String startTime; String completionTime;
 List<Condition> conditions = new ArrayList<>();
 ```
 
-- [ ] **Step 1: Katalog und Modul anlegen**
+- [ ] **Step 1: Set up catalog and module**
 
-`settings.gradle.kts`: `include(..., "ingest")` und einen S3-Client ergänzen. Wähle bewusst: Das Projekt nutzt bereits `mc` im Runner-Image, aber ein Java-Job braucht eine Bibliothek. Nimm den AWS-SDK-v2-S3-Client (`software.amazon.awssdk:s3`) oder MinIOs Java-Client — recherchiere die aktuelle Version real gegen Maven Central und dokumentiere die Wahl im Report.
+`settings.gradle.kts`: `include(..., "ingest")` and add an S3 client. Choose deliberately: the project already uses `mc` in the runner image, but a Java job needs a library. Take the AWS SDK v2 S3 client (`software.amazon.awssdk:s3`) or MinIO's Java client — actually research the current version against Maven Central and document the choice in the report.
 
-- [ ] **Step 2: Den fehlschlagenden Test schreiben**
+- [ ] **Step 2: Write the failing test**
 
-`IngestResourceTest.java` nach dem Muster von `ApusResourceTest` aus Phase 2a:
+`IngestResourceTest.java` following the pattern of `ApusResourceTest` from Phase 2a:
 
 ```java
     @Test
@@ -171,16 +171,16 @@ List<Condition> conditions = new ArrayList<>();
     }
 ```
 
-- [ ] **Step 3: Test ausführen, Fehlschlag prüfen, Klassen implementieren**
+- [ ] **Step 3: Run the test, confirm the failure, implement the classes**
 
-Beide Ressourcen mit `implements Namespaced`, Annotationen `@Group("bluemap.onelitefeather.net")`, `@Version("v1alpha1")`, `@Kind`, `@Plural` (`worldsources`, `worldingests`), `@ShortNames` (`bmsource`, `bmingest`), und `initSpec()`/`initStatus()` überschrieben — sonst liefert `new WorldSource().getSpec()` `null`, was in Phase 2a bereits einmal drei parallele Aufgaben blockiert hat.
+Both resources with `implements Namespaced`, annotations `@Group("bluemap.onelitefeather.net")`, `@Version("v1alpha1")`, `@Kind`, `@Plural` (`worldsources`, `worldingests`), `@ShortNames` (`bmsource`, `bmingest`), and `initSpec()`/`initStatus()` overridden — otherwise `new WorldSource().getSpec()` returns `null`, which already blocked three parallel tasks once in Phase 2a.
 
-- [ ] **Step 4: CRD-Zusicherungen erweitern**
+- [ ] **Step 4: Extend the CRD assertions**
 
-In `CrdGenerationTest` je einen Test, dass `worldsources` und `worldingests` erzeugt werden und **`scope: Namespaced`** tragen. Nutze die vorhandene, gezielt ladende Hilfsmethode.
+In `CrdGenerationTest`, one test each that `worldsources` and `worldingests` are generated and carry **`scope: Namespaced`**. Use the existing, selectively-loading helper method.
 
 Run: `./gradlew :operator:clean :operator:test`
-Expected: PASS, `operator/build/crds/` enthält jetzt fünf CRDs.
+Expected: PASS, `operator/build/crds/` now contains five CRDs.
 
 - [ ] **Step 5: Commit**
 
@@ -192,50 +192,50 @@ git commit -m "feat(ingest): add world source and ingest custom resources"
 
 ---
 
-### Task 2: Layout-Erkennung *(parallel mit Task 3 und 4)*
+### Task 2: Layout detection *(parallel with Task 3 and 4)*
 
-> Eigener Worktree. Ausschließlich `ingest/src/main/java/.../LayoutDetector.java`, `WorldLayout.java` und die zugehörigen Tests. Keine andere Datei, keine Build-Datei.
+> Own worktree. Only `ingest/src/main/java/.../LayoutDetector.java`, `WorldLayout.java`, and the associated tests. No other file, no build file.
 
-**Das ist der inhaltliche Kern des ETL-Layers.** Die Quellen liefern unterschiedliche Verzeichnisstrukturen; BlueMap braucht pro Karte einen definierten Pfad zur richtigen Dimension.
+**This is the substantive core of the ETL layer.** The sources deliver different directory structures; BlueMap needs a defined path to the correct dimension for each map.
 
-| Layout | Erkennungsmerkmal | Abbildung |
+| Layout | Detection signal | Mapping |
 | --- | --- | --- |
-| `vanilla` | `<w>/region`, `<w>/DIM-1/region`, `<w>/DIM1/region` | direkt |
-| `bukkit` | `<w>/region`, `<w>_nether/DIM-1/region`, `<w>_the_end/DIM1/region` | Ordner zusammenführen |
-| `nested` | genau ein Unterverzeichnis, darin eines der obigen | Ebene überspringen, erneut prüfen |
+| `vanilla` | `<w>/region`, `<w>/DIM-1/region`, `<w>/DIM1/region` | direct |
+| `bukkit` | `<w>/region`, `<w>_nether/DIM-1/region`, `<w>_the_end/DIM1/region` | merge folders |
+| `nested` | exactly one subdirectory, containing one of the above | skip a level, check again |
 
 **Interfaces:**
 
 ```java
 public record WorldLayout(String kind, Map<String, Path> dimensions) {}
-// kind: "vanilla" | "bukkit"; dimensions: "overworld"/"the_nether"/"the_end" → Pfad zum region-Verzeichnis
+// kind: "vanilla" | "bukkit"; dimensions: "overworld"/"the_nether"/"the_end" → path to the region directory
 
 public final class LayoutDetector {
-    /** @throws LayoutDetectionException wenn kein bekanntes Layout erkennbar ist */
+    /** @throws LayoutDetectionException if no known layout is detectable */
     public static WorldLayout detect(Path root, String worldName, String forcedLayout);
 }
 ```
 
-- [ ] **Step 1: Die fehlschlagenden Tests schreiben**
+- [ ] **Step 1: Write the failing tests**
 
-Baue die Verzeichnisstrukturen im Test mit `@TempDir` auf — keine Fixture-Dateien nötig, es geht nur um Struktur.
+Build the directory structures in the test with `@TempDir` — no fixture files needed, it's purely about structure.
 
-Testfälle, jeder mit eigener Begründung im Testnamen:
+Test cases, each with its own rationale in the test name:
 
-- Vanilla-Layout mit allen drei Dimensionen wird erkannt und korrekt zugeordnet.
-- Vanilla-Layout mit **nur** Overworld wird erkannt (kein Nether, kein End — das ist normal).
-- Bukkit-Layout mit `world`, `world_nether`, `world_the_end` wird erkannt und auf dieselben logischen Namen abgebildet.
-- Ein zusätzlich verschachteltes Verzeichnis (ZIP-Upload-Fall) wird durchschaut.
-- Eine Struktur ohne jedes `region`-Verzeichnis schlägt mit `LayoutDetectionException` fehl, und die Meldung nennt die gefundenen Pfade — Raten ist ausdrücklich unerwünscht.
-- `forcedLayout = "bukkit"` auf einer Vanilla-Struktur schlägt fehl, statt still etwas Falsches zu liefern.
+- A vanilla layout with all three dimensions is detected and mapped correctly.
+- A vanilla layout with **only** an overworld is detected (no nether, no end — that's normal).
+- A Bukkit layout with `world`, `world_nether`, `world_the_end` is detected and mapped to the same logical names.
+- An additionally nested directory (the ZIP-upload case) is seen through.
+- A structure with no `region` directory at all fails with `LayoutDetectionException`, and the message names the paths that were found — guessing is explicitly unwanted.
+- `forcedLayout = "bukkit"` on a vanilla structure fails, instead of silently delivering something wrong.
 
-- [ ] **Step 2: Implementieren, Tests grün bekommen, committen**
+- [ ] **Step 2: Implement, get the tests green, commit**
 
 ---
 
-### Task 3: Bundle-Writer und Manifest *(parallel mit Task 2 und 4)*
+### Task 3: Bundle writer and manifest *(parallel with Task 2 and 4)*
 
-> Eigener Worktree. Ausschließlich `BundleManifest.java`, `BundleWriter.java`, `S3Client.java` und Tests.
+> Own worktree. Only `BundleManifest.java`, `BundleWriter.java`, `S3Client.java`, and tests.
 
 **Interfaces:**
 
@@ -259,21 +259,21 @@ public final class BundleWriter {
 }
 ```
 
-Damit Task 3 nicht auf Task 2 warten muss, nimmt `BundleWriter` eine schmale Schnittstelle entgegen (`WorldLayoutLike` mit `kind()` und `dimensions()`), die Task 2s Record später erfüllt. Definiere sie in deinem eigenen Paket.
+So that Task 3 doesn't have to wait on Task 2, `BundleWriter` accepts a narrow interface (`WorldLayoutLike` with `kind()` and `dimensions()`), which Task 2's record later satisfies. Define it in your own package.
 
-**Tests, die zählen:**
+**Tests that matter:**
 
-- Das Manifest wird **zuletzt** geschrieben — prüfe die Reihenfolge der Schreibvorgänge über einen Fake-S3-Client, der sie protokolliert. Das ist der Commit-Punkt und die wichtigste Eigenschaft des Bundles.
-- Bricht das Schreiben mittendrin ab, existiert **kein** Manifest, das Bundle gilt also als nicht vorhanden.
-- Die Regionsliste im Manifest entspricht den tatsächlich geschriebenen `.mca`-Dateien; Koordinaten werden aus dem Dateinamen `r.<x>.<z>.mca` gelesen.
-- Serialisierung und Deserialisierung des Manifests sind verlustfrei.
-- Der Fortschritt wird über `ProgressSink` gemeldet, damit der Job ihn nach außen geben kann.
+- The manifest is written **last** — verify the order of write operations via a fake S3 client that logs them. This is the commit point and the most important property of the bundle.
+- If the write aborts partway through, **no** manifest exists, so the bundle counts as not present.
+- The region list in the manifest matches the `.mca` files actually written; coordinates are read from the filename `r.<x>.<z>.mca`.
+- Serialization and deserialization of the manifest are lossless.
+- Progress is reported via `ProgressSink`, so the job can surface it externally.
 
 ---
 
-### Task 4: Connector-Schnittstelle und die beiden Pull-Quellen *(parallel mit Task 2 und 3)*
+### Task 4: Connector interface and the two pull sources *(parallel with Task 2 and 3)*
 
-> Eigener Worktree. Ausschließlich `connector/*` und Tests.
+> Own worktree. Only `connector/*` and tests.
 
 **Interfaces:**
 
@@ -288,43 +288,43 @@ public interface WorldSourceConnector {
 public record SourceVersion(String id, String label, Instant createdAt, long sizeBytes) {}
 ```
 
-**`S3SourceConnector`:** listet Objekte unter einem Prefix, erkennt neue Versionen anhand des Objektschlüssels, lädt sie herunter. Entpackt gängige Archive, wenn der Schlüssel darauf endet.
+**`S3SourceConnector`:** lists objects under a prefix, detects new versions by object key, downloads them. Unpacks common archives if the key ends in one.
 
-**`PterodactylConnector`:** fragt die Backup-Liste über die Client-API des Panels ab und lädt das gewählte Backup über eine signierte URL. **Recherchiere die tatsächliche API** (Endpunkte, Authentifizierung, Antwortformat) und dokumentiere sie im Report — erfinde keine Endpunkte. Das Backup ist ein `tar.gz` des gesamten Servers; da gzip nicht seekbar ist, wird der Strom **einmal** durchlaufen und dabei selektiv nur das Welt-Verzeichnis geschrieben. Das gesamte Archiv darf nie auf der Platte landen.
+**`PterodactylConnector`:** queries the backup list via the panel's client API and downloads the chosen backup via a signed URL. **Research the actual API** (endpoints, authentication, response format) and document it in the report — do not invent endpoints. The backup is a `tar.gz` of the entire server; since gzip isn't seekable, the stream is traversed **once**, selectively writing only the world directory. The full archive must never land on disk.
 
-**Tests:** Der S3-Connector gegen einen MinIO-Testcontainer. Der Pterodactyl-Connector gegen einen lokalen HTTP-Stub, der die Panel-Antworten nachbildet — **keinen** echten Panel-Zugriff und keinen Listener auf `0.0.0.0`. Prüfe insbesondere, dass aus einem tar.gz mit Plugins, Configs und Welten nur die Welt-Pfade extrahiert werden.
-
----
-
-### Task 5: Ingest-Einstiegspunkt und Container-Image
-
-Analog zu `runner/` aus Phase 1: `IngestMain` liest seine Konfiguration aus Umgebungsvariablen, wählt den Connector, ruft Extract → Detect → Write auf und meldet Fortschritt. Dazu ein `Dockerfile`.
-
-**Umgebungsvariablen-Vertrag** (die Schnittstelle, die `IngestJobBuilder` in Task 6 bedient):
-`APUS_SOURCE_TYPE`, `APUS_WORLD_NAME`, `APUS_LAYOUT` (Default `auto`), `APUS_BUNDLE_BUCKET`, `APUS_BUNDLE_TENANT`, `APUS_BUNDLE_WORLD_ID`, `APUS_BUNDLE_VERSION`, `APUS_S3_ENDPOINT`, `APUS_S3_ACCESS_KEY`, `APUS_S3_SECRET_KEY`, plus die quellenspezifischen (`APUS_SOURCE_S3_*`, `APUS_PTERODACTYL_*`).
-
-Wie beim Runner: Fehlt eine Pflichtvariable, Abbruch mit klarer Meldung und Exit-Code ungleich null, **bevor** irgendetwas heruntergeladen wird. Nicht-root, `exec` für den Hauptprozess.
+**Tests:** the S3 connector against a MinIO test container. The Pterodactyl connector against a local HTTP stub that mimics the panel's responses — **no** real panel access and no listener on `0.0.0.0`. In particular, verify that from a tar.gz containing plugins, configs, and worlds, only the world paths are extracted.
 
 ---
 
-### Task 6: Reconciler für Quellen und Ingests
+### Task 5: Ingest entry point and container image
 
-`WorldSourceReconciler`: wertet `poll` aus, vergleicht mit `status.lastSeenVersion`, legt bei Neuem einen `WorldIngest` an. `WorldIngestReconciler`: erzeugt den Job über `IngestJobBuilder`, führt Fortschritt und Ergebnis im Status, setzt bei Erfolg `WorldSource.status.latestBundle`.
+Analogous to `runner/` from Phase 1: `IngestMain` reads its configuration from environment variables, selects the connector, calls Extract → Detect → Write, and reports progress. Plus a `Dockerfile`.
 
-**Bindend:** Eigentümerprüfung wie in Phase 2a. Kein zweiter Ingest für dieselbe Quelle, solange einer läuft — dieselbe optimistische Sperre wie beim Render, dort über `WorldSourceStatus`. Retention: ältere Bundles löschen, aber **nie** eines, das ein `BlueMapRender` noch referenziert.
+**Environment-variable contract** (the interface that `IngestJobBuilder` serves in Task 6):
+`APUS_SOURCE_TYPE`, `APUS_WORLD_NAME`, `APUS_LAYOUT` (default `auto`), `APUS_BUNDLE_BUCKET`, `APUS_BUNDLE_TENANT`, `APUS_BUNDLE_WORLD_ID`, `APUS_BUNDLE_VERSION`, `APUS_S3_ENDPOINT`, `APUS_S3_ACCESS_KEY`, `APUS_S3_SECRET_KEY`, plus the source-specific ones (`APUS_SOURCE_S3_*`, `APUS_PTERODACTYL_*`).
 
----
-
-### Task 7: Integrationstest
-
-Ende-zu-Ende gegen MinIO: eine Welt in Bukkit-Layout als Quelle ablegen, Ingest laufen lassen, prüfen dass ein Bundle mit korrektem Manifest, logisch benannten Dimensionen und vollständiger Regionsliste entsteht. Nutze die vorhandene Fixture `testdata/mini-world`. Eigene `integrationTest`-Task, nicht Teil von `build` — wie in `runner` und `operator`.
-
-Abschließend: ein Render gegen das erzeugte Bundle starten und belegen, dass der Vertrag zwischen Ingest und Render trägt.
+As with the runner: if a required variable is missing, abort with a clear message and a non-zero exit code, **before** anything is downloaded. Non-root, `exec` for the main process.
 
 ---
 
-## Abschluss Phase 2b
+### Task 6: Reconciler for sources and ingests
 
-Danach führt der Weg von einer konfigurierten Quelle bis zur gerenderten Karte ohne Handgriff: `WorldSource` anlegen, Ingest läuft zeitgesteuert, Bundle entsteht, Render startet.
+`WorldSourceReconciler`: evaluates `poll`, compares against `status.lastSeenVersion`, creates a `WorldIngest` when there's something new. `WorldIngestReconciler`: creates the Job via `IngestJobBuilder`, tracks progress and outcome in the status, and on success sets `WorldSource.status.latestBundle`.
 
-**Nicht Teil von 2b:** Die Push-Quellen (`upload`, `push`) und das Paper-Plugin — sie folgen in Phase 6. `WorldSource.spec.type` kennt sie bereits, die Connectoren fehlen noch.
+**Binding:** ownership check as in Phase 2a. No second ingest for the same source while one is running — the same optimistic lock as for rendering, there via `WorldSourceStatus`. Retention: delete older bundles, but **never** one that a `BlueMapRender` still references.
+
+---
+
+### Task 7: Integration test
+
+End-to-end against MinIO: place a world in Bukkit layout as a source, run the ingest, verify that a bundle emerges with a correct manifest, logically named dimensions, and a complete region list. Use the existing fixture `testdata/mini-world`. Its own `integrationTest` task, not part of `build` — as in `runner` and `operator`.
+
+Finally: start a render against the resulting bundle and demonstrate that the contract between ingest and render holds.
+
+---
+
+## Phase 2b completion
+
+After this, the path from a configured source to a rendered map runs with no manual steps: create a `WorldSource`, ingest runs on schedule, a bundle is produced, render starts.
+
+**Not part of 2b:** the push sources (`upload`, `push`) and the Paper plugin — they follow in Phase 6. `WorldSource.spec.type` already knows about them, but the connectors are still missing.
