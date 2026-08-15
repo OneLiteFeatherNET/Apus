@@ -8,8 +8,7 @@ metadata:
 spec:
   replicas: {{ .Values.ui.replicaCount }}
   strategy:
-    # The UI is a stateless static SPA served straight out of its image -- no local state to
-    # lose by running old and new pods side by side.
+    # Stateless: no local state to lose by running old and new pods side by side.
     type: RollingUpdate
   selector:
     matchLabels:
@@ -37,22 +36,23 @@ spec:
           securityContext:
             {{- toYaml .Values.ui.securityContext | nindent 12 }}
           ports:
-            # Nitro's own default is 3000; the image pins PORT=8080 (see ui/Dockerfile), and
-            # the distroless :nonroot base runs as uid 65532, so nothing here ever needs a
-            # privileged port.
+            # Nitro's own default is 3000; the image pins PORT=8080 (see ui/Dockerfile).
             - name: http
               containerPort: 8080
               protocol: TCP
-          # No env injected yet, but no longer because it is impossible: with the Nitro
-          # server now in the image (it replaced nginx), NUXT_PUBLIC_API_BASE_URL,
-          # NUXT_PUBLIC_OIDC_ISSUER and NUXT_PUBLIC_OIDC_CLIENT_ID do reach the shell that
-          # Nitro renders per request. Wiring them to chart values is what unblocks item 5 of
-          # docs/superpowers/specs/2026-08-13-helm-charts-design.md ("the dashboard is not
-          # configurable at all", i.e. no installation can log in) and is deliberately left
-          # to its own change -- it needs new values, schema entries and defaults.
+          {{- with .Values.ui.env }}
+          env:
+            {{- range $name, $value := . }}
+            - name: {{ $name }}
+              value: {{ $value | quote }}
+            {{- end }}
+          {{- end }}
+          {{- with .Values.ui.envFrom }}
+          envFrom:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           readinessProbe:
-            # Static SPA: a 200 on the root is a sufficient signal, no management endpoint
-            # needed like the API.
+            # A 200 on the root is a sufficient signal; no management endpoint like the API.
             httpGet:
               path: /
               port: http

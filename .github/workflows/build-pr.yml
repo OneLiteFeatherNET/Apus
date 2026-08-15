@@ -53,11 +53,8 @@ jobs:
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test
-      # Builds and then exercises `.output/server/index.mjs` -- the container's actual CMD.
-      # Separate from `pnpm test` so the unit suite stays fast; run here because the thing it
-      # guards (the cache/nosniff headers in nuxt.config.ts' routeRules) is invisible until
-      # something serves a real request, and getting it wrong strands browsers on a stale
-      # bundle after a deploy.
+      # Builds, then tests .output/server/index.mjs -- the container's CMD. Not part of
+      # `pnpm test` because it needs that build.
       - run: pnpm test:server
 
   helm:

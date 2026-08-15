@@ -69,22 +69,22 @@ ui:
       type: RuntimeDefault
   securityContext:
     allowPrivilegeEscalation: false
-    # The Nitro server only reads from the image; unlike nginx (which wrote its pid and cache
-    # below /tmp and /var/cache) it needs no writable path anywhere.
+    # The Nitro server only reads from the image; it needs no writable path.
     readOnlyRootFilesystem: true
     capabilities:
       drop: ["ALL"]
   resources:
     requests:
       cpu: 50m
-      # Higher than the 64Mi/128Mi that fitted nginx: Nitro costs ~63Mi before it serves
-      # anything and renders the SPA shell per request, so measured at concurrency 100 it
-      # peaks around 115Mi (with the image's own --max-old-space-size=64 cap; see
-      # ui/Dockerfile -- 153Mi without it). 128Mi would have been an OOMKill under load, not
-      # a tight fit.
+      # Nitro renders the shell per request: ~63Mi idle, ~115Mi peak at concurrency 100 with
+      # the image's --max-old-space-size cap. The 64Mi/128Mi that fitted nginx would OOMKill.
       memory: 128Mi
     limits:
       memory: 256Mi
+  # Passed to the container verbatim. NUXT_PUBLIC_* reach the SPA at runtime because the image
+  # runs Nitro -- see ui/README.md, "Runtime configuration".
+  env: {}
+  envFrom: []
   podAnnotations: {}
   podLabels: {}
   nodeSelector: {}

@@ -1,12 +1,6 @@
-// Tests the *built* Nitro server -- `node .output/server/index.mjs`, which is literally the
-// container's CMD. Run via `pnpm test:server`, which builds first; `pnpm test` does not, so
-// this file lives outside tests/unit (see vitest.server.config.ts).
-//
-// What it is really guarding is the header contract in nuxt.config.ts' routeRules. Nitro
-// serves the SPA shell with no Cache-Control at all, and a browser is then free to cache it
-// heuristically -- after which a deploy leaves clients on HTML that references hashed assets
-// the new build no longer ships. That failure is invisible in development and expensive in
-// production, so it gets a test rather than a comment.
+// Tests the built Nitro server -- `node .output/server/index.mjs`, the container's CMD.
+// Guards the routeRules header contract from nuxt.config.ts; see ui/README.md, "The header
+// contract". Run via `pnpm test:server`, which builds first.
 
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { existsSync, readdirSync } from 'node:fs'
@@ -22,12 +16,7 @@ let server: ChildProcessWithoutNullStreams
 let base: string
 let hashedAsset: string
 
-/**
- * Reserves a free port by binding one and letting go again.
- *
- * `PORT=0` cannot be used the way it can with a plain `net` server: Nitro reads 0 as unset
- * and falls back to its default 3000, which would collide with anything else on the runner.
- */
+/** Nitro reads PORT=0 as unset and falls back to 3000, so a port has to be picked here. */
 function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
     const probe = createServer()
@@ -45,8 +34,7 @@ beforeAll(async () => {
     throw new Error(`${serverEntry} is missing -- run \`pnpm build\` first (pnpm test:server does).`)
   }
 
-  // Whatever the current build happens to have hashed the entry chunk to; hard-coding a name
-  // would make this fail on the next dependency bump for no reason.
+  // Hard-coding a hashed name would break on the next dependency bump.
   const asset = readdirSync(publicAssets).find(name => name.endsWith('.js'))
   if (!asset) throw new Error(`no hashed .js asset below ${publicAssets}`)
   hashedAsset = `/_nuxt/${asset}`
@@ -55,7 +43,7 @@ beforeAll(async () => {
   base = `http://127.0.0.1:${port}`
 
   server = spawn(process.execPath, [serverEntry], {
-    // The same three the image sets, so the test exercises the shipped configuration.
+    // The same three the image sets.
     env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', NODE_OPTIONS: '--max-old-space-size=64' },
     stdio: 'pipe'
   })
@@ -84,7 +72,7 @@ afterAll(async () => {
 
 describe('the built Nitro server', () => {
   it('never lets a browser cache the SPA shell', async () => {
-    // Without the routeRule this header is absent entirely, which means heuristic caching.
+    // Absent entirely without the routeRule, which means heuristic caching.
     const response = await fetch(base)
 
     expect(response.status).toBe(200)
@@ -97,7 +85,7 @@ describe('the built Nitro server', () => {
     const response = await fetch(base + hashedAsset)
 
     expect(response.status).toBe(200)
-    // The `/**` rule must not win over `/_nuxt/**` here, or every asset would be uncacheable.
+    // `/**` must not win over `/_nuxt/**` here, or every asset becomes uncacheable.
     expect(response.headers.get('cache-control')).toBe('public, max-age=31536000, immutable')
     expect(response.headers.get('etag')).toBeTruthy()
   })
@@ -119,8 +107,7 @@ describe('the built Nitro server', () => {
   })
 
   it('serves the shell for a client-side route so a deep link survives a reload', async () => {
-    // /tenant/renders is a Vue Router route, not a file. This is the reload-on-a-deep-link
-    // case the retired nginx `try_files` fallback existed for.
+    // /tenant/renders is a Vue Router route, not a file.
     const response = await fetch(`${base}/tenant/renders`, { headers: { Accept: 'text/html' } })
 
     expect(response.status).toBe(200)
@@ -129,8 +116,7 @@ describe('the built Nitro server', () => {
   })
 
   it('404s a missing hashed asset instead of answering it with the shell', async () => {
-    // A miss below /_nuxt/ means the deploy is broken; the shell cannot substitute for a
-    // chunk, and answering 200 with HTML would only hide it.
+    // A miss here means a broken deploy; answering 200 with HTML would hide it.
     const response = await fetch(`${base}/_nuxt/does-not-exist.js`)
 
     expect(response.status).toBe(404)

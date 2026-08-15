@@ -2,30 +2,21 @@
 //
 // Apus UI is a pure SPA (design spec §11.2): `ssr: false`, no server-rendered routes, no
 // backend-for-frontend session. Auth (see app/composables/useAuth.ts) is therefore a
-// client-only, public OIDC client rather than a confidential one behind a session cookie --
-// see ui/README.md "Why no server-side session".
+// client-only, public OIDC client -- see ui/README.md, "Why no server-side session".
 //
-// It ships as Nitro's own `node-server` build: `nuxt build` writes `.output/server` (the
-// server) and `.output/public` (the client bundle), and the container runs the former. The
-// SPA shell is rendered per request from the same output; there is no index.html on disk.
-// `ssr: false` still holds -- nothing about a *page* is server-rendered, and this app
-// deliberately has no `server/` directory, so the only thing that server does is hand out the
-// shell and the assets (see ui/README.md "Serving the built SPA").
+// The container runs Nitro's own node-server build; ui/README.md, "Serving the built SPA",
+// covers what that means for the output layout, the headers below and runtime config.
 export default defineNuxtConfig({
   compatibilityDate: '2026-08-09',
   devtools: { enabled: true },
   ssr: false,
   nitro: {
-    // Not the default `node-server`-by-omission: spelling it out keeps `nuxt build` from
-    // silently picking a different preset when it detects a deploy provider in CI, which
-    // would produce an output the Dockerfile's CMD cannot start.
+    // Explicit, so CI cannot auto-detect a deploy provider and build an output the
+    // Dockerfile's CMD refuses to start.
     preset: 'node-server'
   },
-  // Nitro serves the shell with no Cache-Control at all, which leaves browsers free to cache
-  // it heuristically -- the exact failure the retired nginx.conf guarded against, where a
-  // deploy strands clients on HTML referencing hashed assets that no longer exist. The
-  // hashed assets themselves already come back `immutable` from Nitro; that rule is repeated
-  // here only because `/**` would otherwise override it.
+  // Nitro sends no Cache-Control on the shell at all; `/_nuxt/**` repeats Nitro's own
+  // immutable because `/**` would otherwise override it. Held by tests/server/nitro.spec.ts.
   routeRules: {
     '/**': {
       headers: {

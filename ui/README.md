@@ -107,68 +107,42 @@ no tests" — the composables' own logic content is effectively zero.
 
 ## Serving the built SPA
 
-`ui/Dockerfile` runs `pnpm build` and copies the whole `.output` into
+`ui/Dockerfile` runs `pnpm build` and copies `.output` into
 `gcr.io/distroless/nodejs24-debian12:nonroot`, where the container starts Nuxt's own Nitro
-server (`nitro.preset: 'node-server'`, see `nuxt.config.ts`). The runtime image is a Node
-binary plus that output: no shell, no package manager, and none of the OS-level TLS/PCRE/zlib
-stack the nginx base used to carry.
-
-Run it locally exactly as the container does:
+server (`nitro.preset: 'node-server'`). There is no `index.html` on disk — with `ssr: false`
+Nitro renders the SPA shell per request, which is what makes the runtime config below work.
 
 ```bash
-pnpm build && PORT=8080 node .output/server/index.mjs
+pnpm build && PORT=8080 node .output/server/index.mjs   # exactly what the container does
 ```
 
-`.output/public` holds the client bundle; there is **no `index.html` on disk**. With
-`ssr: false` Nitro renders the SPA shell per request from `.output/server`, which is why the
-runtime config below is read from the environment rather than baked in.
+**Configuration is read at runtime.** Every `runtimeConfig.public` key maps to `NUXT_PUBLIC_` +
+the key in SCREAMING_SNAKE_CASE (`apiBaseUrl` ← `NUXT_PUBLIC_API_BASE_URL`). The
+`apus-platform` chart passes them generically through `ui.env` (a map handed to the container
+verbatim) and `ui.envFrom`, so a new key needs no chart change:
 
-### What this buys, and what it costs
+```yaml
+ui:
+  env:
+    NUXT_PUBLIC_API_BASE_URL: https://apus.example.net/api
+    NUXT_PUBLIC_OIDC_ISSUER: https://id.example.net/realms/apus
+    NUXT_PUBLIC_OIDC_CLIENT_ID: apus-ui
+```
 
-- **Runtime configuration.** `NUXT_PUBLIC_API_BASE_URL`, `NUXT_PUBLIC_OIDC_ISSUER` and
-  `NUXT_PUBLIC_OIDC_CLIENT_ID` now reach the shell Nitro renders, so one image works for every
-  installation. That is what unblocks item 5 of
-  `docs/superpowers/specs/2026-08-13-helm-charts-design.md` — with the old static image the
-  empty OIDC values were frozen in at build time and *no installation could log in*. The
-  `apus-platform` chart does not pass them yet; that is its own change.
-- **No nginx.** Every CVE in OpenSSL, PCRE, zlib, the shell and the package manager used to be
-  reported against this image for code the deployment never executes — nothing here terminates
-  TLS, rewrites requests or proxies. nginx also needed a writable filesystem for its pid and
-  cache, which is why the chart could not set `readOnlyRootFilesystem: true`. It now can.
-- **But: an npm dependency tree in the image.** `.output/server/node_modules` carries the
-  packages Nitro externalises (the Vue runtime and compiler, `@babel/parser`,
-  `@iconify/utils`, and a handful more — see `.output/server/package.json`). An SCA scanner
-  will walk those, where a dependency-free server would have given it nothing to find. This is
-  the deliberate trade for running Nitro's own server; the versions are the ones
-  `pnpm-lock.yaml` already pins.
-- **And: memory.** Nitro is ~63 MiB idle and peaks near 115 MiB at concurrency 100, where
-  nginx idled at a few MiB. The image caps V8's old space
-  (`NODE_OPTIONS=--max-old-space-size=64`; ~153 MiB without it) so the footprint does not
-  depend on the node's RAM, and `ui.resources` in the `apus-platform` chart is set to
-  match — change the two together.
+None of these are secrets: this is a public OIDC client, and every value ends up in the served
+HTML by design.
 
-Not `vite preview` / `nuxt preview`: that is a development preview server, and serving
-production traffic with it would put vite, rollup and esbuild — this module's largest
-dependency tree — into the runtime image.
+**The header contract.** Nitro sends no `Cache-Control` on the shell at all, so `routeRules` in
+`nuxt.config.ts` pin `no-store` there and repeat Nitro's `immutable` on `/_nuxt/**` — without
+that, a deploy strands browsers on HTML referencing hashed assets the new build no longer
+ships. `tests/server/nitro.spec.ts` spawns the built server and holds it; it needs a build, so
+it runs as `pnpm test:server`.
 
-### The header contract
-
-Nitro serves the SPA shell with **no `Cache-Control` at all**, which leaves browsers free to
-cache it heuristically — the exact failure the retired `nginx.conf` guarded against, where a
-deploy strands clients on HTML referencing hashed assets the new build no longer ships. The
-`routeRules` in `nuxt.config.ts` therefore pin `no-store` on the shell and repeat Nitro's own
-`immutable` on `/_nuxt/**` (which `/**` would otherwise override), and add `nosniff` to both.
-
-`tests/server/nitro.spec.ts` spawns the built `node .output/server/index.mjs` — the container's
-actual CMD — and holds that contract, plus the deep-link reload, the 304 on a conditional
-asset request, a missing chunk staying a 404, and the SIGTERM shutdown. It needs a build, so it
-runs as `pnpm test:server` (which builds first) rather than as part of `pnpm test`; CI runs
-both.
-
-Two differences from the old nginx behaviour are Nitro's and left as they are: a missing
-non-`/_nuxt/` file answers 200 with the shell rather than 404, and `x-powered-by: Nuxt` is sent
-on the shell (route rules cannot remove it — Nuxt sets it after they apply; stripping it needs
-a Nitro plugin).
+Full documentation — why Nitro rather than nginx or `vite preview`, the measured memory and
+dependency trade-offs, the complete variable and chart-value reference, and the operational
+how-to — lives in Outline:
+[Apus UI — Auslieferung & Runtime-Konfiguration](https://outline.onelitefeather.dev/doc/apus-ui-auslieferung-runtime-konfiguration-FMiR3F2bIQ)
+(space *Entwicklung*).
 
 ### Why no server-side session
 
@@ -191,7 +165,8 @@ Flow: Authorization Code + PKCE, public client (no client secret — there is no
 keep one in a pure SPA). Configuration is three environment variables
 (`NUXT_PUBLIC_API_BASE_URL`, `NUXT_PUBLIC_OIDC_ISSUER`, `NUXT_PUBLIC_OIDC_CLIENT_ID`), matching
 the design spec's instruction to keep the broker choice (§15: Keycloak vs. Zitadel, undecided)
-out of code entirely.
+out of code entirely. They are read at runtime, not baked in — see "Runtime configuration"
+above for how the deployment supplies them.
 
 ### Token storage — binding requirement, and the reasoning
 
