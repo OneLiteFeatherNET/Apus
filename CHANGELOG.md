@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/OneLiteFeatherNET/Apus/compare/apus-v0.2.1...apus-v0.3.0) (2026-08-15)
+
+
+### Features
+
+* Helm charts for the operator and the platform ([#37](https://github.com/OneLiteFeatherNET/Apus/issues/37)) ([a03a524](https://github.com/OneLiteFeatherNET/Apus/commit/a03a524db16c72b29961af6428caed8a829afaaf))
+
 ## [0.2.1](https://github.com/OneLiteFeatherNET/Apus/compare/apus-v0.2.0...apus-v0.2.1) (2026-08-13)
 
 
