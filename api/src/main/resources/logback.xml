@@ -15,14 +15,13 @@
   You should have received a copy of the GNU Affero General Public License
   along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-  NOTE, and this is not cosmetic: docs/logging-and-tracing.md prints this file using a double
-  hyphen as a dash inside its XML comments. A double hyphen is not legal inside an XML comment,
-  so that exact text makes Logback abandon the whole configuration with a SAXParseException and
-  silently fall back to its BasicConfigurator: root at DEBUG, console only, no OTLP appender,
-  and none of the per-logger levels below. Nothing fails loudly, which is why
-  ObservabilityStartupTest#logbackIsTheConfiguredSlf4jBinding asserts the configuration was
-  actually applied. Every comment in this file therefore uses a single dash. Do not paste the
-  document's version back over it.
+  NOTE, and this is not cosmetic: a double hyphen is not legal inside an XML comment. One makes
+  Logback abandon the whole configuration with a SAXParseException, attaching neither appender
+  below - no console line for `kubectl logs`, and no record reaching the collector either.
+  Nothing fails loudly, which is how operator's and ingest's copies of this file shipped broken
+  in 0.4.0. Every comment in this file therefore uses a single dash, and
+  LogbackConfigurationTest loads every logback.xml in the repository through JoranConfigurator
+  so that a reintroduced one fails the build rather than a pod.
 -->
 <configuration>
   <!-- Console: for a human reading `kubectl logs`. No JSON here on purpose, because nothing

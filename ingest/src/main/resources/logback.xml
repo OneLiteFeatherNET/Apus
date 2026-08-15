@@ -1,8 +1,8 @@
 <configuration>
-  <!-- Console: for a human reading `kubectl logs`. No JSON here on purpose -- nothing
+  <!-- Console: for a human reading `kubectl logs`. No JSON here on purpose, because nothing
        parses this stream for ingestion, so it can stay legible. The operator does read a few
        stable substrings back out of it (phase=..., progress: NN.N% (done/total bytes),
-       dimensions=[...] -- see IngestLogProgress), which is why IngestMain's message text is a
+       dimensions=[...]; see IngestLogProgress), which is why IngestMain's message text is a
        contract even though its formatting here is not. -->
   <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
     <encoder>
@@ -25,7 +25,7 @@
   </root>
 
   <!-- Our own code at DEBUG is useful while troubleshooting and cheap; the AWS SDK at DEBUG is a
-       firehose (this module's equivalent of the Kubernetes client in operator/api -- ingest talks
+       firehose (this module's equivalent of the Kubernetes client in operator/api; ingest talks
        to S3, not to the API server). -->
   <logger name="net.onelitefeather.apus" level="INFO"/>
   <logger name="software.amazon.awssdk" level="WARN"/>
