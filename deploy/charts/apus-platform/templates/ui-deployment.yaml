@@ -37,14 +37,19 @@ spec:
           securityContext:
             {{- toYaml .Values.ui.securityContext | nindent 12 }}
           ports:
-            # ui/serve.mjs defaults to 8080 (PORT overrides it) and the distroless :nonroot
-            # base runs as uid 65532, so nothing here ever needs a privileged port.
+            # Nitro's own default is 3000; the image pins PORT=8080 (see ui/Dockerfile), and
+            # the distroless :nonroot base runs as uid 65532, so nothing here ever needs a
+            # privileged port.
             - name: http
               containerPort: 8080
               protocol: TCP
-          # The UI is a prebuilt static SPA: config (API base URL, OIDC issuer/client) is
-          # baked in at build time, not read from the environment at runtime -- there is
-          # nothing to inject here.
+          # No env injected yet, but no longer because it is impossible: with the Nitro
+          # server now in the image (it replaced nginx), NUXT_PUBLIC_API_BASE_URL,
+          # NUXT_PUBLIC_OIDC_ISSUER and NUXT_PUBLIC_OIDC_CLIENT_ID do reach the shell that
+          # Nitro renders per request. Wiring them to chart values is what unblocks item 5 of
+          # docs/superpowers/specs/2026-08-13-helm-charts-design.md ("the dashboard is not
+          # configurable at all", i.e. no installation can log in) and is deliberately left
+          # to its own change -- it needs new values, schema entries and defaults.
           readinessProbe:
             # Static SPA: a 200 on the root is a sufficient signal, no management endpoint
             # needed like the API.

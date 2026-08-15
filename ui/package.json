@@ -13,12 +13,12 @@
     "build": "nuxt build",
     "generate": "nuxt generate",
     "preview": "nuxt preview",
-    "serve": "node serve.mjs .output/public",
     "postinstall": "nuxt prepare",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "typecheck": "vue-tsc --noEmit -p tsconfig.json",
     "test": "vitest run -c vitest.config.ts && vitest run -c vitest.nuxt.config.ts",
+    "test:server": "nuxt build && vitest run -c vitest.server.config.ts",
     "test:watch": "vitest -c vitest.config.ts"
   },
   "dependencies": {

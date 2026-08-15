@@ -69,19 +69,20 @@ ui:
       type: RuntimeDefault
   securityContext:
     allowPrivilegeEscalation: false
-    # The Node static server only reads from the image; unlike nginx (which wrote its pid and
-    # cache below /tmp and /var/cache) it needs no writable path anywhere.
+    # The Nitro server only reads from the image; unlike nginx (which wrote its pid and cache
+    # below /tmp and /var/cache) it needs no writable path anywhere.
     readOnlyRootFilesystem: true
     capabilities:
       drop: ["ALL"]
   resources:
     requests:
       cpu: 50m
-      # Higher than the 64Mi/128Mi that fitted nginx: a Node process costs ~50Mi before it
-      # serves anything, and measured at concurrency 100 it peaks around 100Mi (with the
-      # image's own --max-old-space-size=64 cap; see ui/Dockerfile). 128Mi would have been an
-      # OOMKill under load, not a tight fit.
-      memory: 96Mi
+      # Higher than the 64Mi/128Mi that fitted nginx: Nitro costs ~63Mi before it serves
+      # anything and renders the SPA shell per request, so measured at concurrency 100 it
+      # peaks around 115Mi (with the image's own --max-old-space-size=64 cap; see
+      # ui/Dockerfile -- 153Mi without it). 128Mi would have been an OOMKill under load, not
+      # a tight fit.
+      memory: 128Mi
     limits:
       memory: 256Mi
   podAnnotations: {}

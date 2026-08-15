@@ -9,8 +9,8 @@ This chart installs:
   (`ClusterRole`/`ClusterRoleBinding`) needed to read and write the Apus custom resources
   (`Tenant`, `WorldSource`, `WorldIngest`, `BlueMapMap`, `BlueMapRender`, `BlueMapHosting`)
   and to tail render-job Pod logs as a Loki-less fallback.
-- The UI `Deployment` and `Service` — a prebuilt static SPA served out of a distroless image
-  by a dependency-free Node static server (see `ui/README.md`, "Serving the built SPA").
+- The UI `Deployment` and `Service` — the SPA served out of a distroless image by Nuxt's own
+  Nitro server (see `ui/README.md`, "Serving the built SPA").
 - Optionally, a single `Ingress` that routes `/api` to the API and `/` to the UI.
 - Optionally, a Prometheus Operator `ServiceMonitor` for the API.
 
@@ -92,7 +92,7 @@ listed here.
 | `ui.replicaCount` | int | `2` | Number of UI replicas. The UI is a stateless static SPA, safe to scale. |
 | `ui.podSecurityContext` | object | `{"runAsNonRoot": true, "runAsUser": 65532, "seccompProfile": {"type": "RuntimeDefault"}}` | Pod-level security context for the UI. `runAsUser: 65532`, not `10001` like the Java images — the distroless `:nonroot` base image runs as uid 65532. |
 | `ui.securityContext` | object | `{"allowPrivilegeEscalation": false, "readOnlyRootFilesystem": true, "capabilities": {"drop": ["ALL"]}}` | Container-level security context for the UI. `readOnlyRootFilesystem: true` — the UI container only ever reads its own image; nothing in it needs a writable path. |
-| `ui.resources` | object | `{"requests": {"cpu": "50m", "memory": "96Mi"}, "limits": {"memory": "256Mi"}}` | Resource requests/limits for the UI container. Higher than nginx needed — a Node process costs ~50Mi idle and peaks near 100Mi under load; see the comment in `values.yaml`. |
+| `ui.resources` | object | `{"requests": {"cpu": "50m", "memory": "128Mi"}, "limits": {"memory": "256Mi"}}` | Resource requests/limits for the UI container. Higher than nginx needed — Nitro costs ~63Mi idle and peaks near 115Mi under load; see the comment in `values.yaml`. |
 | `ui.podAnnotations` | object | `{}` | Extra annotations added to the UI pod. |
 | `ui.podLabels` | object | `{}` | Extra labels added to the UI pod. |
 | `ui.nodeSelector` | object | `{}` | Node selector for the UI pod. |
