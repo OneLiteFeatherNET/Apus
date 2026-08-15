@@ -159,6 +159,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      # Required for keyless cosign signing below: without it the OIDC token request
+      # returns 403 and the sign step fails. Same grant the six image jobs already carry.
+      id-token: write
     steps:
       - uses: actions/checkout@v5
       - uses: azure/setup-helm@v4
@@ -166,7 +169,12 @@ jobs:
           # Same pin, same reason as build-pr.yml (see the comment there): the chart that ships
           # must be packaged by the exact Helm version the PR job linted and rendered it with.
           version: v4.2.2
+      - name: Install Cosign
+        # Installed before the push, not after it: a cosign install that fails would
+        # otherwise leave two charts published in the registry that nothing ever signs.
+        uses: sigstore/cosign-installer@v4.1.2
       - name: Package and push charts
+        id: push
         env:
           HARBOR_REGISTRY: ${{ secrets.HARBOR_REGISTRY }}
           HARBOR_USERNAME: ${{ secrets.HARBOR_USERNAME }}
@@ -193,11 +201,74 @@ jobs:
             "$(printf '%s:%s' "${HARBOR_USERNAME}" "${HARBOR_PASSWORD}" | base64 -w0)" \
             > "${config}"
           trap 'rm -f "${config}"' EXIT
+          refs=()
           for chart in apus-operator apus-platform; do
             helm package "deploy/charts/${chart}"
+            log="${RUNNER_TEMP}/helm-push-${chart}.log"
+            # `helm push` prints its "Digest: sha256:..." line to stderr, so 2>&1 is what
+            # makes it readable at all. The default shell for a `run:` block without an
+            # explicit `shell:` key is `bash -e {0}` -- note: no pipefail -- so a pipeline
+            # reports tee's exit status and a failed push would sail through as success.
+            # PIPESTATUS[0] is helm's own status; it is read on the very next line, before
+            # anything else can overwrite the array.
             helm push "${chart}-${VERSION}.tgz" "oci://${HARBOR_REGISTRY}/apus/charts" \
-              --registry-config "${config}"
+              --registry-config "${config}" 2>&1 | tee "${log}"
+            status="${PIPESTATUS[0]}"
+            [ "${status}" -eq 0 ] || exit "${status}"
+            # Sign the digest, never the tag: a tag can later be repointed at other content,
+            # which would leave a valid signature vouching for something nobody reviewed.
+            digest="$(sed -n -E 's/^[[:space:]]*Digest:[[:space:]]*(sha256:[0-9a-f]{64}).*$/\1/p' "${log}" | head -n1)"
+            if [ -z "${digest}" ]; then
+              # Loud failure on purpose. Skipping the signature here would publish a chart
+              # that looks exactly like a signed one to anyone who does not check.
+              echo "::error::no digest found in helm push output for ${chart}; refusing to leave the pushed chart unsigned" >&2
+              exit 1
+            fi
+            refs+=("${HARBOR_REGISTRY}/apus/charts/${chart}@${digest}")
           done
+          {
+            echo 'refs<<CHART_REFS_EOF'
+            printf '%s\n' "${refs[@]}"
+            echo 'CHART_REFS_EOF'
+          } >> "${GITHUB_OUTPUT}"
+      - name: Sign the charts (keyless)
+        env:
+          CHART_REFS: ${{ steps.push.outputs.refs }}
+          COSIGN_USERNAME: ${{ secrets.HARBOR_USERNAME }}
+          COSIGN_PASSWORD_REG: ${{ secrets.HARBOR_PASSWORD }}
+        run: |
+          # Keyless signing via the GitHub Actions OIDC identity (no key, no password) --
+          # the same mechanism docker-publish.yml@v2.4.0 applies to the images, so charts and
+          # images end up verifiable against one and the same identity.
+          # cosign does not read helm's --registry-config; it takes its own registry flags.
+          while IFS= read -r ref; do
+            [ -n "${ref}" ] || continue
+            cosign sign --yes \
+              --registry-username="${COSIGN_USERNAME}" \
+              --registry-password="${COSIGN_PASSWORD_REG}" \
+              "${ref}"
+          done <<< "${CHART_REFS}"
+      - name: Verify the chart signatures
+        env:
+          CHART_REFS: ${{ steps.push.outputs.refs }}
+          COSIGN_USERNAME: ${{ secrets.HARBOR_USERNAME }}
+          COSIGN_PASSWORD_REG: ${{ secrets.HARBOR_PASSWORD }}
+        run: |
+          # A signature nobody verifies is decoration: this step is what proves the signature
+          # was actually stored next to the chart and was issued to this workflow.
+          # The identity is this workflow's own path at its ref, because publish-charts runs
+          # here rather than through `uses:` -- for a reusable workflow the certificate SAN
+          # would name the callee's path instead, and this regexp would never match.
+          identity="^https://github\.com/${GITHUB_REPOSITORY}/\.github/workflows/release-please\.yml@refs/"
+          while IFS= read -r ref; do
+            [ -n "${ref}" ] || continue
+            cosign verify \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+              --certificate-identity-regexp "${identity}" \
+              --registry-username="${COSIGN_USERNAME}" \
+              --registry-password="${COSIGN_PASSWORD_REG}" \
+              "${ref}" > /dev/null
+          done <<< "${CHART_REFS}"
 
   publish-telemetry-addon:
     needs: release-please
