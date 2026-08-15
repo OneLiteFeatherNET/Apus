@@ -1,46 +1,46 @@
-# Apus Phase 8 — Deployment und Observability: Implementierungsplan
+# Apus Phase 8 — Deployment and Observability: Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Apus lässt sich per GitOps in einen Cluster ausrollen, und wer es betreibt, sieht am Dashboard, was das System gerade tut — statt es aus `kubectl`-Ausgaben zusammenzureimen.
+**Goal:** Apus can be rolled out into a cluster via GitOps, and whoever operates it can see on the dashboard what the system is currently doing — instead of having to piece it together from `kubectl` output.
 
-**Architecture:** Das Repository liefert eine Kustomize-Basis unter `deploy/`, die das Cluster-Repository (`Kubernetes-FLUX`) referenziert und über ein Overlay mit seinen eigenen Werten überschreibt. Die sechs CRD-YAMLs werden eingecheckt statt nur generiert, damit ein Ausrollen keinen Gradle-Lauf voraussetzt; ein Test hält die eingecheckte Fassung mit dem Generator synchron. Metriken folgen dem im Repository bereits etablierten Muster: der Operator exponiert sie wie das `telemetry-addon` über den JDK-eigenen `HttpServer`, die API über Micronauts Micrometer-Integration.
+**Architecture:** The repository ships a Kustomize base under `deploy/`, which the cluster repository (`Kubernetes-FLUX`) references and overrides with its own values via an overlay. The six CRD YAMLs are checked in rather than only generated, so that a rollout does not require a Gradle run; a test keeps the checked-in version in sync with the generator. Metrics follow the pattern already established in the repository: the operator exposes them, like `telemetry-addon`, over the JDK's own `HttpServer`, the API over Micronaut's Micrometer integration.
 
-**Tech Stack:** Kustomize, Prometheus Operator (`PodMonitor`/`ServiceMonitor` aus dem im Cluster vorhandenen kube-prometheus-stack), Micrometer 1.15, JOSDK 5.5.1, Grafana, k3s via Testcontainers.
+**Tech Stack:** Kustomize, Prometheus Operator (`PodMonitor`/`ServiceMonitor` from the kube-prometheus-stack already present in the cluster), Micrometer 1.15, JOSDK 5.5.1, Grafana, k3s via Testcontainers.
 
 ## Global Constraints
 
-- **Voraussetzung: Phase 7 ist abgeschlossen.** Die Manifeste referenzieren die dort gebauten Images (`apus/operator`, `apus/api`, `apus/ui`); ohne sie ist dieser Plan nicht ausrollbar.
-- **Java-Toolchain 25**, Basispakete wie gehabt (`net.onelitefeather.apus.operator`, `...apus.api`).
-- **AGPL-Lizenzheader** über jede neue Java-Datei; Spotless erzwingt ihn.
-- **Neue Abhängigkeiten kommen in den Inline-Version-Catalog** in `settings.gradle.kts` — dieses Repository benutzt bewusst kein `libs.versions.toml`. Jede neue Version bekommt dort einen Kommentar, gegen was sie geprüft wurde, wie es die bestehenden Einträge tun.
-- **Der Operator arbeitet strikt namespace-lokal** (Design-Spec §10.1). Die RBAC-Regeln dieses Plans dürfen daran nichts aufweichen.
-- **Credentials erscheinen nie in Metriken, Labels oder Dashboards** (Design-Spec §12).
-- **Integrationstests bleiben aus dem PR-Build ausgeschlossen** — der k3s-Test aus Task 8 folgt der bestehenden `*IntegrationTest`-Konvention.
+- **Prerequisite: Phase 7 is complete.** The manifests reference the images built there (`apus/operator`, `apus/api`, `apus/ui`); without them this plan cannot be rolled out.
+- **Java toolchain 25**, base packages as before (`net.onelitefeather.apus.operator`, `...apus.api`).
+- **AGPL license header** on every new Java file; Spotless enforces it.
+- **New dependencies go into the inline version catalog** in `settings.gradle.kts` — this repository deliberately uses no `libs.versions.toml`. Every new version gets a comment there stating what it was checked against, the way the existing entries do.
+- **The operator works strictly namespace-local** (design spec §10.1). This plan's RBAC rules must not loosen that in any way.
+- **Credentials never appear in metrics, labels or dashboards** (design spec §12).
+- **Integration tests stay excluded from the PR build** — the k3s test from Task 8 follows the existing `*IntegrationTest` convention.
 
 ---
 
-### Task 1: CRD-YAMLs einchecken und synchron halten
+### Task 1: Check in the CRD YAMLs and keep them in sync
 
-Heute erzeugt `./gradlew :operator:generateCrds` die sechs CRDs nach `operator/build/crds`. Wer Apus ausrollt, braucht sie aber vor dem ersten Operator-Start — und ein Cluster-Repository soll dafür kein Gradle ausführen müssen.
+Today `./gradlew :operator:generateCrds` generates the six CRDs into `operator/build/crds`. Anyone rolling out Apus needs them, though, before the operator starts for the first time — and a cluster repository should not have to run Gradle for that.
 
 **Files:**
 
-- Create: `deploy/crds/*.yaml` (sechs Dateien, Generator-Ausgabe)
+- Create: `deploy/crds/*.yaml` (six files, generator output)
 - Create: `operator/src/test/java/net/onelitefeather/apus/operator/CrdsInSyncTest.java`
-- Modify: `operator/build.gradle.kts` (Ausgabeverzeichnis des Generators zusätzlich nach `deploy/crds`)
+- Modify: `operator/build.gradle.kts` (also write the generator's output to `deploy/crds`)
 
 **Interfaces:**
 
-- Consumes: `generateCrds` (JavaExec-Task, `operator/build.gradle.kts:62`), der nach `build/crds` schreibt.
-- Produces: `deploy/crds/` als eingecheckte Quelle für Task 2.
+- Consumes: `generateCrds` (JavaExec task, `operator/build.gradle.kts:62`), which writes to `build/crds`.
+- Produces: `deploy/crds/` as the checked-in source for Task 2.
 
-- [ ] **Schritt 1: CRDs erzeugen und Namen feststellen**
+- [ ] **Step 1: Generate the CRDs and note the names**
 
 Run: `./gradlew :operator:generateCrds && ls operator/build/crds/`
-Expected: sechs YAML-Dateien. Die exakten Dateinamen notieren — sie werden in Schritt 3 gebraucht.
+Expected: six YAML files. Note down the exact file names — they are needed in Step 3.
 
-- [ ] **Schritt 2: Failing test schreiben**
+- [ ] **Step 2: Write a failing test**
 
 ```java
 package net.onelitefeather.apus.operator;
@@ -110,14 +110,14 @@ class CrdsInSyncTest {
 }
 ```
 
-- [ ] **Schritt 3: Test laufen lassen und Fehlschlag bestätigen**
+- [ ] **Step 3: Run the test and confirm the failure**
 
 Run: `./gradlew :operator:test --tests '*CrdsInSyncTest*'`
-Expected: FAIL mit `../deploy/crds does not exist`.
+Expected: FAIL with `../deploy/crds does not exist`.
 
-- [ ] **Schritt 4: Generator zusätzlich nach `deploy/crds` schreiben lassen**
+- [ ] **Step 4: Have the generator also write to `deploy/crds`**
 
-In `operator/build.gradle.kts` nach der `generateCrds`-Registrierung:
+In `operator/build.gradle.kts`, after the `generateCrds` registration:
 
 ```kotlin
 val syncCrds by tasks.registering(Copy::class) {
@@ -128,27 +128,27 @@ val syncCrds by tasks.registering(Copy::class) {
 }
 ```
 
-- [ ] **Schritt 5: CRDs erzeugen und einchecken**
+- [ ] **Step 5: Generate the CRDs and check them in**
 
 Run: `./gradlew :operator:syncCrds && ls deploy/crds/`
-Expected: dieselben sechs Dateien wie in Schritt 1.
+Expected: the same six files as in Step 1.
 
-- [ ] **Schritt 6: Test läuft grün**
+- [ ] **Step 6: Test passes**
 
 Run: `./gradlew :operator:test --tests '*CrdsInSyncTest*'`
 Expected: PASS
 
-- [ ] **Schritt 7: Gegenprobe, dass der Test Drift wirklich erkennt**
+- [ ] **Step 7: Confirm the test actually catches drift**
 
 ```bash
 printf '\n# drift\n' >> deploy/crds/$(ls deploy/crds | head -1)
-./gradlew :operator:test --tests '*CrdsInSyncTest*' || echo "erkannt"
+./gradlew :operator:test --tests '*CrdsInSyncTest*' || echo "caught"
 git checkout deploy/crds
 ```
 
-Expected: `erkannt` — ein Test, der Drift nicht bemerkt, ist wertlos.
+Expected: `caught` — a test that does not notice drift is worthless.
 
-- [ ] **Schritt 8: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add deploy/crds operator/build.gradle.kts operator/src/test/java/net/onelitefeather/apus/operator/CrdsInSyncTest.java
@@ -157,7 +157,7 @@ git commit -m "feat: check in the generated CRDs and guard them against drift"
 
 ---
 
-### Task 2: Kustomize-Basis für den Operator
+### Task 2: Kustomize base for the operator
 
 **Files:**
 
@@ -170,10 +170,10 @@ git commit -m "feat: check in the generated CRDs and guard them against drift"
 
 **Interfaces:**
 
-- Consumes: `deploy/crds/` aus Task 1; die Umgebungsvariablen aus `OperatorConfig` (`APUS_ROOK_NAMESPACE`, `APUS_CEPH_OBJECT_STORE`, `APUS_BUCKET_STORAGE_CLASS`, `APUS_RUNNER_IMAGE`, `APUS_INGEST_IMAGE`, `APUS_HOSTING_IMAGE`, `APUS_BUNDLE_BUCKET`, `APUS_BUNDLE_S3_ENDPOINT`, `APUS_BUNDLE_S3_REGION`, `APUS_BUNDLE_CREDENTIALS_SECRET`).
-- Produces: die Basis, auf die Task 3 (API und UI) und Task 6 (PodMonitor) aufsetzen.
+- Consumes: `deploy/crds/` from Task 1; the environment variables from `OperatorConfig` (`APUS_ROOK_NAMESPACE`, `APUS_CEPH_OBJECT_STORE`, `APUS_BUCKET_STORAGE_CLASS`, `APUS_RUNNER_IMAGE`, `APUS_INGEST_IMAGE`, `APUS_HOSTING_IMAGE`, `APUS_BUNDLE_BUCKET`, `APUS_BUNDLE_S3_ENDPOINT`, `APUS_BUNDLE_S3_REGION`, `APUS_BUNDLE_CREDENTIALS_SECRET`).
+- Produces: the base that Task 3 (API and UI) and Task 6 (PodMonitor) build on.
 
-- [ ] **Schritt 1: Namespace und ServiceAccount**
+- [ ] **Step 1: Namespace and ServiceAccount**
 
 `deploy/base/namespace.yaml`:
 
@@ -194,7 +194,7 @@ metadata:
   namespace: apus-system
 ```
 
-- [ ] **Schritt 2: RBAC**
+- [ ] **Step 2: RBAC**
 
 `deploy/base/operator-rbac.yaml`:
 
@@ -282,12 +282,12 @@ subjects:
     namespace: apus-system
 ```
 
-- [ ] **Schritt 3: RBAC gegen den tatsächlichen Code prüfen**
+- [ ] **Step 3: Check the RBAC against the actual code**
 
 Run: `grep -rhoE '\b(Job|Deployment|Service|Ingress|ConfigMap|Secret|Namespace|ResourceQuota|LimitRange|NetworkPolicy|ObjectBucketClaim|CephObjectStoreUser|Pod)\b' operator/src/main/java --include='*.java' | sort -u`
-Expected: Jeder ausgegebene Typ hat oben eine Regel. Fehlt einer, ergänzen — eine zu schmale ClusterRole äußert sich zur Laufzeit als `Forbidden` mitten in einer Reconciliation, nicht beim Start.
+Expected: every type it prints has a rule above. If one is missing, add it — an overly narrow ClusterRole shows up at runtime as `Forbidden` in the middle of a reconciliation, not at startup.
 
-- [ ] **Schritt 4: Operator-Deployment**
+- [ ] **Step 4: Operator Deployment**
 
 `deploy/base/operator-deployment.yaml`:
 
@@ -360,7 +360,7 @@ spec:
               drop: ["ALL"]
 ```
 
-- [ ] **Schritt 5: Kustomization und README**
+- [ ] **Step 5: Kustomization and README**
 
 `deploy/base/kustomization.yaml`:
 
@@ -376,44 +376,45 @@ resources:
   - operator-deployment.yaml
 ```
 
-Dafür braucht `deploy/crds` eine eigene `kustomization.yaml`, die die sechs Dateien auflistet:
+For that, `deploy/crds` needs its own `kustomization.yaml` listing the six files:
 
 ```yaml
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
 resources:
-  - <die sechs Dateinamen aus Task 1, Schritt 1>
+  - <the six file names from Task 1, Step 1>
 ```
 
 `deploy/README.md`:
 
 ```markdown
-# Ausrollen
+# Rolling out
 
-`base/` ist die vollständige, aber unkonfigurierte Kustomize-Basis. Cluster-spezifische
-Werte — Registry, Image-Tags, Rook-Namen, Hostnamen — gehören in ein Overlay im
-Cluster-Repository, nicht hierher.
+`base/` is the complete but unconfigured Kustomize base. Cluster-specific
+values — registry, image tags, Rook names, hostnames — belong in an overlay in the
+cluster repository, not here.
 
-    kubectl apply -k deploy/base            # direkt, für einen Testcluster
+    kubectl apply -k deploy/base            # directly, for a test cluster
     kustomize build deploy/base | kubectl apply -f -
 
-Die CRDs unter `crds/` sind generiert. Sie werden nicht von Hand bearbeitet, sondern über
+The CRDs under `crds/` are generated. They are never edited by hand; instead they are
+refreshed via
 
     ./gradlew :operator:syncCrds
 
-erneuert; `CrdsInSyncTest` bricht den Build, wenn das jemand vergisst.
+`CrdsInSyncTest` breaks the build if anyone forgets.
 ```
 
-- [ ] **Schritt 6: Manifeste validieren**
+- [ ] **Step 6: Validate the manifests**
 
 Run: `kustomize build deploy/base > /tmp/apus-base.yaml && grep -c '^kind:' /tmp/apus-base.yaml`
-Expected: mindestens 11 Objekte (6 CRDs, Namespace, ServiceAccount, ClusterRole, ClusterRoleBinding, Deployment).
+Expected: at least 11 objects (6 CRDs, Namespace, ServiceAccount, ClusterRole, ClusterRoleBinding, Deployment).
 
 Run: `kubectl apply --dry-run=client -f /tmp/apus-base.yaml`
-Expected: jede Zeile endet auf `(dry run)`, keine Fehler.
+Expected: every line ends in `(dry run)`, no errors.
 
-- [ ] **Schritt 7: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add deploy/
@@ -422,7 +423,7 @@ git commit -m "feat: add a Kustomize base for rolling out the operator"
 
 ---
 
-### Task 3: Manifeste für API und UI
+### Task 3: Manifests for the API and the UI
 
 **Files:**
 
@@ -434,12 +435,12 @@ git commit -m "feat: add a Kustomize base for rolling out the operator"
 - Create: `deploy/base/ingress.yaml`
 - Modify: `deploy/base/kustomization.yaml`
 
-- [ ] **Schritt 1: RBAC der API ermitteln, statt sie zu raten**
+- [ ] **Step 1: Determine the API's RBAC instead of guessing it**
 
 Run: `grep -rn 'resources(\|\.secrets()\|\.namespaces()\|customResources' api/src/main/java --include='*.java' | head -20`
-Expected: eine Liste der tatsächlich angesprochenen Ressourcen. Die API liest die Custom Resources und — für den Push-Token-Lookup — Secrets. Genau diese und keine weiteren kommen in die Rolle.
+Expected: a list of the resources actually touched. The API reads the custom resources and — for the push-token lookup — secrets. Exactly those, and no more, go into the role.
 
-- [ ] **Schritt 2: API-RBAC schreiben**
+- [ ] **Step 2: Write the API RBAC**
 
 `deploy/base/api-rbac.yaml`:
 
@@ -485,9 +486,9 @@ subjects:
     namespace: apus-system
 ```
 
-- [ ] **Schritt 3: Deployments und Services**
+- [ ] **Step 3: Deployments and Services**
 
-`deploy/base/api-deployment.yaml` — gleiche Struktur wie das Operator-Deployment (`securityContext`, `runAsUser: 10001`, `readOnlyRootFilesystem`), Image `harbor.onelitefeather.dev/apus/api:0.1.0`, `serviceAccountName: apus-api`, Port 8080, plus:
+`deploy/base/api-deployment.yaml` — same structure as the operator Deployment (`securityContext`, `runAsUser: 10001`, `readOnlyRootFilesystem`), image `harbor.onelitefeather.dev/apus/api:0.1.0`, `serviceAccountName: apus-api`, port 8080, plus:
 
 ```yaml
           env:
@@ -511,27 +512,27 @@ subjects:
             initialDelaySeconds: 30
 ```
 
-`deploy/base/api-service.yaml` und `deploy/base/ui-service.yaml`: je ein `ClusterIP`-Service auf Port 8080 mit passendem Selector.
+`deploy/base/api-service.yaml` and `deploy/base/ui-service.yaml`: one `ClusterIP` Service each on port 8080 with a matching selector.
 
-`deploy/base/ui-deployment.yaml`: Image `harbor.onelitefeather.dev/apus/ui:0.1.0`, `runAsUser: 101` (die unprivilegierte nginx-Basis aus Phase 7, Task 8 läuft unter dieser uid — nicht 10001), Port 8080, `readOnlyRootFilesystem: false`, weil nginx sein Cache-Verzeichnis beschreibt.
+`deploy/base/ui-deployment.yaml`: image `harbor.onelitefeather.dev/apus/ui:0.1.0`, `runAsUser: 101` (the unprivileged nginx base from Phase 7, Task 8 runs under this uid — not 10001), port 8080, `readOnlyRootFilesystem: false`, because nginx writes to its cache directory.
 
-- [ ] **Schritt 4: Ingress**
+- [ ] **Step 4: Ingress**
 
-`deploy/base/ingress.yaml` — ein Host, zwei Pfade: `/api` auf den API-Service, `/` auf den UI-Service. `ingressClassName: nginx`, TLS über cert-manager, Hostname als Platzhalter `apus.example.net`, den das Overlay ersetzt.
+`deploy/base/ingress.yaml` — one host, two paths: `/api` to the API Service, `/` to the UI Service. `ingressClassName: nginx`, TLS via cert-manager, hostname as the placeholder `apus.example.net`, which the overlay replaces.
 
-- [ ] **Schritt 5: Health-Endpunkte verifizieren, bevor die Probes eingecheckt werden**
+- [ ] **Step 5: Verify the health endpoints before checking in the probes**
 
 Run: `grep -rn 'micronaut-management\|endpoints:' api/build.gradle.kts api/src/main/resources/application.yml`
-Expected: `micronaut-management` ist als Abhängigkeit vorhanden und `/health` aktiviert. Ist es das nicht, laufen die Probes ins Leere und der Pod wird endlos neu gestartet — dann zuerst Task 5 dieses Plans ausführen (der bringt `micronaut-management` mit) und danach hierher zurückkehren.
+Expected: `micronaut-management` is present as a dependency and `/health` is enabled. If it is not, the probes hit nothing and the pod restarts endlessly — in that case, run Task 5 of this plan first (it brings in `micronaut-management`) and come back here afterwards.
 
-- [ ] **Schritt 6: Kustomization erweitern und validieren**
+- [ ] **Step 6: Extend and validate the kustomization**
 
-Die sechs neuen Dateien in `deploy/base/kustomization.yaml` unter `resources` ergänzen.
+Add the six new files under `resources` in `deploy/base/kustomization.yaml`.
 
 Run: `kustomize build deploy/base | kubectl apply --dry-run=client -f -`
-Expected: keine Fehler.
+Expected: no errors.
 
-- [ ] **Schritt 7: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add deploy/base
@@ -540,13 +541,13 @@ git commit -m "feat: add deployment manifests for the API and the dashboard"
 
 ---
 
-### Task 4: Operator-Metriken
+### Task 4: Operator metrics
 
-Design-Spec §13.1 verlangt „Renders nach Phase, Ingest-Dauer, Quota-Auslastung je Mandant". Nichts davon existiert.
+Design spec §13.1 requires "renders by phase, ingest duration, quota usage per tenant". None of that exists.
 
 **Files:**
 
-- Modify: `settings.gradle.kts` (Micrometer im Katalog)
+- Modify: `settings.gradle.kts` (Micrometer in the catalog)
 - Modify: `operator/build.gradle.kts`
 - Create: `operator/src/main/java/net/onelitefeather/apus/operator/metrics/ApusMetrics.java`
 - Create: `operator/src/main/java/net/onelitefeather/apus/operator/metrics/MetricsServer.java`
@@ -575,11 +576,11 @@ Design-Spec §13.1 verlangt „Renders nach Phase, Ingest-Dauer, Quota-Auslastun
   }
   ```
 
-- Consumes: `JOSDK 5.5.1`s `Metrics`-Schnittstelle für die Reconciliation-Metriken.
+- Consumes: JOSDK 5.5.1's `Metrics` interface for the reconciliation metrics.
 
-- [ ] **Schritt 1: Katalogeinträge ergänzen**
+- [ ] **Step 1: Add the catalog entries**
 
-In `settings.gradle.kts` im `versionCatalogs`-Block:
+In the `versionCatalogs` block of `settings.gradle.kts`:
 
 ```kotlin
 // Micrometer: the operator has no web framework to inherit a registry from, so it takes
@@ -594,7 +595,7 @@ library("micrometer.registry.prometheus", "io.micrometer", "micrometer-registry-
 library("josdk.micrometer", "io.javaoperatorsdk", "micrometer-support").versionRef("josdk")
 ```
 
-In `operator/build.gradle.kts` unter `dependencies`:
+In `operator/build.gradle.kts` under `dependencies`:
 
 ```kotlin
 implementation(libs.micrometer.core)
@@ -602,7 +603,7 @@ implementation(libs.micrometer.registry.prometheus)
 implementation(libs.josdk.micrometer)
 ```
 
-- [ ] **Schritt 2: Failing test für die Metriken schreiben**
+- [ ] **Step 2: Write a failing test for the metrics**
 
 ```java
 package net.onelitefeather.apus.operator.metrics;
@@ -680,12 +681,12 @@ class ApusMetricsTest {
 }
 ```
 
-- [ ] **Schritt 3: Test laufen lassen und Fehlschlag bestätigen**
+- [ ] **Step 3: Run the test and confirm the failure**
 
 Run: `./gradlew :operator:test --tests '*ApusMetricsTest*'`
-Expected: FAIL, `ApusMetrics` existiert nicht.
+Expected: FAIL, `ApusMetrics` does not exist.
 
-- [ ] **Schritt 4: `ApusMetrics` implementieren**
+- [ ] **Step 4: Implement `ApusMetrics`**
 
 ```java
 package net.onelitefeather.apus.operator.metrics;
@@ -760,12 +761,12 @@ public final class ApusMetrics {
 }
 ```
 
-- [ ] **Schritt 5: Test läuft grün**
+- [ ] **Step 5: Test passes**
 
 Run: `./gradlew :operator:test --tests '*ApusMetricsTest*'`
 Expected: PASS
 
-- [ ] **Schritt 6: Failing test für den Metrics-Server**
+- [ ] **Step 6: Write a failing test for the metrics server**
 
 ```java
 package net.onelitefeather.apus.operator.metrics;
@@ -814,25 +815,25 @@ class MetricsServerTest {
 }
 ```
 
-- [ ] **Schritt 7: `MetricsServer` implementieren**
+- [ ] **Step 7: Implement `MetricsServer`**
 
-Nach dem Vorbild von `telemetry-addon/src/main/java/net/onelitefeather/apus/telemetry/TelemetryServer.java`: JDK-`HttpServer`, ein `HttpHandler` auf `/metrics`, `Executors.newVirtualThreadPerTaskExecutor()`, `port()`-Methode, die den effektiv gebundenen Port zurückgibt (nötig, weil der Test mit Port 0 bindet).
+Following the model of `telemetry-addon/src/main/java/net/onelitefeather/apus/telemetry/TelemetryServer.java`: JDK `HttpServer`, an `HttpHandler` on `/metrics`, `Executors.newVirtualThreadPerTaskExecutor()`, a `port()` method that returns the port actually bound (needed because the test binds to port 0).
 
-- [ ] **Schritt 8: Test läuft grün**
+- [ ] **Step 8: Test passes**
 
 Run: `./gradlew :operator:test --tests '*MetricsServerTest*'`
 Expected: PASS
 
-- [ ] **Schritt 9: In `ApusOperator` verdrahten**
+- [ ] **Step 9: Wire it into `ApusOperator`**
 
-Im Start-Pfad eine `PrometheusMeterRegistry` anlegen, an `ApusMetrics` und an JOSDKs `MicrometerMetrics` übergeben (`Operator`-Konfiguration: `.withMetrics(MicrometerMetrics.newPerResourceCollectingMicrometerMetricsBuilder(registry).build())`), `MetricsServer` auf Port 8080 starten und beim Herunterfahren schließen. `ApusMetrics` an die Reconciler durchreichen, die die drei Ereignisse melden.
+In the start path, create a `PrometheusMeterRegistry`, hand it to `ApusMetrics` and to JOSDK's `MicrometerMetrics` (`Operator` configuration: `.withMetrics(MicrometerMetrics.newPerResourceCollectingMicrometerMetricsBuilder(registry).build())`), start `MetricsServer` on port 8080 and close it on shutdown. Pass `ApusMetrics` through to the reconcilers, which report the three events.
 
-- [ ] **Schritt 10: Gesamten Operator-Test-Lauf grün halten**
+- [ ] **Step 10: Keep the whole operator test run green**
 
 Run: `./gradlew :operator:test`
 Expected: BUILD SUCCESSFUL
 
-- [ ] **Schritt 11: Commit**
+- [ ] **Step 11: Commit**
 
 ```bash
 git add settings.gradle.kts operator/
@@ -841,7 +842,7 @@ git commit -m "feat: export operator metrics for renders, ingests and tenant sto
 
 ---
 
-### Task 5: API-Metriken
+### Task 5: API metrics
 
 **Files:**
 
@@ -850,7 +851,7 @@ git commit -m "feat: export operator metrics for renders, ingests and tenant sto
 - Modify: `api/src/main/resources/application.yml`
 - Create: `api/src/test/java/net/onelitefeather/apus/api/MetricsEndpointTest.java`
 
-- [ ] **Schritt 1: Katalog und Abhängigkeiten**
+- [ ] **Step 1: Catalog and dependencies**
 
 ```kotlin
 // Micronaut Micrometer, per the OneLiteFeather observability baseline. Version taken from
@@ -875,7 +876,7 @@ implementation(libs.micronaut.micrometer.registry.prometheus)
 implementation(libs.micronaut.management)
 ```
 
-- [ ] **Schritt 2: Failing test schreiben**
+- [ ] **Step 2: Write a failing test**
 
 ```java
 package net.onelitefeather.apus.api;
@@ -920,12 +921,12 @@ class MetricsEndpointTest {
 }
 ```
 
-- [ ] **Schritt 3: Test laufen lassen und Fehlschlag bestätigen**
+- [ ] **Step 3: Run the test and confirm the failure**
 
 Run: `./gradlew :api:test --tests '*MetricsEndpointTest*'`
-Expected: FAIL — der Endpunkt existiert nicht (404 statt 401).
+Expected: FAIL — the endpoint does not exist (404 instead of 401).
 
-- [ ] **Schritt 4: `application.yml` ergänzen**
+- [ ] **Step 4: Extend `application.yml`**
 
 ```yaml
 endpoints:
@@ -949,14 +950,14 @@ micronaut:
       uptime.enabled: true
 ```
 
-`health` bleibt bewusst unauthentifiziert — Kubelet-Probes tragen kein Token. Details sind dabei unbedenklich, weil der Endpunkt nur innerhalb des Clusters erreichbar ist (kein Ingress-Pfad darauf).
+`health` deliberately stays unauthenticated — kubelet probes carry no token. The details are unproblematic there, because the endpoint is only reachable from inside the cluster (no ingress path onto it).
 
-- [ ] **Schritt 5: Tests grün**
+- [ ] **Step 5: Tests pass**
 
 Run: `./gradlew :api:test`
 Expected: BUILD SUCCESSFUL
 
-- [ ] **Schritt 6: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add settings.gradle.kts api/
@@ -965,7 +966,7 @@ git commit -m "feat: expose Prometheus metrics and health endpoints from the API
 
 ---
 
-### Task 6: Scrape-Konfiguration
+### Task 6: Scrape configuration
 
 **Files:**
 
@@ -975,12 +976,12 @@ git commit -m "feat: expose Prometheus metrics and health endpoints from the API
 - Create: `deploy/base/operator-service.yaml`
 - Modify: `deploy/base/kustomization.yaml`
 
-- [ ] **Schritt 1: Label prüfen, unter dem der Operator seine Render-Pods markiert**
+- [ ] **Step 1: Check the label under which the operator marks its render pods**
 
 Run: `grep -rn 'class Labels' -A 30 operator/src/main/java/net/onelitefeather/apus/operator/api/Labels.java`
-Expected: die Konstanten für die Pod-Labels. Der `PodMonitor` muss exakt darauf selektieren — geraten führt zu einem Monitor, der nie etwas findet und dabei keinen Fehler wirft.
+Expected: the constants for the pod labels. The `PodMonitor` has to select on exactly these — guessing produces a monitor that never finds anything and throws no error while doing so.
 
-- [ ] **Schritt 2: `PodMonitor` für Render-Pods**
+- [ ] **Step 2: `PodMonitor` for render pods**
 
 ```yaml
 apiVersion: monitoring.coreos.com/v1
@@ -996,30 +997,30 @@ spec:
     any: true
   selector:
     matchLabels:
-      <die Labels aus Schritt 1>
+      <the labels from Step 1>
   podMetricsEndpoints:
     - port: telemetry
       path: /metrics
       interval: 15s
 ```
 
-Damit das greift, muss der Render-Job seinen Port benennen. Prüfen:
+For this to take effect, the render job has to name its port. Check:
 
 Run: `grep -n 'containerPort\|withName' operator/src/main/java/net/onelitefeather/apus/operator/render/RenderJobBuilder.java`
-Expected: ein benannter Port `telemetry` auf 8099. Fehlt der Name, im selben Task ergänzen und den zugehörigen `RenderJobBuilderTest` erweitern.
+Expected: a named port `telemetry` on 8099. If the name is missing, add it within the same task and extend the associated `RenderJobBuilderTest`.
 
-- [ ] **Schritt 3: Service und `ServiceMonitor` für Operator und API**
+- [ ] **Step 3: Service and `ServiceMonitor` for operator and API**
 
-`operator-service.yaml`: ClusterIP-Service auf Port 8080, Name `metrics`, Selector `app.kubernetes.io/name: apus-operator`.
+`operator-service.yaml`: ClusterIP Service on port 8080, name `metrics`, selector `app.kubernetes.io/name: apus-operator`.
 
-Beide `ServiceMonitor`s selektieren auf denselben Labels; der für die API scrapt Pfad `/prometheus` und braucht die Basic-Auth- bzw. Token-Referenz, mit der der Endpunkt geschützt ist (`basicAuth` mit Verweis auf ein Secret, das das Overlay im Cluster-Repository liefert).
+Both `ServiceMonitor`s select on the same labels; the one for the API scrapes path `/prometheus` and needs the basic-auth or token reference that protects the endpoint (`basicAuth` referencing a secret that the overlay in the cluster repository supplies).
 
-- [ ] **Schritt 4: Validieren**
+- [ ] **Step 4: Validate**
 
 Run: `kustomize build deploy/base | kubectl apply --dry-run=client -f - 2>&1 | tail -5`
-Expected: keine Fehler. `PodMonitor`/`ServiceMonitor` erfordern die CRDs des Prometheus-Operators; ist der lokal nicht vorhanden, schlägt `--dry-run=client` **nicht** fehl (es prüft nur Struktur) — für die echte Prüfung `--dry-run=server` gegen einen Cluster mit kube-prometheus-stack verwenden.
+Expected: no errors. `PodMonitor`/`ServiceMonitor` require the Prometheus Operator's CRDs; if those are not present locally, `--dry-run=client` does **not** fail (it only checks structure) — for a real check, use `--dry-run=server` against a cluster that has kube-prometheus-stack.
 
-- [ ] **Schritt 5: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add deploy/base
@@ -1028,9 +1029,9 @@ git commit -m "feat: add scrape configuration for render pods, operator and API"
 
 ---
 
-### Task 7: Grafana-Dashboards
+### Task 7: Grafana dashboards
 
-Design-Spec §13.1: „ein Grafana-Dashboard je Ebene (Plattform, Mandant)".
+Design spec §13.1: "one Grafana dashboard per level (platform, tenant)".
 
 **Files:**
 
@@ -1039,54 +1040,54 @@ Design-Spec §13.1: „ein Grafana-Dashboard je Ebene (Plattform, Mandant)".
 - Create: `deploy/base/dashboards-configmap.yaml`
 - Modify: `deploy/base/kustomization.yaml`
 
-- [ ] **Schritt 1: Verfügbare Metriknamen zusammenstellen**
+- [ ] **Step 1: Compile the available metric names**
 
-Aus Task 4 und 5 sowie dem bestehenden `telemetry-addon`:
+From Task 4 and 5, plus the existing `telemetry-addon`:
 
 Run: `grep -rn 'apus_' telemetry-addon/src/main/java/net/onelitefeather/apus/telemetry/PrometheusWriter.java operator/src/main/java/net/onelitefeather/apus/operator/metrics/ApusMetrics.java`
-Expected: die vollständige Liste. Jedes Panel darf ausschließlich diese Namen verwenden — ein Dashboard mit erfundenen Metriken sieht korrekt aus und bleibt dauerhaft leer.
+Expected: the complete list. Every panel may use only these names — a dashboard with invented metrics looks correct and stays permanently empty.
 
-- [ ] **Schritt 2: Plattform-Dashboard bauen**
+- [ ] **Step 2: Build the platform dashboard**
 
-`deploy/dashboards/apus-platform.json`, Panels:
+`deploy/dashboards/apus-platform.json`, panels:
 
-1. **Renders nach Phase** (Zeitreihe): `sum by (phase) (rate(apus_renders_total[5m]))`
-2. **Fehlerquote** (Stat): `sum(rate(apus_renders_total{phase="Failed"}[1h])) / sum(rate(apus_renders_total[1h]))`
-3. **Speicherverbrauch je Mandant** (Balken): `apus_storage_used_bytes`
-4. **Ingest-Dauer, 95. Perzentil** (Zeitreihe): `histogram_quantile(0.95, sum by (le, tenant) (rate(apus_ingest_duration_seconds_bucket[30m])))`
-5. **Reconciliation-Fehler des Operators** (Zeitreihe, aus JOSDKs Micrometer-Support): `sum by (name) (rate(operator_sdk_reconciliations_failed_total[5m]))`
-6. **API-Latenz** (Zeitreihe): `histogram_quantile(0.95, sum by (le, uri) (rate(http_server_requests_seconds_bucket[5m])))`
+1. **Renders by phase** (time series): `sum by (phase) (rate(apus_renders_total[5m]))`
+2. **Error rate** (stat): `sum(rate(apus_renders_total{phase="Failed"}[1h])) / sum(rate(apus_renders_total[1h]))`
+3. **Storage used per tenant** (bar): `apus_storage_used_bytes`
+4. **Ingest duration, 95th percentile** (time series): `histogram_quantile(0.95, sum by (le, tenant) (rate(apus_ingest_duration_seconds_bucket[30m])))`
+5. **Operator reconciliation errors** (time series, from JOSDK's Micrometer support): `sum by (name) (rate(operator_sdk_reconciliations_failed_total[5m]))`
+6. **API latency** (time series): `histogram_quantile(0.95, sum by (le, uri) (rate(http_server_requests_seconds_bucket[5m])))`
 
-Als Template-Variable `datasource` vom Typ `prometheus`; keine fest verdrahtete Datenquellen-UID, sonst lässt sich das Dashboard in keinem zweiten Cluster importieren.
+A `datasource` template variable of type `prometheus`; no hardcoded datasource UID, or the dashboard cannot be imported into a second cluster.
 
-- [ ] **Schritt 3: Mandanten-Dashboard bauen**
+- [ ] **Step 3: Build the tenant dashboard**
 
-`deploy/dashboards/apus-tenant.json` mit derselben Datenquellen-Variable plus einer Variable `tenant` (`label_values(apus_storage_used_bytes, tenant)`). Panels: laufende Renders mit Fortschritt (`apus_render_progress_ratio` und `apus_render_eta_seconds` — die Namen, die `PrometheusWriter` im `telemetry-addon` tatsächlich schreibt), letzte Ingest-Dauer, Speicherverbrauch gegen Quota, Render-Historie nach Phase — alle mit `{tenant="$tenant"}` gefiltert.
+`deploy/dashboards/apus-tenant.json` with the same datasource variable plus a `tenant` variable (`label_values(apus_storage_used_bytes, tenant)`). Panels: running renders with progress (`apus_render_progress_ratio` and `apus_render_eta_seconds` — the names `PrometheusWriter` in `telemetry-addon` actually writes), latest ingest duration, storage used against quota, render history by phase — all filtered on `{tenant="$tenant"}`.
 
-Die Render-Metriken tragen allerdings **kein** `tenant`-Label: Das `telemetry-addon` läuft im Render-Pod und kennt nur `map`. Der Mandant kommt über die Pod-Labels herein, die der `PodMonitor` aus Task 6 anhängt — beim Bau der Panels ist zu prüfen, welches Label das ist (`grep` in `Labels.java`), und danach zu filtern. Wer stattdessen `{tenant="$tenant"}` auf `apus_render_progress_ratio` schreibt, bekommt ein dauerhaft leeres Panel.
+The render metrics, however, carry **no** `tenant` label: `telemetry-addon` runs in the render pod and only knows `map`. The tenant comes in through the pod labels the `PodMonitor` from Task 6 attaches — when building the panels, check which label that is (`grep` in `Labels.java`) and filter on it. Writing `{tenant="$tenant"}` on `apus_render_progress_ratio` instead yields a permanently empty panel.
 
-- [ ] **Schritt 4: JSON validieren**
+- [ ] **Step 4: Validate the JSON**
 
 Run: `for f in deploy/dashboards/*.json; do python3 -c "import json,sys;json.load(open('$f'));print('$f ok')"; done`
-Expected: beide `ok`.
+Expected: both `ok`.
 
-- [ ] **Schritt 5: Alle verwendeten Metriknamen gegen Schritt 1 gegenprüfen**
+- [ ] **Step 5: Cross-check every metric name used against Step 1**
 
-Nicht gegen den Quellcode greppen, sondern gegen einen echten Scrape — die Meter-Namen im Code und die gescrapten Namen unterscheiden sich (`apus_renders` im Code, `apus_renders_total` im Scrape; `apus_ingest_duration` im Code, `apus_ingest_duration_seconds*` im Scrape). Ein Abgleich gegen den Quellcode würde genau deshalb Fehlalarme produzieren.
+Do not grep against the source code, but against an actual scrape — the meter names in the code and the scraped names differ (`apus_renders` in the code, `apus_renders_total` in the scrape; `apus_ingest_duration` in the code, `apus_ingest_duration_seconds*` in the scrape). Comparing against the source code would produce false alarms for exactly that reason.
 
 ```bash
-# Scrape einer laufenden Instanz als Referenz nehmen:
+# Use a scrape from a running instance as the reference:
 kubectl -n apus-system port-forward svc/apus-operator 8080:8080 &
 curl -s localhost:8080/metrics | grep -oE '^apus_[a-z_]+' | sort -u > /tmp/scraped.txt
 grep -ohE 'apus_[a-z_]+' deploy/dashboards/*.json | sort -u > /tmp/used.txt
 comm -23 /tmp/used.txt /tmp/scraped.txt
 ```
 
-Expected: leere Ausgabe. Jeder Name, der hier erscheint, wird von keiner Instanz exportiert — entweder ein Tippfehler oder eine Metrik, die noch niemand schreibt. Beides muss vor dem Commit aufgelöst sein, denn ein Panel mit falschem Namen bleibt leer, ohne je einen Fehler zu zeigen.
+Expected: empty output. Any name that shows up here is exported by no instance — either a typo or a metric nobody writes yet. Either way it has to be resolved before committing, because a panel with the wrong name stays empty without ever showing an error.
 
-Metriken aus dem `telemetry-addon` (`apus_render_*`) erscheinen nicht im Operator-Scrape; für sie ist derselbe Abgleich gegen einen Render-Pod auf Port 8099 zu fahren.
+Metrics from `telemetry-addon` (`apus_render_*`) do not appear in the operator scrape; run the same comparison against a render pod on port 8099 for those.
 
-- [ ] **Schritt 6: ConfigMap für die Grafana-Sidecar-Erkennung**
+- [ ] **Step 6: ConfigMap for the Grafana sidecar discovery**
 
 ```yaml
 apiVersion: v1
@@ -1099,7 +1100,7 @@ metadata:
     grafana_dashboard: "1"
 ```
 
-Die beiden JSON-Dateien werden über `configMapGenerator` in `kustomization.yaml` eingebunden, nicht von Hand in die ConfigMap kopiert:
+The two JSON files are pulled in via `configMapGenerator` in `kustomization.yaml`, not copied into the ConfigMap by hand:
 
 ```yaml
 configMapGenerator:
@@ -1114,7 +1115,7 @@ configMapGenerator:
       disableNameSuffixHash: true
 ```
 
-- [ ] **Schritt 7: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add deploy/dashboards deploy/base
@@ -1123,62 +1124,62 @@ git commit -m "feat: add Grafana dashboards for the platform and tenant views"
 
 ---
 
-### Task 8: Ende-zu-Ende-Lauf auf k3s
+### Task 8: End-to-end run on k3s
 
-Design-Spec §13.2 sieht vor: „k3s + S3: kompletter Durchlauf Ingest → Render → Hosting mit Mini-Welt". Vorhanden sind `PushIngestEndToEndTest` (Ingest allein) und `RenderEndToEndTest` (Render allein) — der Durchlauf über alle drei Stufen fehlt, und Hosting ist in keinem E2E-Test enthalten.
+Design spec §13.2 calls for: "k3s + S3: full run through Ingest → Render → Hosting with a mini world." `PushIngestEndToEndTest` (ingest alone) and `RenderEndToEndTest` (render alone) exist — the run across all three stages is missing, and hosting is in no E2E test at all.
 
 **Files:**
 
 - Create: `operator/src/test/java/net/onelitefeather/apus/operator/FullPipelineIntegrationTest.java`
-- Modify: `operator/build.gradle.kts` (nur falls der `integrationTest`-Task angepasst werden muss)
+- Modify: `operator/build.gradle.kts` (only if the `integrationTest` task needs adjusting)
 
 **Interfaces:**
 
-- Consumes: die bestehende k3s-Testcontainers-Infrastruktur der vorhandenen `*IntegrationTest`-Klassen sowie `testdata/mini-world`.
+- Consumes: the existing k3s Testcontainers infrastructure of the existing `*IntegrationTest` classes, plus `testdata/mini-world`.
 
-- [ ] **Schritt 1: Bestehende Integrationstest-Infrastruktur ansehen**
+- [ ] **Step 1: Look at the existing integration-test infrastructure**
 
 Run: `ls operator/src/test/java/net/onelitefeather/apus/operator/*IntegrationTest.java && grep -n 'K3sContainer\|MinIOContainer\|LocallyRunOperatorExtension' operator/src/test/java/net/onelitefeather/apus/operator/OperatorIntegrationTest.java | head`
-Expected: das vorhandene Muster für k3s- und MinIO-Container. Der neue Test übernimmt es unverändert, statt eine zweite Variante zu erfinden.
+Expected: the existing pattern for k3s and MinIO containers. The new test adopts it unchanged, rather than inventing a second variant.
 
-- [ ] **Schritt 2: Failing test schreiben**
+- [ ] **Step 2: Write a failing test**
 
-Der Test fährt in einer Methode:
+The test drives, in one method:
 
-1. k3s starten, die sechs CRDs aus `deploy/crds` anwenden, den Operator über `LocallyRunOperatorExtension` gegen diesen Cluster laufen lassen.
-2. MinIO starten, `testdata/mini-world` als Push-Quelle in den Staging-Prefix legen.
-3. `Tenant` anlegen, auf `status.namespace` warten.
-4. `WorldSource` (Typ `push`) und `WorldIngest` anlegen, warten bis `status.phase == "Succeeded"` und `status.bundle.path` gesetzt ist.
-5. `BlueMapMap` anlegen, warten bis der erzeugte `BlueMapRender` auf `Succeeded` steht.
-6. `BlueMapHosting` anlegen, warten bis `status.ready == true` und `status.url` gesetzt ist.
-7. Prüfen, dass im Map-Bucket tatsächlich Kacheln liegen (`settings.json` und mindestens eine `.png`/`.prbm` unterhalb des Map-Prefix).
+1. Start k3s, apply the six CRDs from `deploy/crds`, run the operator against this cluster via `LocallyRunOperatorExtension`.
+2. Start MinIO, place `testdata/mini-world` as a push source in the staging prefix.
+3. Create `Tenant`, wait for `status.namespace`.
+4. Create `WorldSource` (type `push`) and `WorldIngest`, wait until `status.phase == "Succeeded"` and `status.bundle.path` is set.
+5. Create `BlueMapMap`, wait until the generated `BlueMapRender` reaches `Succeeded`.
+6. Create `BlueMapHosting`, wait until `status.ready == true` and `status.url` is set.
+7. Check that the map bucket actually contains tiles (`settings.json` and at least one `.png`/`.prbm` beneath the map prefix).
 
-Timeouts großzügig (Render der Mini-Welt: bis zu 10 Minuten), jede Wartestufe mit eigener aussagekräftiger Fehlermeldung, damit ein Fehlschlag zeigt, *welche* Stufe hängen blieb.
+Generous timeouts (rendering the mini world: up to 10 minutes), every wait stage with its own descriptive failure message, so a failure shows *which* stage got stuck.
 
-- [ ] **Schritt 3: Test laufen lassen und Fehlschlag bestätigen**
+- [ ] **Step 3: Run the test and confirm the failure**
 
 Run: `./gradlew :operator:integrationTest --tests '*FullPipelineIntegrationTest*'`
-Expected: FAIL. Der Fehlschlag muss aus einer der Wartestufen kommen, nicht aus einem Kompilierfehler.
+Expected: FAIL. The failure has to come from one of the wait stages, not from a compile error.
 
-- [ ] **Schritt 4: Test zum Laufen bringen**
+- [ ] **Step 4: Get the test passing**
 
-Was hier zu tun ist, hängt vom Fehlschlag ab. Erwartbare Stolpersteine, jeweils mit dem Ort, an dem sie zu beheben sind:
+What needs doing here depends on the failure. Expected stumbling blocks, each with where to fix it:
 
-- Der Operator im Test kennt die Image-Namen nicht → `OperatorConfig`-Umgebungsvariablen im Test setzen, so wie das Deployment aus Task 2 es tut.
-- Rook existiert im k3s-Testcluster nicht → der Test setzt `storage.bucketClaim` nicht auf `auto`, sondern legt Bucket und Secret direkt in MinIO an und referenziert sie; die Rook-Integration ist eigener Scope und in `OperatorIntegrationTest` bereits abgedeckt.
-- Der Hosting-Pod braucht einen Ingress-Controller → im Test gegen den `Service` prüfen statt gegen die Ingress-URL; `status.ready` ist das Signal, nicht die externe Erreichbarkeit.
+- The operator in the test does not know the image names → set the `OperatorConfig` environment variables in the test, the same way the Deployment from Task 2 does.
+- Rook does not exist in the k3s test cluster → the test does not set `storage.bucketClaim` to `auto`, but creates a bucket and secret directly in MinIO and references them; the Rook integration is a separate scope and is already covered in `OperatorIntegrationTest`.
+- The hosting pod needs an ingress controller → check against the `Service` in the test instead of the ingress URL; `status.ready` is the signal, not external reachability.
 
-- [ ] **Schritt 5: Test läuft grün, reproduzierbar**
+- [ ] **Step 5: Test passes, reproducibly**
 
-Run: `./gradlew :operator:integrationTest --tests '*FullPipelineIntegrationTest*'` (zweimal hintereinander)
-Expected: beide Male PASS. Ein E2E-Test, der nur beim ersten Lauf grün ist, hat Zustandsreste und ist nicht fertig.
+Run: `./gradlew :operator:integrationTest --tests '*FullPipelineIntegrationTest*'` (twice in a row)
+Expected: PASS both times. An E2E test that is only green on the first run has leftover state and is not done.
 
-- [ ] **Schritt 6: Sicherstellen, dass er nicht im PR-Build landet**
+- [ ] **Step 6: Make sure it does not end up in the PR build**
 
 Run: `./gradlew :operator:test --tests '*FullPipeline*' 2>&1 | grep -c 'No tests found'`
-Expected: `1` — der Test greift die `*IntegrationTest`-Namenskonvention und ist damit aus `test` ausgeschlossen.
+Expected: `1` — the test matches the `*IntegrationTest` naming convention and is thereby excluded from `test`.
 
-- [ ] **Schritt 7: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add operator/src/test/java/net/onelitefeather/apus/operator/FullPipelineIntegrationTest.java
@@ -1187,35 +1188,35 @@ git commit -m "test: cover the full ingest, render and hosting pipeline on k3s"
 
 ---
 
-### Task 9: Design-Spec nachziehen
+### Task 9: Update the design spec
 
 **Files:**
 
 - Modify: `docs/superpowers/specs/2026-08-08-apus-design.md`
 
-- [ ] **Schritt 1: §13.1 als umgesetzt kennzeichnen**
+- [ ] **Step 1: Mark §13.1 as implemented**
 
-Der Abschnitt beschreibt Metriken, Logs und Dashboards im Futur. Umschreiben auf den Ist-Zustand, mit den echten Dateinamen (`deploy/base/servicemonitor-*.yaml`, `deploy/dashboards/*.json`) und den tatsächlich exportierten Metriknamen.
+The section describes metrics, logs and dashboards in future tense. Rewrite it to the actual state, with the real file names (`deploy/base/servicemonitor-*.yaml`, `deploy/dashboards/*.json`) and the metric names that are actually exported.
 
-- [ ] **Schritt 2: §13.2, Zeile „E2E", auf den neuen Test verweisen**
+- [ ] **Step 2: Point §13.2, the "E2E" line, at the new test**
 
 <!-- markdownlint-disable-next-line MD038 -->
-Ersetzen durch: `k3s + S3: kompletter Durchlauf Ingest → Render → Hosting mit Mini-Welt (`FullPipelineIntegrationTest`, Teil von `./gradlew :operator:integrationTest`)`.
+Replace with: `k3s + S3: full run through Ingest → Render → Hosting with a mini world (`FullPipelineIntegrationTest`, part of `./gradlew :operator:integrationTest`)`.
 
-- [ ] **Schritt 3: §0 um den Deployment-Stand ergänzen**
+- [ ] **Step 3: Add the deployment state to §0**
 
 ```markdown
-**Ausrollbar seit Phase 8.** `deploy/base` ist eine vollständige Kustomize-Basis
-(CRDs, Operator, API, UI, RBAC, Scrape-Konfiguration); cluster-spezifische Werte kommen
-aus einem Overlay im Cluster-Repository. Operator und API exportieren Metriken, zwei
-Grafana-Dashboards liegen unter `deploy/dashboards`. Was offen bleibt, sind die
-inhaltlichen Härtungen aus §15 — siehe den Plan zu Phase 9.
+**Rollable out since Phase 8.** `deploy/base` is a complete Kustomize base
+(CRDs, operator, API, UI, RBAC, scrape configuration); cluster-specific values come
+from an overlay in the cluster repository. Operator and API export metrics, two
+Grafana dashboards live under `deploy/dashboards`. What remains open are the
+substantive hardening items from §15 — see the phase 9 plan.
 ```
 
-- [ ] **Schritt 4: Lint und Commit**
+- [ ] **Step 4: Lint and commit**
 
 Run: `npx markdownlint-cli2 docs/superpowers/specs/2026-08-08-apus-design.md`
-Expected: keine Fehler.
+Expected: no errors.
 
 ```bash
 git add docs/superpowers/specs/2026-08-08-apus-design.md
@@ -1224,8 +1225,8 @@ git commit -m "docs: record the phase 8 deployment and observability state"
 
 ---
 
-## Was dieser Plan bewusst nicht abdeckt
+## What this plan deliberately does not cover
 
-- **Das Flux-Overlay selbst.** Es gehört ins Cluster-Repository (`Kubernetes-FLUX`), nicht hierher: Registry-Hostnamen, Rook-Namen, Domains und Secret-Referenzen sind Cluster-Eigenschaften, keine Projekt-Eigenschaften. `deploy/base` ist so geschnitten, dass ein Overlay genau diese Werte patchen kann.
-- **Alerting-Regeln.** Sinnvoll, aber sie brauchen erst Betriebserfahrung mit den neuen Metriken — Schwellwerte ohne Datengrundlage erzeugen nur Rauschen.
-- **Die Härtungen aus §15** (Identity-Broker, RBAC-Verengung, Quota-Signal, Paper-Save-Fenster, `emptyDir`-Grenze) — eigener Plan (Phase 9).
+- **The Flux overlay itself.** It belongs in the cluster repository (`Kubernetes-FLUX`), not here: registry hostnames, Rook names, domains and secret references are cluster properties, not project properties. `deploy/base` is cut so that an overlay can patch exactly these values.
+- **Alerting rules.** Worthwhile, but they first need operational experience with the new metrics — thresholds without a data basis just produce noise.
+- **The hardening items from §15** (identity broker, RBAC narrowing, quota signal, Paper save window, `emptyDir` limit) — a separate plan (Phase 9).

@@ -1,107 +1,107 @@
-# Apus Phase 7 — CI und Auslieferung: Implementierungsplan
+# Apus Phase 7 — CI and Delivery: Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Jeder Commit wird automatisch gebaut und getestet, jede Komponente lässt sich als Container-Image oder Maven-Artefakt ausliefern, und Versionen entstehen aus Conventional Commits statt von Hand.
+**Goal:** Every commit is built and tested automatically, every component can be delivered as a container image or Maven artifact, and versions come from Conventional Commits instead of by hand.
 
-**Architecture:** Apus konsumiert die zentralen wiederverwendbaren Workflows aus `OneLiteFeatherNET/workflows` statt eigene CI zu schreiben. Release Please verwaltet Versionen und Changelogs; `telemetry-addon` und `paper-worldpush` bekommen eigene Release-Spuren, weil sie an fremden Versionen (BlueMap- bzw. Paper-API) hängen — so vorgesehen in der Design-Spec §4. Die drei bisher nicht paketierten Komponenten (`operator`, `api`, `ui`) bekommen Dockerfiles im Stil der bestehenden (`runner`, `ingest`, `hosting`): Multi-Stage, non-root uid 10001, Build-Kontext ist das Repository-Root.
+**Architecture:** Apus consumes the central, reusable workflows from `OneLiteFeatherNET/workflows` instead of writing its own CI. Release Please manages versions and changelogs; `telemetry-addon` and `paper-worldpush` get their own release tracks because they depend on external versions (the BlueMap and Paper APIs respectively) — as provided for in the design spec §4. The three components not yet packaged (`operator`, `api`, `ui`) get Dockerfiles in the style of the existing ones (`runner`, `ingest`, `hosting`): multi-stage, non-root uid 10001, build context is the repository root.
 
-**Tech Stack:** GitHub Actions (`OneLiteFeatherNET/workflows@v2.4.0`), Release Please (`googleapis/release-please-action@v5`), Renovate (zentrales OLF-Preset), Docker (Harbor-Registry), Gradle 9 mit Inline-Version-Catalog, Java 25 (Temurin).
+**Tech Stack:** GitHub Actions (`OneLiteFeatherNET/workflows@v2.4.0`), Release Please (`googleapis/release-please-action@v5`), Renovate (the central OLF preset), Docker (Harbor registry), Gradle 9 with an inline version catalog, Java 25 (Temurin).
 
 ## Global Constraints
 
-- **Java-Toolchain 25 (Temurin)** in jedem Workflow — das ist der Default der zentralen Workflows; nicht überschreiben.
-- **Wiederverwendbare Workflows werden auf den vollen SemVer-Tag gepinnt** — `@v2.4.0`, niemals `@main` und niemals `@v2`.
-- **Kein `clean` in Gradle-Tasks der CI** — das entwertet den `setup-gradle`-Cache.
-- **Der Versionsmarker lebt in `build.gradle.kts`, nicht in `gradle.properties`.** Aktuell steht `version = 999.0.0` in `gradle.properties`; dieser Eintrag wird ersatzlos entfernt.
-- **Dockerfiles bauen aus dem Repository-Root als Kontext** und kopieren mit modulqualifiziertem Pfad (`COPY operator/...`), genau wie `runner/Dockerfile` und `ingest/Dockerfile` es tun.
-- **Non-root in jedem Image:** Benutzer `apus`, uid 10001, Arbeitsverzeichnis unterhalb `/work` bzw. `/app`.
-- **Jar-Dateinamen sind fest** (kein Glob im `COPY`), Konvention wie `ingest`: `archiveFileName.set("apus-<modul>.jar")`.
-- **AGPL-Lizenzheader** über jede neue Java-Datei — Spotless erzwingt das via `.spotless/Copyright.java`.
-- **Integrationstests laufen nicht im PR-Build.** `operator`, `runner` und `ingest` schließen `**/*IntegrationTest.class` aus `test` aus und tragen einen separaten `integrationTest`-Task; das bleibt so, weil diese Tests Docker und teilweise k3s brauchen.
+- **Java toolchain 25 (Temurin)** in every workflow — that is the default of the central workflows; do not override it.
+- **Reusable workflows are pinned to the full SemVer tag** — `@v2.4.0`, never `@main` and never `@v2`.
+- **No `clean` in CI's Gradle tasks** — it invalidates the `setup-gradle` cache.
+- **The version marker lives in `build.gradle.kts`, not in `gradle.properties`.** Today `gradle.properties` has `version = 999.0.0`; that line is removed outright, with nothing to replace it.
+- **Dockerfiles build with the repository root as context** and copy using a module-qualified path (`COPY operator/...`), exactly the way `runner/Dockerfile` and `ingest/Dockerfile` do.
+- **Non-root in every image:** user `apus`, uid 10001, working directory under `/work` or `/app` respectively.
+- **Jar file names are fixed** (no glob in `COPY`), the same convention as `ingest`: `archiveFileName.set("apus-<module>.jar")`.
+- **AGPL license header on every new Java file** — Spotless enforces it via `.spotless/Copyright.java`.
+- **Integration tests do not run in the PR build.** `operator`, `runner` and `ingest` exclude `**/*IntegrationTest.class` from `test` and carry a separate `integrationTest` task; that stays as it is, because these tests need Docker and, in some cases, k3s.
 
 ---
 
-## Vorbedingung (einmalig, außerhalb des Repos)
+## Prerequisite (one-time, outside the repository)
 
-Das Renovate-Preset verlangt ein GitHub-Team als Reviewer. Ein Team `apus-maintainers` existiert in der Organisation **nicht** (geprüft am 2026-08-12 über `gh api orgs/OneLiteFeatherNET/teams`). Vor Task 2 ist entweder das Team anzulegen:
+The Renovate preset requires a GitHub team as reviewer. A team `apus-maintainers` does **not** exist in the organization (checked on 2026-08-12 via `gh api orgs/OneLiteFeatherNET/teams`). Before Task 2, either create the team:
 
 ```bash
 gh api -X POST orgs/OneLiteFeatherNET/teams -f name='apus-maintainers' -f privacy='closed'
 gh api -X PUT orgs/OneLiteFeatherNET/teams/apus-maintainers/repos/OneLiteFeatherNET/Apus -f permission='push'
 ```
 
-oder in Task 2 stattdessen ein bestehendes Team einzusetzen — `infrastructure-core-team` ist der naheliegende Kandidat, da Apus Infrastruktur ist. Diese Entscheidung ist die einzige im gesamten Plan, die nicht aus dem Repository ableitbar ist.
+or use an existing team instead in Task 2 — `infrastructure-core-team` is the obvious candidate, since Apus is infrastructure. This decision is the only one in the whole plan that cannot be derived from the repository.
 
 ---
 
-### Task 1: Root-README
+### Task 1: Root README
 
-Das Repository hat keinen Einstiegspunkt. Modul-READMEs existieren für `runner`, `hosting`, `ingest`, `ui` und `testdata`, aber wer das Repository öffnet, findet keine Orientierung.
+The repository has no entry point. Module READMEs exist for `runner`, `hosting`, `ingest`, `ui` and `testdata`, but anyone who opens the repository finds no orientation.
 
 **Files:**
 
 - Create: `README.md`
 
-- [ ] **Schritt 1: README schreiben**
+- [ ] **Step 1: Write the README**
 
-Inhalt (vollständig, nicht kürzen):
+Content (in full, do not shorten):
 
 ```markdown
 # Apus
 
-Apus rendert Minecraft-Welten mit [BlueMap](https://bluemap.bluecolored.de/) auf Kubernetes
-und hostet die Ergebnisse. Welt-Daten kommen aus mehreren, sehr unterschiedlichen Quellen;
-ein ETL-Layer normalisiert sie, ein Operator führt Render- und Hosting-Jobs aus, eine
-Oberfläche zeigt Fortschritt und erlaubt Bedienung ohne YAML.
+Apus renders Minecraft worlds with [BlueMap](https://bluemap.bluecolored.de/) on Kubernetes
+and hosts the results. World data comes from several, very different sources; an ETL layer
+normalizes it, an operator runs render and hosting jobs, and a UI shows progress and allows
+operation without YAML.
 
-Das vollständige Design steht in
+The full design is in
 [`docs/superpowers/specs/2026-08-08-apus-design.md`](docs/superpowers/specs/2026-08-08-apus-design.md).
 
-## Module
+## Modules
 
-| Modul | Zweck | Auslieferung |
+| Module | Purpose | Delivery |
 |---|---|---|
-| `telemetry-addon` | BlueMap-Addon, exponiert Render-Fortschritt als JSON und Prometheus-Metriken | Maven |
-| `ingest` | ETL: Connectoren (s3, pterodactyl, push, upload), Layout-Erkennung, Bundle-Writer | Container-Image |
-| `runner` | BlueMap-CLI plus beide Addons, rendert eine Welt aus S3 nach S3 | Container-Image |
-| `hosting` | Langlebiger BlueMap-Webserver, liest gerenderte Karten aus S3 | Container-Image |
-| `operator` | Kubernetes-Operator, sechs CRDs, erzeugt Jobs/Deployments/Ingresses/Buckets | Container-Image |
-| `api` | Micronaut-REST/SSE über den Custom Resources, Durchsetzungspunkt für Auth | Container-Image |
-| `ui` | Nuxt-4-Dashboard für Mandanten und Plattform-Betreiber | Container-Image |
-| `paper-worldpush` | Paper-Plugin, schiebt Welten vom laufenden Server nach Apus | Maven |
+| `telemetry-addon` | BlueMap addon, exposes render progress as JSON and Prometheus metrics | Maven |
+| `ingest` | ETL: connectors (s3, pterodactyl, push, upload), layout detection, bundle writer | Container image |
+| `runner` | BlueMap CLI plus both addons, renders a world from S3 to S3 | Container image |
+| `hosting` | Long-lived BlueMap web server, reads rendered maps from S3 | Container image |
+| `operator` | Kubernetes operator, six CRDs, creates Jobs/Deployments/Ingresses/Buckets | Container image |
+| `api` | Micronaut REST/SSE over the custom resources, enforcement point for auth | Container image |
+| `ui` | Nuxt 4 dashboard for tenants and platform operators | Container image |
+| `paper-worldpush` | Paper plugin, pushes worlds from the running server to Apus | Maven |
 
-## Bauen
+## Building
 
-Voraussetzungen: JDK 25, Docker (für Integrationstests), pnpm (für `ui`).
+Prerequisites: JDK 25, Docker (for integration tests), pnpm (for `ui`).
 
-    ./gradlew build          # alle Java-Module, ohne Integrationstests
-    ./gradlew integrationTest # braucht Docker
-    ./gradlew :operator:generateCrds  # erzeugt die sechs CRD-YAMLs nach operator/build/crds
+    ./gradlew build          # all Java modules, without integration tests
+    ./gradlew integrationTest # needs Docker
+    ./gradlew :operator:generateCrds  # generates the six CRD YAMLs into operator/build/crds
 
     cd ui && pnpm install && pnpm test && pnpm lint
 
-## Entwicklung
+## Development
 
-Der Kern des Systems ist das **World Bundle** — eine unveränderliche, normalisierte
-Momentaufnahme einer Welt in S3. Links davon (Ingest) weiß niemand etwas von BlueMap,
-rechts davon (Render, Hosting) niemand etwas von Pterodactyl oder ZIP-Uploads. Wer eine
-neue Welt-Quelle anbindet, implementiert nur `WorldSourceConnector` in `ingest`.
+The core of the system is the **World Bundle** — an immutable, normalized
+snapshot of a world in S3. On its left (ingest) nobody knows anything about BlueMap;
+on its right (render, hosting) nobody knows anything about Pterodactyl or ZIP uploads. Anyone
+connecting a new world source only has to implement `WorldSourceConnector` in `ingest`.
 
-Commits folgen [Conventional Commits](https://www.conventionalcommits.org/) — Release
-Please leitet daraus Version und Changelog ab.
+Commits follow [Conventional Commits](https://www.conventionalcommits.org/) — Release
+Please derives the version and changelog from them.
 
-## Lizenz
+## License
 
-AGPL-3.0, siehe [LICENSE](LICENSE).
+AGPL-3.0, see [LICENSE](LICENSE).
 ```
 
-- [ ] **Schritt 2: Verifizieren, dass alle Links auflösen**
+- [ ] **Step 2: Verify that all links resolve**
 
 Run: `ls docs/superpowers/specs/2026-08-08-apus-design.md LICENSE`
-Expected: Beide Pfade existieren.
+Expected: Both paths exist.
 
-- [ ] **Schritt 3: Commit**
+- [ ] **Step 3: Commit**
 
 ```bash
 git add README.md
@@ -118,9 +118,9 @@ git commit -m "docs: add a root README with module overview and build instructio
 
 **Interfaces:**
 
-- Produces: Die Datei, über die Renovate ab jetzt auch die Workflow-Pins aus Task 4/5/9 aktualisiert.
+- Produces: The file through which Renovate, from now on, also updates the workflow pins from Task 4/5/9.
 
-- [ ] **Schritt 1: `renovate.json` anlegen**
+- [ ] **Step 1: Create `renovate.json`**
 
 ```json
 {
@@ -132,21 +132,21 @@ git commit -m "docs: add a root README with module overview and build instructio
 }
 ```
 
-Das `:paper`-Flavour ist nötig, weil `paper-worldpush` gegen `io.papermc.paper:paper-api` baut, dessen Versionsschema `X.Y.Z-<mc-version>` von der SemVer-Standardauswertung falsch interpretiert wird. Ein `:minestom`-Flavour braucht Apus nicht.
+The `:paper` flavour is needed because `paper-worldpush` builds against `io.papermc.paper:paper-api`, whose version scheme `X.Y.Z-<mc-version>` the standard SemVer evaluation misreads. Apus needs no `:minestom` flavour.
 
-Keine eigenen `packageRules` — Patch-Automerge, Reviewer, Zeitzone, Office-Hours-Schedule, Semantic Commits, das `renovate`-Label und Vulnerability Alerts bringt das Preset bereits mit.
+No `packageRules` of our own — patch automerge, reviewer, timezone, office-hours schedule, semantic commits, the `renovate` label and vulnerability alerts all already come with the preset.
 
-- [ ] **Schritt 2: Team-Slug verifizieren**
+- [ ] **Step 2: Verify the team slug**
 
 Run: `gh api orgs/OneLiteFeatherNET/teams --paginate -q '.[].slug' | grep -x apus-maintainers`
-Expected: Ausgabe `apus-maintainers`. Schlägt das fehl, ist die Vorbedingung oben nicht erfüllt — entweder Team anlegen oder den Slug in `renovate.json` auf `infrastructure-core-team` ändern.
+Expected: output `apus-maintainers`. If this fails, the prerequisite above has not been met — either create the team or change the slug in `renovate.json` to `infrastructure-core-team`.
 
-- [ ] **Schritt 3: JSON validieren**
+- [ ] **Step 3: Validate the JSON**
 
 Run: `python3 -c "import json;json.load(open('renovate.json'));print('ok')"`
 Expected: `ok`
 
-- [ ] **Schritt 4: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
 git add renovate.json
@@ -155,16 +155,16 @@ git commit -m "ci: adopt the central OneLiteFeather Renovate preset"
 
 ---
 
-### Task 3: Versionsmarker und Release Please
+### Task 3: Version marker and Release Please
 
-`gradle.properties` trägt heute `version = 999.0.0` — ein Platzhalter ohne Automatik dahinter. Release Please verlangt den Marker im jeweiligen `build.gradle.kts`. Apus bekommt drei Release-Spuren: das Gesamtprojekt (dessen Version die Container-Images tragen), `telemetry-addon` und `paper-worldpush`.
+`gradle.properties` today carries `version = 999.0.0` — a placeholder with no automation behind it. Release Please requires the marker in each module's `build.gradle.kts`. Apus gets three release tracks: the project as a whole (whose version the container images carry), `telemetry-addon` and `paper-worldpush`.
 
 **Files:**
 
-- Modify: `gradle.properties` (Zeile `version = 999.0.0` entfernen)
-- Modify: `build.gradle.kts` (Versionsmarker und Weitergabe an Subprojekte)
-- Modify: `telemetry-addon/build.gradle.kts` (eigener Marker)
-- Modify: `paper-worldpush/build.gradle.kts` (eigener Marker)
+- Modify: `gradle.properties` (remove the line `version = 999.0.0`)
+- Modify: `build.gradle.kts` (version marker and propagation to subprojects)
+- Modify: `telemetry-addon/build.gradle.kts` (own marker)
+- Modify: `paper-worldpush/build.gradle.kts` (own marker)
 - Create: `release-please-config.json`
 - Create: `.release-please-manifest.json`
 - Create: `CHANGELOG.md`
@@ -172,22 +172,22 @@ git commit -m "ci: adopt the central OneLiteFeather Renovate preset"
 
 **Interfaces:**
 
-- Produces: Die Workflow-Outputs `release_created`, `version`, `telemetry-addon--release_created`, `paper-worldpush--release_created`. Task 9 und Task 10 hängen sich daran. **Achtung:** Das Root-Paket ist die Ausnahme von der `<pfad>--<schlüssel>`-Regel — `setPathOutput()` in der Action setzt bei Paketpfad `.` den blanken Schlüssel. `.--release_created` ist immer leer.
+- Produces: The workflow outputs `release_created`, `version`, `telemetry-addon--release_created`, `paper-worldpush--release_created`. Task 9 and Task 10 hang off these. **Careful:** the root package is the exception to the `<path>--<key>` rule — `setPathOutput()` in the action sets the bare key when the package path is `.`. `.--release_created` is always empty.
 
-- [ ] **Schritt 1: Aktuellen Zustand festhalten**
+- [ ] **Step 1: Record the current state**
 
 ```bash
 grep -n version gradle.properties
 git rev-parse HEAD
 ```
 
-Der ausgegebene SHA ist der `bootstrap-sha` für Schritt 4. Notieren.
+The SHA this prints is the `bootstrap-sha` for Step 4. Note it down.
 
-- [ ] **Schritt 2: Version aus `gradle.properties` entfernen und in `build.gradle.kts` verlegen**
+- [ ] **Step 2: Remove the version from `gradle.properties` and move it into `build.gradle.kts`**
 
-`gradle.properties`: die Zeile `version = 999.0.0` ersatzlos löschen.
+`gradle.properties`: delete the line `version = 999.0.0` outright.
 
-`build.gradle.kts` — der `subprojects`-Block erbt die Version bisher implizit über `gradle.properties`; das muss jetzt explizit geschehen:
+`build.gradle.kts` — the `subprojects` block has so far inherited the version implicitly via `gradle.properties`; that now has to happen explicitly:
 
 ```kotlin
 plugins {
@@ -205,23 +205,23 @@ subprojects {
     if (name != "telemetry-addon" && name != "paper-worldpush") {
         version = rootProject.version
     }
-    // ... bestehender Inhalt unverändert ...
+    // ... existing content unchanged ...
 }
 ```
 
-- [ ] **Schritt 3: Eigene Marker in den beiden Modulen mit eigener Release-Spur**
+- [ ] **Step 3: Own markers in the two modules with their own release track**
 
-In `telemetry-addon/build.gradle.kts` als erste Zeile nach dem `plugins`-Block:
+In `telemetry-addon/build.gradle.kts` as the first line after the `plugins` block:
 
 ```kotlin
 version = "0.1.0" // x-release-please-version
 ```
 
-Dasselbe in `paper-worldpush/build.gradle.kts`.
+The same in `paper-worldpush/build.gradle.kts`.
 
-- [ ] **Schritt 4: `release-please-config.json` anlegen**
+- [ ] **Step 4: Create `release-please-config.json`**
 
-`<BOOTSTRAP_SHA>` durch den SHA aus Schritt 1 ersetzen.
+Replace `<BOOTSTRAP_SHA>` with the SHA from Step 1.
 
 ```json
 {
@@ -258,9 +258,9 @@ Dasselbe in `paper-worldpush/build.gradle.kts`.
 }
 ```
 
-`include-component-in-tag: true` ist bei mehreren Paketen zwingend, sonst kollidieren zwei Module auf demselben Git-Tag. `separate-pull-requests: true`, weil die drei Spuren unabhängig releasen sollen.
+`include-component-in-tag: true` is mandatory with multiple packages, otherwise two modules collide on the same Git tag. `separate-pull-requests: true`, because the three tracks are meant to release independently.
 
-- [ ] **Schritt 5: Manifest und Changelog anlegen**
+- [ ] **Step 5: Create the manifest and changelog**
 
 `.release-please-manifest.json`:
 
@@ -272,9 +272,9 @@ Dasselbe in `paper-worldpush/build.gradle.kts`.
 }
 ```
 
-`CHANGELOG.md`: leere Datei anlegen (`: > CHANGELOG.md`). Release Please füllt sie; niemals von Hand editieren.
+`CHANGELOG.md`: create an empty file (`: > CHANGELOG.md`). Release Please fills it in; never edit it by hand.
 
-- [ ] **Schritt 6: Workflow anlegen**
+- [ ] **Step 6: Create the workflow**
 
 `.github/workflows/release-please.yml`:
 
@@ -306,21 +306,21 @@ jobs:
           manifest-file: .release-please-manifest.json
 ```
 
-Die Publish-Jobs kommen in Task 9 (Images) und Task 10 (Maven) hinzu. Kein zusätzlicher `on: push: tags:`-Workflow — Release Please taggt mit dem Standard-`GITHUB_TOKEN` und löst damit keine Tag-Push-Workflows aus; zwei Publish-Pfade wären entweder tot oder würden sich auf demselben Tag ins Gehege kommen.
+The publish jobs are added in Task 9 (images) and Task 10 (Maven). No additional `on: push: tags:` workflow — Release Please tags with the standard `GITHUB_TOKEN`, which does not trigger tag-push workflows; two publish paths would either be dead or collide on the same tag.
 
-- [ ] **Schritt 7: Verifizieren, dass Gradle die Version weiterhin auflöst**
+- [ ] **Step 7: Verify that Gradle still resolves the version**
 
 Run: `./gradlew :ingest:properties --property version && ./gradlew :telemetry-addon:properties --property version`
-Expected: beide geben `version: 0.1.0` aus — die erste über `rootProject.version`, die zweite über den eigenen Marker.
+Expected: both print `version: 0.1.0` — the first via `rootProject.version`, the second via its own marker.
 
-- [ ] **Schritt 8: Verifizieren, dass der Build unverändert durchläuft**
+- [ ] **Step 8: Verify the build still passes unchanged**
 
 Run: `./gradlew build`
-Expected: BUILD SUCCESSFUL. Der Jar-Dateiname von `ingest` ist versionsunabhängig festgelegt (`apus-ingest.jar`), die Umstellung darf daran nichts ändern — gegenprüfen mit `ls ingest/build/libs/`.
+Expected: BUILD SUCCESSFUL. The jar file name of `ingest` is fixed independently of the version (`apus-ingest.jar`); the switch must not change that — cross-check with `ls ingest/build/libs/`.
 
-- [ ] **Schritt 9: Commit**
+- [ ] **Step 9: Commit**
 
-Der Commit-Typ muss `chore:` sein, damit die Einführung nicht selbst einen Versions-Bump auslöst.
+The commit type must be `chore:`, so that introducing this does not itself trigger a version bump.
 
 ```bash
 git add gradle.properties build.gradle.kts telemetry-addon/build.gradle.kts \
@@ -331,13 +331,13 @@ git commit -m "chore: manage versions and changelogs with release-please"
 
 ---
 
-### Task 4: PR-Build
+### Task 4: PR build
 
 **Files:**
 
 - Create: `.github/workflows/build-pr.yml`
 
-- [ ] **Schritt 1: Workflow anlegen**
+- [ ] **Step 1: Create the workflow**
 
 ```yaml
 name: build-pr
@@ -363,11 +363,11 @@ jobs:
     secrets: inherit
 ```
 
-Der Path-Filter-Schlüssel muss `code` heißen — so erwartet ihn der zentrale Workflow. Der `ui`-Teil hängt nicht an Gradle und bekommt einen eigenen Job in Schritt 2.
+The path-filter key must be called `code` — that is what the central workflow expects. The `ui` part does not hang off Gradle and gets its own job in Step 2.
 
-- [ ] **Schritt 2: UI-Job im selben Workflow ergänzen**
+- [ ] **Step 2: Add a UI job to the same workflow**
 
-Nuxt/pnpm deckt der zentrale Katalog nicht ab; das ist ein legitimer repo-eigener Job:
+The central catalog does not cover Nuxt/pnpm; this is a legitimate job that belongs to the repository itself:
 
 ```yaml
   ui:
@@ -389,20 +389,20 @@ Nuxt/pnpm deckt der zentrale Katalog nicht ab; das ist ein legitimer repo-eigene
       - run: pnpm test
 ```
 
-- [ ] **Schritt 3: Workflow-Syntax prüfen**
+- [ ] **Step 3: Check the workflow syntax**
 
 Run: `python3 -c "import yaml;yaml.safe_load(open('.github/workflows/build-pr.yml'));print('ok')"`
 Expected: `ok`
 
-- [ ] **Schritt 4: Lokal gegenprüfen, dass die Kommandos tatsächlich grün sind**
+- [ ] **Step 4: Verify locally that the commands are actually green**
 
 Run: `./gradlew build`
 Expected: BUILD SUCCESSFUL
 
 Run: `cd ui && pnpm install --frozen-lockfile && pnpm lint && pnpm typecheck && pnpm test`
-Expected: alle vier ohne Fehler. Schlägt hier etwas fehl, ist das ein echter Befund — dann diesen Task stoppen und den Fehler zuerst beheben, statt eine rote CI einzuchecken.
+Expected: all four succeed with no errors. If anything fails here, that is a real finding — stop this task and fix the failure first, rather than checking in a red CI.
 
-- [ ] **Schritt 5: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add .github/workflows/build-pr.yml
@@ -411,9 +411,9 @@ git commit -m "ci: build and test Gradle modules and the UI on pull requests"
 
 ---
 
-### Task 5: Markdown-Lint und Fork-PR-Schutz
+### Task 5: Markdown lint and fork PR protection
 
-Das Repository trägt ungewöhnlich viel Dokumentation (Design-Spec, Pläne, Spike-Berichte, sechs READMEs) mit vielen Querverweisen. Kaputte Links fallen sonst niemandem auf.
+The repository carries an unusually large amount of documentation (design spec, plans, spike reports, six READMEs) with many cross-references. Broken links otherwise go unnoticed.
 
 **Files:**
 
@@ -421,7 +421,7 @@ Das Repository trägt ungewöhnlich viel Dokumentation (Design-Spec, Pläne, Spi
 - Create: `.github/workflows/close-invalid-prs.yml`
 - Create: `.markdownlint-cli2.jsonc`
 
-- [ ] **Schritt 1: Markdownlint-Konfiguration anlegen**
+- [ ] **Step 1: Create the markdownlint configuration**
 
 ```jsonc
 {
@@ -435,14 +435,14 @@ Das Repository trägt ungewöhnlich viel Dokumentation (Design-Spec, Pläne, Spi
   "ignores": [
     "**/node_modules/**",
     "**/build/**",
-    // Alle Changelogs, nicht nur das im Wurzelverzeichnis: Release Please schreibt
-    // eines je Release-Spur. Ein blankes "CHANGELOG.md" trifft nur die Wurzeldatei.
+    // Every changelog, not just the one at the repository root: Release Please writes
+    // one per release track. A bare "CHANGELOG.md" only matches the root file.
     "**/CHANGELOG.md"
   ]
 }
 ```
 
-- [ ] **Schritt 2: Workflows anlegen**
+- [ ] **Step 2: Create the workflows**
 
 `.github/workflows/markdown-lint.yml`:
 
@@ -476,12 +476,12 @@ jobs:
     secrets: inherit
 ```
 
-- [ ] **Schritt 3: Lint lokal ausführen**
+- [ ] **Step 3: Run the lint locally**
 
 Run: `npx markdownlint-cli2 "**/*.md" "#ui/node_modules" "#**/build"`
-Expected: keine Fehler. Treten welche auf, im selben Task beheben — entweder die Datei korrigieren oder, wenn die Regel für dieses Repository unsinnig ist, sie in `.markdownlint-cli2.jsonc` mit Begründung abschalten.
+Expected: no errors. If any show up, fix them within the same task — either correct the file, or, if the rule makes no sense for this repository, disable it in `.markdownlint-cli2.jsonc` with a rationale.
 
-- [ ] **Schritt 4: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
 git add .github/workflows/markdown-lint.yml .github/workflows/close-invalid-prs.yml .markdownlint-cli2.jsonc
@@ -490,28 +490,28 @@ git commit -m "ci: lint markdown and close pull requests from fork default branc
 
 ---
 
-### Task 6: Container-Image für den Operator
+### Task 6: Container image for the operator
 
 **Files:**
 
 - Create: `operator/Dockerfile`
-- Modify: `operator/build.gradle.kts` (Shadow-Plugin und fester Jar-Name)
-- Modify: `settings.gradle.kts` — nur falls `shadow` im Katalog fehlt; er ist bereits als `version("shadow", "9.3.2")` vorhanden, dann entfällt die Änderung
+- Modify: `operator/build.gradle.kts` (shadow plugin and fixed jar name)
+- Modify: `settings.gradle.kts` — only if `shadow` is missing from the catalog; it is already present as `version("shadow", "9.3.2")`, in which case this change is dropped
 
 **Interfaces:**
 
-- Consumes: `application { mainClass.set("net.onelitefeather.apus.operator.ApusOperator") }`, bereits vorhanden in `operator/build.gradle.kts:124`.
-- Produces: `operator/build/libs/apus-operator.jar`, das der Dockerfile per festem Namen kopiert.
+- Consumes: `application { mainClass.set("net.onelitefeather.apus.operator.ApusOperator") }`, already present in `operator/build.gradle.kts:124`.
+- Produces: `operator/build/libs/apus-operator.jar`, which the Dockerfile copies by its fixed name.
 
-- [ ] **Schritt 1: Shadow-Jar konfigurieren**
+- [ ] **Step 1: Configure the shadow jar**
 
-In `operator/build.gradle.kts` das Plugin ergänzen (im `plugins`-Block, analog zu `ingest`):
+In `operator/build.gradle.kts` add the plugin (in the `plugins` block, mirroring `ingest`):
 
 ```kotlin
 alias(libs.plugins.shadow)
 ```
 
-und den Task konfigurieren:
+and configure the task:
 
 ```kotlin
 tasks {
@@ -528,15 +528,15 @@ tasks {
 }
 ```
 
-- [ ] **Schritt 2: Jar bauen und prüfen, dass er startfähig ist**
+- [ ] **Step 2: Build the jar and check that it can start**
 
 Run: `./gradlew :operator:shadowJar && ls -la operator/build/libs/apus-operator.jar`
-Expected: Datei existiert.
+Expected: the file exists.
 
 Run: `unzip -p operator/build/libs/apus-operator.jar META-INF/MANIFEST.MF | grep Main-Class`
 Expected: `Main-Class: net.onelitefeather.apus.operator.ApusOperator`
 
-- [ ] **Schritt 3: Dockerfile schreiben**
+- [ ] **Step 3: Write the Dockerfile**
 
 ```dockerfile
 # syntax=docker/dockerfile:1
@@ -561,15 +561,15 @@ EXPOSE 8080
 ENTRYPOINT ["java", "-jar", "/opt/apus/operator.jar"]
 ```
 
-- [ ] **Schritt 4: Image bauen und starten**
+- [ ] **Step 4: Build and start the image**
 
 Run: `docker build -f operator/Dockerfile -t apus-operator:test .`
-Expected: erfolgreicher Build.
+Expected: a successful build.
 
 Run: `docker run --rm apus-operator:test 2>&1 | head -20`
-Expected: Der Operator startet und scheitert erwartbar an der fehlenden Kubernetes-Verbindung — nicht an `ClassNotFoundException` oder `no main manifest attribute`. Genau das unterscheidet ein funktionierendes Fat-Jar von einem kaputten.
+Expected: the operator starts and fails, as expected, on the missing Kubernetes connection — not on a `ClassNotFoundException` or `no main manifest attribute`. That distinction is exactly what tells a working fat jar apart from a broken one.
 
-- [ ] **Schritt 5: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add operator/Dockerfile operator/build.gradle.kts
@@ -578,21 +578,21 @@ git commit -m "feat: package the operator as a container image"
 
 ---
 
-### Task 7: Container-Image für die API
+### Task 7: Container image for the API
 
 **Files:**
 
 - Create: `api/Dockerfile`
-- Modify: `api/build.gradle.kts` (Shadow-Plugin und fester Jar-Name)
+- Modify: `api/build.gradle.kts` (shadow plugin and fixed jar name)
 
 **Interfaces:**
 
-- Consumes: `application { mainClass.set("net.onelitefeather.apus.api.Application") }`, vorhanden in `api/build.gradle.kts:113`.
+- Consumes: `application { mainClass.set("net.onelitefeather.apus.api.Application") }`, present in `api/build.gradle.kts:113`.
 - Produces: `api/build/libs/apus-api.jar`.
 
-- [ ] **Schritt 1: Shadow-Jar konfigurieren**
+- [ ] **Step 1: Configure the shadow jar**
 
-Im `plugins`-Block von `api/build.gradle.kts`:
+In the `plugins` block of `api/build.gradle.kts`:
 
 ```kotlin
 alias(libs.plugins.shadow)
@@ -616,15 +616,15 @@ tasks {
 }
 ```
 
-- [ ] **Schritt 2: Jar bauen und Bean-Auflösung verifizieren**
+- [ ] **Step 2: Build the jar and verify bean resolution**
 
 Run: `./gradlew :api:shadowJar`
 Expected: BUILD SUCCESSFUL
 
 Run: `unzip -l api/build/libs/apus-api.jar | grep -c 'META-INF/services'`
-Expected: eine Zahl größer 0 — schlägt das fehl, hat `mergeServiceFiles()` nicht gegriffen und die API würde zur Laufzeit keine Beans finden.
+Expected: a number greater than 0 — if this fails, `mergeServiceFiles()` did not take effect and the API would find no beans at runtime.
 
-- [ ] **Schritt 3: Dockerfile schreiben**
+- [ ] **Step 3: Write the Dockerfile**
 
 ```dockerfile
 # syntax=docker/dockerfile:1
@@ -644,17 +644,17 @@ EXPOSE 8080
 ENTRYPOINT ["java", "-jar", "/opt/apus/api.jar"]
 ```
 
-- [ ] **Schritt 4: Image bauen und Start prüfen**
+- [ ] **Step 4: Build the image and check the start**
 
 Run: `docker build -f api/Dockerfile -t apus-api:test .`
-Expected: erfolgreicher Build.
+Expected: a successful build.
 
 Run: `docker run --rm -p 8080:8080 -d --name apus-api-test apus-api:test && sleep 15 && docker logs apus-api-test | tail -20`
-Expected: Micronaut-Startzeile (`Startup completed in ...ms`). Die JWT-Validierung braucht einen Issuer und wird beim ersten Request scheitern — der Start selbst muss aber sauber durchlaufen.
+Expected: a Micronaut startup line (`Startup completed in ...ms`). JWT validation needs an issuer and will fail on the first request — but the startup itself has to complete cleanly.
 
-Aufräumen: `docker rm -f apus-api-test`
+Clean up: `docker rm -f apus-api-test`
 
-- [ ] **Schritt 5: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add api/Dockerfile api/build.gradle.kts
@@ -663,21 +663,21 @@ git commit -m "feat: package the API as a container image"
 
 ---
 
-### Task 8: Container-Image für die UI
+### Task 8: Container image for the UI
 
-Die UI läuft laut Design-Spec §11.2 als SPA (`ssr: false`). Ein statisches Build-Ergebnis, ausgeliefert von nginx, ist damit die passende Form — kein Node-Prozess im Cluster.
+Per design spec §11.2 the UI runs as an SPA (`ssr: false`). A static build output, served by nginx, is therefore the right shape — no Node process in the cluster.
 
 **Files:**
 
 - Create: `ui/Dockerfile`
 - Create: `ui/nginx.conf`
 
-- [ ] **Schritt 1: Verifizieren, dass der SPA-Modus tatsächlich konfiguriert ist**
+- [ ] **Step 1: Verify that SPA mode is actually configured**
 
 Run: `grep -n 'ssr' ui/nuxt.config.ts`
-Expected: `ssr: false`. Steht dort etwas anderes, ist dieser Task falsch zugeschnitten — dann statt nginx ein Node-Image mit `node .output/server/index.mjs` bauen und Schritt 2 überspringen.
+Expected: `ssr: false`. If it says something else, this task is scoped wrong — build a Node image with `node .output/server/index.mjs` instead of nginx, and skip Step 2.
 
-- [ ] **Schritt 2: nginx-Konfiguration schreiben**
+- [ ] **Step 2: Write the nginx configuration**
 
 ```nginx
 server {
@@ -704,7 +704,7 @@ server {
 }
 ```
 
-- [ ] **Schritt 3: Dockerfile schreiben**
+- [ ] **Step 3: Write the Dockerfile**
 
 ```dockerfile
 # syntax=docker/dockerfile:1
@@ -736,20 +736,20 @@ COPY --from=build /src/.output/public /usr/share/nginx/html
 EXPOSE 8080
 ```
 
-- [ ] **Schritt 4: Image bauen und ausliefern lassen**
+- [ ] **Step 4: Build the image and let it serve**
 
 Run: `docker build -f ui/Dockerfile -t apus-ui:test .`
-Expected: erfolgreicher Build.
+Expected: a successful build.
 
 Run: `docker run --rm -d -p 8081:8080 --name apus-ui-test apus-ui:test && sleep 3 && curl -sf -o /dev/null -w '%{http_code}\n' http://localhost:8081/`
 Expected: `200`
 
 Run: `curl -sf -o /dev/null -w '%{http_code}\n' http://localhost:8081/tenants/does-not-exist`
-Expected: `200` — der SPA-Fallback greift. Kommt hier `404`, ist `try_files` falsch verdrahtet.
+Expected: `200` — the SPA fallback kicks in. If this comes back `404`, `try_files` is wired wrong.
 
-Aufräumen: `docker rm -f apus-ui-test`
+Clean up: `docker rm -f apus-ui-test`
 
-- [ ] **Schritt 5: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add ui/Dockerfile ui/nginx.conf
@@ -758,21 +758,21 @@ git commit -m "feat: package the dashboard as a static nginx container image"
 
 ---
 
-### Task 9: Images veröffentlichen
+### Task 9: Publish the images
 
-Sechs Images: `runner`, `ingest`, `hosting`, `operator`, `api`, `ui`. Die ersten drei haben ihre Dockerfiles bereits, die letzten drei kommen aus Task 6–8.
+Six images: `runner`, `ingest`, `hosting`, `operator`, `api`, `ui`. The first three already have their Dockerfiles; the last three come from Task 6–8.
 
 **Files:**
 
-- Modify: `.github/workflows/release-please.yml` (Publish-Jobs anhängen)
+- Modify: `.github/workflows/release-please.yml` (append publish jobs)
 
 **Interfaces:**
 
-- Consumes: `needs.release-please.outputs.root-released` und `root-version` aus Task 3.
+- Consumes: `needs.release-please.outputs.root-released` and `root-version` from Task 3.
 
-- [ ] **Schritt 1: Gradle-Job für die Jar-Artefakte ergänzen**
+- [ ] **Step 1: Add a Gradle job for the jar artifacts**
 
-Drei der sechs Images kopieren Gradle-Ausgaben (`telemetry-addon` für `runner`, `ingest`, `operator`, `api`). Der Build-Kontext muss diese Dateien also enthalten. In `.github/workflows/release-please.yml` nach dem `release-please`-Job:
+Three of the six images copy Gradle outputs (`telemetry-addon` for `runner`, `ingest`, `operator`, `api`). The build context therefore has to contain those files. In `.github/workflows/release-please.yml`, after the `release-please` job:
 
 ```yaml
   build-context:
@@ -788,7 +788,7 @@ Drei der sechs Images kopieren Gradle-Ausgaben (`telemetry-addon` für `runner`,
     secrets: inherit
 ```
 
-- [ ] **Schritt 2: Die sechs Publish-Jobs ergänzen**
+- [ ] **Step 2: Add the six publish jobs**
 
 ```yaml
   publish-runner:
@@ -876,19 +876,19 @@ Drei der sechs Images kopieren Gradle-Ausgaben (`telemetry-addon` für `runner`,
     secrets: inherit
 ```
 
-`publish-ui` hängt bewusst **nicht** am `build-context`: Die UI baut sich im Dockerfile selbst aus den Quellen und braucht keine Gradle-Ausgabe. Die anderen fünf teilen sich einen Kontext-Artefakt-Namen — `artifact-name` muss überall exakt `docker-context` lauten, sonst findet der Publish-Job den Upload nicht.
+`publish-ui` deliberately does **not** hang off `build-context`: the UI builds itself from source inside the Dockerfile and needs no Gradle output. The other five share one context artifact name — `artifact-name` must read exactly `docker-context` everywhere, or the publish job cannot find the upload.
 
-- [ ] **Schritt 3: Prüfen, dass `dockerfile` ein unterstützter Eingabewert ist**
+- [ ] **Step 3: Check that `dockerfile` is a supported input**
 
 Run: `gh api repos/OneLiteFeatherNET/workflows/contents/.github/workflows/docker-publish.yml -q '.content' | base64 -d | grep -A3 -E '^\s+(dockerfile|context|artifact-name):'`
-Expected: Die drei Eingaben erscheinen im `workflow_call`-`inputs`-Block. Fehlt `dockerfile`, unterstützt der zentrale Workflow nur den Standardnamen `Dockerfile` im Kontextverzeichnis — dann ist das eine Erweiterung am zentralen Workflow (Vorgehen laut `release-engineering:workflows`, Abschnitt „Introducing a new mechanic"), und dieser Task blockiert, bis die dort ergänzt und getaggt ist.
+Expected: the three inputs appear in the `workflow_call` `inputs` block. If `dockerfile` is missing, the central workflow only supports the standard name `Dockerfile` in the context directory — that then becomes an extension to the central workflow (approach per `release-engineering:workflows`, section "Introducing a new mechanic"), and this task is blocked until that has been added and tagged there.
 
-- [ ] **Schritt 4: YAML validieren**
+- [ ] **Step 4: Validate the YAML**
 
 Run: `python3 -c "import yaml;yaml.safe_load(open('.github/workflows/release-please.yml'));print('ok')"`
 Expected: `ok`
 
-- [ ] **Schritt 5: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add .github/workflows/release-please.yml
@@ -897,9 +897,9 @@ git commit -m "ci: publish all six container images on release"
 
 ---
 
-### Task 10: Maven-Veröffentlichung für die beiden Bibliotheken
+### Task 10: Maven publishing for the two libraries
 
-`telemetry-addon` konsumieren BlueMap-Nutzer, `paper-worldpush` Server-Betreiber. Beide sind ohne Publishing nicht erreichbar.
+BlueMap users consume `telemetry-addon`, server operators consume `paper-worldpush`. Neither is reachable without publishing.
 
 **Files:**
 
@@ -907,21 +907,21 @@ git commit -m "ci: publish all six container images on release"
 - Modify: `paper-worldpush/build.gradle.kts`
 - Modify: `.github/workflows/release-please.yml`
 
-- [ ] **Schritt 1: Publishing in beiden Modulen konfigurieren**
+- [ ] **Step 1: Configure publishing in both modules**
 
-In beiden `build.gradle.kts` (Modulname jeweils anpassen):
+In both `build.gradle.kts` files (adjust the module name each time):
 
 ```kotlin
 plugins {
     `maven-publish`
-    // ... vorhandene Plugins ...
+    // ... existing plugins ...
 }
 
 publishing {
     publications {
         create<MavenPublication>("maven") {
             groupId = "net.onelitefeather.apus"
-            artifactId = "telemetry-addon"   // bzw. "paper-worldpush"
+            artifactId = "telemetry-addon"   // or "paper-worldpush"
             // The shadow jar is the artifact consumers need -- the thin jar would leave
             // them to resolve the relocated dependencies themselves.
             artifact(tasks.named("shadowJar"))
@@ -940,20 +940,20 @@ publishing {
 }
 ```
 
-- [ ] **Schritt 2: Repository-URL und Credential-Namen gegen ein bestehendes OLF-Projekt gegenprüfen**
+- [ ] **Step 2: Cross-check the repository URL and credential names against an existing OLF project**
 
 Run: `gh api repos/OneLiteFeatherNET/Aves/contents/build.gradle.kts -q '.content' | base64 -d | grep -A12 'repositories'`
-Expected: URL und Umgebungsvariablennamen stimmen mit Schritt 1 überein. Weichen sie ab, gilt der Wert aus dem bestehenden Projekt — der zentrale `gradle-publish.yml`-Workflow reicht genau diese Secrets herein.
+Expected: the URL and environment variable names match Step 1. If they differ, the value from the existing project wins — the central `gradle-publish.yml` workflow injects exactly these secrets.
 
-- [ ] **Schritt 3: Lokal in ein Verzeichnis publizieren**
+- [ ] **Step 3: Publish locally into a directory**
 
 Run: `./gradlew :telemetry-addon:publishToMavenLocal :paper-worldpush:publishToMavenLocal`
 Expected: BUILD SUCCESSFUL
 
 Run: `find ~/.m2/repository/net/onelitefeather/apus -name '*.jar' | sort`
-Expected: je ein Jar pro Modul.
+Expected: one jar per module.
 
-- [ ] **Schritt 4: Publish-Jobs anhängen**
+- [ ] **Step 4: Append the publish jobs**
 
 In `.github/workflows/release-please.yml`:
 
@@ -981,9 +981,9 @@ In `.github/workflows/release-please.yml`:
     secrets: inherit
 ```
 
-Die projektqualifizierte Task-Syntax sorgt dafür, dass eine Veröffentlichung des einen Moduls das andere nicht mitzieht.
+The project-qualified task syntax ensures that publishing one module does not drag the other along with it.
 
-- [ ] **Schritt 5: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add telemetry-addon/build.gradle.kts paper-worldpush/build.gradle.kts .github/workflows/release-please.yml
@@ -992,44 +992,44 @@ git commit -m "feat: publish telemetry-addon and paper-worldpush to the OneLiteF
 
 ---
 
-### Task 11: Design-Spec nachziehen
+### Task 11: Update the design spec
 
-Die Spec führt in §13.2 „Phase 1 hat im Repository keinerlei CI-Konfiguration angelegt" als offenen Punkt. Nach diesem Plan stimmt das nicht mehr.
+The spec still lists in §13.2 "Phase 1 set up no CI configuration at all in the repository" as an open point. After this plan that is no longer true.
 
 **Files:**
 
 - Modify: `docs/superpowers/specs/2026-08-08-apus-design.md`
 
-- [ ] **Schritt 1: §13.2, Zeile zum `telemetry-addon`, umschreiben**
+- [ ] **Step 1: Rewrite §13.2, the line about `telemetry-addon`**
 
-Der Satz „**Offen:** Eine CI-Matrix über unterstützte BlueMap-Versionen als Frühwarnsystem existiert nicht — Phase 1 hat im Repository keinerlei CI-Konfiguration angelegt." wird ersetzt durch:
-
-```markdown
-**Teilweise offen:** CI existiert seit Phase 7 (`.github/workflows/build-pr.yml`), eine
-Matrix über mehrere BlueMap-Versionen als Frühwarnsystem aber noch nicht — der
-Contract-Test läuft gegen die eine im Katalog gepinnte Version. Bis eine Matrix existiert,
-muss er vor jedem BlueMap-Upgrade weiterhin gezielt laufen.
-```
-
-- [ ] **Schritt 2: §0 um einen Absatz zum Auslieferungsstand ergänzen**
-
-Nach dem Absatz zu Region-Sharding einfügen:
+The sentence "**Open:** A CI matrix over supported BlueMap versions as an early-warning system does not exist — Phase 1 set up no CI configuration at all in the repository." is replaced with:
 
 ```markdown
-**Auslieferung steht seit Phase 7.** Alle sechs Komponenten liegen als Container-Image vor
-(`runner`, `ingest`, `hosting`, `operator`, `api`, `ui`), `telemetry-addon` und
-`paper-worldpush` werden nach Maven veröffentlicht. Versionen und Changelogs entstehen
-über Release Please aus Conventional Commits; `telemetry-addon` und `paper-worldpush`
-tragen dabei eigene Release-Spuren, wie in §4 vorgesehen. Was weiterhin fehlt, sind die
-Cluster-Manifeste und die Observability-Verdrahtung — siehe den Plan zu Phase 8.
+**Partly open:** CI has existed since Phase 7 (`.github/workflows/build-pr.yml`), but a
+matrix over multiple BlueMap versions as an early-warning system does not exist yet — the
+contract test runs against the one version pinned in the catalog. Until a matrix exists, it
+still has to be run deliberately before every BlueMap upgrade.
 ```
 
-- [ ] **Schritt 3: Markdown-Lint über die geänderte Datei**
+- [ ] **Step 2: Add a paragraph on the delivery state to §0**
+
+Insert after the paragraph on region sharding:
+
+```markdown
+**Delivery has existed since Phase 7.** All six components are available as container images
+(`runner`, `ingest`, `hosting`, `operator`, `api`, `ui`), `telemetry-addon` and
+`paper-worldpush` are published to Maven. Versions and changelogs come from Release Please
+out of Conventional Commits; `telemetry-addon` and `paper-worldpush` carry their own release
+tracks in doing so, as provided for in §4. What is still missing are the cluster manifests
+and the observability wiring — see the phase 8 plan.
+```
+
+- [ ] **Step 3: Markdown-lint the changed file**
 
 Run: `npx markdownlint-cli2 docs/superpowers/specs/2026-08-08-apus-design.md`
-Expected: keine Fehler.
+Expected: no errors.
 
-- [ ] **Schritt 4: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
 git add docs/superpowers/specs/2026-08-08-apus-design.md
@@ -1038,8 +1038,8 @@ git commit -m "docs: record the phase 7 delivery state in the design spec"
 
 ---
 
-## Was dieser Plan bewusst nicht abdeckt
+## What this plan deliberately does not cover
 
-- **Cluster-Manifeste, CRD-YAMLs, Metriken, Dashboards und der k3s-E2E-Lauf** — eigener Plan (Phase 8). Sie setzen die hier gebauten Images voraus, aber nicht umgekehrt.
-- **Identity-Broker-Auswahl, RBAC-Härtung, Quota-Exit-Code, das Paper-Save-Fenster und die `emptyDir`-Grenze** — eigener Plan (Phase 9). Das sind inhaltliche Härtungen am bestehenden Code, keine Auslieferungsfragen.
-- **Eine CI-Matrix über mehrere BlueMap-Versionen.** Sinnvoll, aber sie setzt voraus, dass der Contract-Test parametrierbar über die BlueMap-Version ist — das ist er heute nicht (die Version steht fest im Katalog und im `runner/Dockerfile`). Gehört in denselben Schritt wie eine Überarbeitung des Contract-Tests, nicht in die CI-Einführung.
+- **Cluster manifests, CRD YAMLs, metrics, dashboards and the k3s E2E run** — a separate plan (Phase 8). They assume the images built here, but not the other way around.
+- **Identity broker selection, RBAC hardening, the quota exit code, the Paper save window and the `emptyDir` limit** — a separate plan (Phase 9). Those are substantive hardening work on existing code, not delivery questions.
+- **A CI matrix over multiple BlueMap versions.** Worthwhile, but it assumes the contract test is parametrizable over the BlueMap version — which it is not today (the version is fixed in the catalog and in `runner/Dockerfile`). Belongs in the same step as a rework of the contract test, not in the CI rollout.
