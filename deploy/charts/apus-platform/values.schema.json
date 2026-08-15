@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": ["auth", "api", "ui"],
+  "properties": {
+    "auth": {
+      "type": "object",
+      "required": ["issuer", "jwksUri"],
+      "properties": {
+        "issuer": {
+          "type": "string",
+          "minLength": 1,
+          "format": "uri",
+          "description": "OIDC issuer the API validates tokens against. Deliberately has no default: an unset issuer must fail the install, never start an API that accepts unvalidated tokens."
+        },
+        "jwksUri": {
+          "type": "string",
+          "minLength": 1,
+          "format": "uri",
+          "description": "JWKS endpoint the API fetches signing keys from. As mandatory as the issuer and enforced for the same reason: application.yml wires both from the environment with no default (micronaut.security.token.jwt.signatures.jwks.apus-issuer.jwks-uri), so an empty value leaves the API with no signing keys and it rejects every token at runtime instead of failing at install time."
+        }
+      }
+    }
+  }
+}

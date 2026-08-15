@@ -1,0 +1,87 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "apus-operator.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "apus-operator.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  strategy:
+    # The operator holds a lease-free single-writer position: two instances would
+    # reconcile the same resources concurrently. Recreate, never RollingUpdate.
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "apus-operator.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "apus-operator.labels" . | nindent 8 }}
+        {{- with .Values.podLabels }}{{- toYaml . | nindent 8 }}{{- end }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "apus-operator.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: operator
+          image: {{ include "apus-operator.image" (dict "image" .Values.image "ctx" .) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          {{- if .Values.metrics.enabled }}
+          ports:
+            - name: metrics
+              containerPort: {{ .Values.metrics.port }}
+              protocol: TCP
+          {{- end }}
+          env:
+            - name: APUS_ROOK_NAMESPACE
+              value: {{ .Values.rook.namespace | quote }}
+            - name: APUS_CEPH_OBJECT_STORE
+              value: {{ .Values.rook.cephObjectStore | quote }}
+            - name: APUS_BUCKET_STORAGE_CLASS
+              value: {{ .Values.rook.bucketStorageClass | quote }}
+            - name: APUS_RUNNER_IMAGE
+              value: {{ include "apus-operator.image" (dict "image" .Values.images.runner "ctx" .) | quote }}
+            - name: APUS_INGEST_IMAGE
+              value: {{ include "apus-operator.image" (dict "image" .Values.images.ingest "ctx" .) | quote }}
+            - name: APUS_HOSTING_IMAGE
+              value: {{ include "apus-operator.image" (dict "image" .Values.images.hosting "ctx" .) | quote }}
+            - name: APUS_BUNDLE_BUCKET
+              value: {{ .Values.bundles.bucket | quote }}
+            - name: APUS_BUNDLE_S3_ENDPOINT
+              value: {{ .Values.bundles.s3Endpoint | quote }}
+            - name: APUS_BUNDLE_S3_REGION
+              value: {{ .Values.bundles.s3Region | quote }}
+            - name: APUS_BUNDLE_CREDENTIALS_SECRET
+              value: {{ .Values.bundles.credentialsSecret | quote }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            # readOnlyRootFilesystem is on; the JVM still needs a writable temp dir.
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

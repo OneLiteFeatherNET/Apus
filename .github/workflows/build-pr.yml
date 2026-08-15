@@ -53,3 +53,93 @@ jobs:
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test
+
+  helm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: azure/setup-helm@v4
+        with:
+          # Pinned on purpose: the schema checks below grep for JSON-Pointer paths
+          # (/auth/issuer), which Helm only emits since it moved to jsonschema/v6
+          # after 3.18.4. An older Helm would fail these checks with a misleading
+          # message even though the schema is fine. setup-helm's own fallback
+          # version is 3.18.3, so "latest" is not safe to rely on here.
+          version: v4.2.2
+      - name: Lint charts
+        run: |
+          helm lint deploy/charts/apus-operator --set bundles.s3Endpoint=http://example
+          helm lint deploy/charts/apus-platform \
+            --set auth.issuer=https://id.example.net \
+            --set auth.jwksUri=https://id.example.net/keys
+      - name: Render charts
+        run: |
+          helm template t deploy/charts/apus-operator --set bundles.s3Endpoint=http://example > /tmp/operator.yaml
+          helm template t deploy/charts/apus-platform \
+            --set auth.issuer=https://id.example.net \
+            --set auth.jwksUri=https://id.example.net/keys > /tmp/platform.yaml
+      - name: The values schema actually rejects missing required values
+        run: |
+          # A schema that never rejects anything is worse than none: it looks like a guard.
+          # A `helm template` that fails for an unrelated reason would also pass a bare
+          # exit-code check, so grep the error for the field the schema is supposed to guard.
+          if error=$(helm template t deploy/charts/apus-platform 2>&1 >/dev/null); then
+            echo "values.schema.json did not reject a missing auth.issuer" >&2
+            exit 1
+          fi
+          if ! grep -q '/auth/issuer' <<<"$error"; then
+            echo "helm template failed, but not because of auth.issuer:" >&2
+            echo "$error" >&2
+            exit 1
+          fi
+          # jwksUri is checked separately with the issuer supplied: otherwise the run above
+          # would "pass" this assertion on the issuer error alone and an unenforced jwksUri
+          # would go unnoticed. Without it the API has no signing keys and rejects every
+          # token at runtime -- the same failure mode the issuer guard exists to prevent.
+          if error=$(helm template t deploy/charts/apus-platform \
+              --set auth.issuer=https://id.example.net 2>&1 >/dev/null); then
+            echo "values.schema.json did not reject a missing auth.jwksUri" >&2
+            exit 1
+          fi
+          if ! grep -q '/auth/jwksUri' <<<"$error"; then
+            echo "helm template failed, but not because of auth.jwksUri:" >&2
+            echo "$error" >&2
+            exit 1
+          fi
+          if error=$(helm template t deploy/charts/apus-operator --set bundles.s3Endpoint="" 2>&1 >/dev/null); then
+            echo "values.schema.json did not reject an empty bundles.s3Endpoint" >&2
+            exit 1
+          fi
+          if ! grep -q '/bundles/s3Endpoint' <<<"$error"; then
+            echo "helm template failed, but not because of bundles.s3Endpoint:" >&2
+            echo "$error" >&2
+            exit 1
+          fi
+      - name: Install kubeconform
+        env:
+          # Pinned for the same reason as helm above: a validator that changes its schema
+          # handling between releases would turn a red CI run into something nobody can
+          # reproduce locally.
+          KUBECONFORM_VERSION: v0.8.0
+        run: |
+          # Unpacked into RUNNER_TEMP and put on PATH via GITHUB_PATH rather than into
+          # /usr/local/bin: no sudo, and nothing outside the job's own workspace is touched.
+          curl -sSfL "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" \
+            | tar -xz -C "${RUNNER_TEMP}" kubeconform
+          echo "${RUNNER_TEMP}" >> "${GITHUB_PATH}"
+      - name: Validate the rendered manifests against the Kubernetes schemas
+        run: |
+          # kubeconform, not `kubectl apply --dry-run=client`: that dry-run is not offline.
+          # Since kubectl 1.26 it downloads the OpenAPI document from the API server before it
+          # validates anything, so on a runner with no cluster it falls back to localhost:8080
+          # and dies with "failed to download openapi ... connection refused". kubeconform
+          # validates against the published JSON schemas and never contacts an API server --
+          # which is also why this step is a schema check, not an API-server check.
+          #
+          # -ignore-missing-schemas is needed and safe here: the upstream schema set ships no
+          # schema for CustomResourceDefinition itself, and the only non-built-in kinds these
+          # charts render are exactly those six CRDs (plus a ServiceMonitor when
+          # metrics.serviceMonitor.enabled is set). No chart renders a custom resource, so
+          # nothing that would need a CRD-derived schema is silently skipped.
+          # -strict rejects unknown fields, which is where the typos actually live.
+          kubeconform -strict -summary -ignore-missing-schemas /tmp/operator.yaml /tmp/platform.yaml

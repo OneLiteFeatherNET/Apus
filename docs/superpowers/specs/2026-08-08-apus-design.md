@@ -32,8 +32,12 @@ Skalierung über `render-threads` — siehe §14, Phase 4, für die volle Begrü
 (`runner`, `ingest`, `hosting`, `operator`, `api`, `ui`), `telemetry-addon` und
 `paper-worldpush` werden nach Maven veröffentlicht. Versionen und Changelogs entstehen
 über Release Please aus Conventional Commits; `telemetry-addon` und `paper-worldpush`
-tragen dabei eigene Release-Spuren, wie in §4 vorgesehen. Was weiterhin fehlt, sind die
-Cluster-Manifeste und die Observability-Verdrahtung — siehe den Plan zu Phase 8.
+tragen dabei eigene Release-Spuren, wie in §4 vorgesehen. Was weiterhin fehlt, ist die
+Observability-Verdrahtung (Metriken, Dashboards) — siehe den Plan zu Phase 8.
+
+**Ausrollbar über Helm.** Apus wird über zwei Helm Charts unter `deploy/charts/`
+(`apus-operator`, `apus-platform`) ausgerollt; sie lösen die ursprünglich für Phase 8
+vorgesehene Kustomize-Basis ab. Details: `docs/superpowers/specs/2026-08-13-helm-charts-design.md`.
 
 **Bewusst offen gelassene Punkte** (Details in §15):
 

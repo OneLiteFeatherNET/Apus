@@ -1,0 +1,111 @@
+{{- if .Values.rbac.create }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "apus-operator.fullname" . }}
+  labels:
+    {{- include "apus-operator.labels" . | nindent 4 }}
+rules:
+  # Own custom resources, including status and finalizers.
+  - apiGroups: ["bluemap.onelitefeather.net"]
+    resources:
+      - tenants
+      - worldsources
+      - worldingests
+      - bluemapmaps
+      - bluemaprenders
+      - bluemaphostings
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["bluemap.onelitefeather.net"]
+    resources:
+      - tenants/status
+      - worldsources/status
+      - worldingests/status
+      - bluemapmaps/status
+      - bluemaprenders/status
+      - bluemaphostings/status
+    verbs: ["get", "update", "patch"]
+  - apiGroups: ["bluemap.onelitefeather.net"]
+    resources:
+      - tenants/finalizers
+      - bluemapmaps/finalizers
+    verbs: ["update"]
+  # A Tenant creates a namespace with its ResourceQuota and LimitRange (design spec §8.1).
+  - apiGroups: [""]
+    resources: ["namespaces", "resourcequotas", "limitranges"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  # The per-tenant NetworkPolicy of design spec §8.1 is not implemented yet -- TenantReconciler
+  # creates none today. The rule is kept so enabling it later is a code change rather than a
+  # code change plus a chart upgrade nobody remembers; it grants nothing that is used right now.
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  # Renders and ingests are Jobs; hosting is a Deployment behind a Service and Ingress.
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["services", "configmaps"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # A BlueMapHosting with spec.tls.enabled requests its ingress certificate from cert-manager:
+  # BlueMapHostingReconciler does client.resources(Certificate.class)...createOr(update), and
+  # that Certificate is @Group("cert-manager.io") @Version("v1") @Plural("certificates").
+  # Granted unconditionally, not behind a value: the reconciler probes with client.supports()
+  # and stays out of the way on a cluster without cert-manager, so the rule is inert there --
+  # whereas a missing rule turns every TLS hosting into a 403 nobody expects at that point.
+  # get/create/update is what createOr(update) exercises; list/watch keep the rule shaped like
+  # its siblings above and cost nothing on a type the operator may already write. No delete:
+  # the certificate carries the hosting as its owner reference and is garbage-collected.
+  - apiGroups: ["cert-manager.io"]
+    resources: ["certificates"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  # Reading the render pod's /progress endpoint and its termination message (design spec §7.2).
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list", "watch"]
+  # Rook provisions bucket, credentials secret and endpoint ConfigMap (design spec §9.1).
+  - apiGroups: ["objectbucket.io"]
+    resources: ["objectbucketclaims"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["ceph.rook.io"]
+    resources: ["cephobjectstoreusers"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Two different kinds of secret. The operator only ever reads the ones Rook creates
+  # (bucket credentials, wired into render jobs and hosting pods), but it *creates* the
+  # push-token secret itself: TenantReconciler builds `apus-push-token` in every tenant
+  # namespace on first reconcile (create() only -- it deliberately never rewrites it, since
+  # regenerating the token would break every paper-worldpush already configured with it).
+  # Without `create` the very first Tenant reconcile fails with a 403.
+  # This cannot be narrowed with resourceNames: the name is fixed, but the namespace is not
+  # -- a new one appears with every Tenant -- and a ClusterRole rule cannot say "this name,
+  # in any namespace, but nothing else". No update/patch/delete on purpose: the operator
+  # performs none of them on secrets, and the push token is garbage-collected through the
+  # Tenant owner reference rather than deleted by hand.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch", "create"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "apus-operator.fullname" . }}
+  labels:
+    {{- include "apus-operator.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "apus-operator.fullname" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "apus-operator.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

@@ -1,0 +1,13 @@
+{{- if .Values.crds.install }}
+{{- /*
+The CRDs ship as templates rather than in Helm's crds/ directory on purpose: Helm
+installs that directory once and never touches it again, so `helm upgrade` would
+silently leave an old schema in place while the new operator reads fields it does
+not know. resource-policy: keep makes uninstall keep them, so removing the chart
+does not delete every Tenant, BlueMapMap and BlueMapHosting in the cluster.
+*/ -}}
+{{- range $path, $_ := .Files.Glob "files/crds/*.yaml" }}
+---
+{{ $.Files.Get $path | trim }}
+{{- end }}
+{{- end }}
