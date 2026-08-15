@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/OneLiteFeatherNET/Apus/compare/apus-v0.3.0...apus-v0.3.1) (2026-08-15)
+
+
+### Bug Fixes
+
+* **operator:** keep the process alive after the operator starts ([#43](https://github.com/OneLiteFeatherNET/Apus/issues/43)) ([718ae54](https://github.com/OneLiteFeatherNET/Apus/commit/718ae54c752c6e95a20089db32b18b4d7cee0eea))
+
 ## [0.3.0](https://github.com/OneLiteFeatherNET/Apus/compare/apus-v0.2.1...apus-v0.3.0) (2026-08-15)
 
 
