@@ -15,12 +15,17 @@ import type { PipelineStage } from '#core/utils/pipeline'
 
 defineProps<{ stages: PipelineStage[], compact?: boolean }>()
 
+// Five states, five distinguishable fills. `active` is half-filled rather than outlined: in the
+// compact row it would otherwise be indistinguishable from `pending`, and "rendering right now"
+// versus "waiting for something" is the single most useful distinction the row makes.
+// `skipped` keeps a visible dashed edge for the same reason in reverse -- an invisible square
+// reads as a rendering fault rather than as "this stage does not apply here".
 const stateClass: Record<string, string> = {
   done: 'bg-primary border-primary',
-  active: 'border-primary bg-transparent',
+  active: 'bg-primary/40 border-primary',
   pending: 'bg-transparent border-accented',
   failed: 'bg-error border-error',
-  skipped: 'bg-transparent border-muted'
+  skipped: 'bg-transparent border-muted border-dashed opacity-70'
 }
 
 // Colour never carries a state on its own: every square has this word beside it, or -- in the

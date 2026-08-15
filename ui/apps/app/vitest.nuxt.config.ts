@@ -9,6 +9,10 @@ import { defineVitestConfig } from '@nuxt/test-utils/config'
 export default defineVitestConfig({
   test: {
     environment: 'nuxt',
-    include: ['tests/nuxt/**/*.spec.ts']
+    include: ['tests/nuxt/**/*.spec.ts'],
+    // Each spec file boots its own Nuxt app, and several booting in parallel on a loaded machine
+    // run past Vitest's 10s default -- a timeout here means "the machine was busy", not "the
+    // component is broken", and it is not worth a flaky suite to find that out each time.
+    hookTimeout: 60_000
   }
 })

@@ -1,6 +1,10 @@
-<script setup lang="ts">
+<script setup lang="ts" generic="Row extends Record<string, unknown>">
 /**
  * The dense table both applications use for lists of resources.
+ *
+ * Generic over the row type so a `#cell-*` slot receives the caller's own shape rather than
+ * `Record<string, unknown>`. Without that every page casts in its template, which is both noise
+ * and a place for a genuine type error to hide behind an `as`.
  *
  * A real <table>, not a grid of divs: the header-to-cell association a screen reader needs comes
  * free from the element, and reimplementing it with ARIA on divs is a well-known way to get it
@@ -20,8 +24,8 @@ export interface DataTableColumn {
 
 withDefaults(defineProps<{
   columns: DataTableColumn[]
-  rows: Record<string, unknown>[]
-  rowKey: string
+  rows: Row[]
+  rowKey: keyof Row & string
   loading?: boolean
   caption?: string
 }>(), { loading: false, caption: undefined })

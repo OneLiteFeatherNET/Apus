@@ -107,8 +107,8 @@ describe('the built Nitro server', () => {
   })
 
   it('serves the shell for a client-side route so a deep link survives a reload', async () => {
-    // /tenant/renders is a Vue Router route in this app, not a file on disk.
-    const response = await fetch(`${base}/tenant/renders`, { headers: { Accept: 'text/html' } })
+    // /renders is a Vue Router route in this app, not a file on disk.
+    const response = await fetch(`${base}/renders`, { headers: { Accept: 'text/html' } })
 
     expect(response.status).toBe(200)
     expect(response.headers.get('cache-control')).toBe('no-store')

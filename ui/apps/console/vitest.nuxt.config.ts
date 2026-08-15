@@ -7,6 +7,9 @@ import { defineVitestConfig } from '@nuxt/test-utils/config'
 export default defineVitestConfig({
   test: {
     environment: 'nuxt',
-    include: ['tests/nuxt/**/*.spec.ts']
+    include: ['tests/nuxt/**/*.spec.ts'],
+    // Same reason as the tenant app's copy: booting a Nuxt app per spec file runs past Vitest's
+    // 10s default when several start at once.
+    hookTimeout: 60_000
   }
 })
