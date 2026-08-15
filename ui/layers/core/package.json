@@ -1,0 +1,20 @@
+{
+  "name": "@apus/ui-core",
+  "version": "0.1.0",
+  "description": "Apus UI core layer -- OIDC session, typed API client, wire types, role helpers. No visual code.",
+  "private": true,
+  "type": "module",
+  "main": "./nuxt.config.ts",
+  "scripts": {
+    "test": "vitest run -c vitest.config.ts",
+    "test:watch": "vitest -c vitest.config.ts",
+    "typecheck": "echo 'typechecked through the apps that extend this layer'"
+  },
+  "dependencies": {
+    "oidc-client-ts": "3.5.0"
+  },
+  "devDependencies": {
+    "happy-dom": "20.11.2",
+    "vitest": "4.1.10"
+  }
+}

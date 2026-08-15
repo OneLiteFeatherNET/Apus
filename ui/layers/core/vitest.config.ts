@@ -5,6 +5,9 @@ import { defineConfig } from 'vitest/config'
 // is plain, framework-agnostic TypeScript with no Nuxt auto-imports or runtime dependency --
 // see ui/README.md "Why plain Vitest". A `happy-dom` environment is enough for the DOM globals
 // (atob, TextDecoder, ReadableStream) the API client and JWT helpers touch.
+//
+// This config lives in the layer, not at the workspace root: the code it covers lives here, and
+// `pnpm -r test` reaches it through this package's own `test` script.
 export default defineConfig({
   resolve: {
     alias: {
