@@ -20,11 +20,17 @@ package net.onelitefeather.apus.operator.ingest;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import io.fabric8.kubernetes.api.model.EnvVar;
 import io.fabric8.kubernetes.api.model.ObjectMetaBuilder;
 import io.fabric8.kubernetes.api.model.OwnerReference;
 import io.fabric8.kubernetes.api.model.batch.v1.Job;
+import io.opentelemetry.api.trace.Span;
+import io.opentelemetry.api.trace.Tracer;
+import io.opentelemetry.context.Scope;
+import io.opentelemetry.sdk.trace.SdkTracerProvider;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -252,5 +258,50 @@ class IngestJobBuilderTest {
         assertEquals(Labels.MANAGED_BY_VALUE, labels.get(Labels.MANAGED_BY));
         assertEquals("survival-source", labels.get(Labels.SOURCE));
         assertEquals(source.getMetadata().getUid(), labels.get(Labels.SOURCE_UID));
+    }
+
+    @Test
+    void addsNoTelemetryEnvironmentWhenTheOperatorHasNoCollector() {
+        // The operator running without OTEL_EXPORTER_OTLP_ENDPOINT must not hand the job an
+        // endpoint either -- an ingest image pointed at nothing would retry an exporter that
+        // can never succeed, for every run.
+        assumeTrue(
+                System.getenv("OTEL_EXPORTER_OTLP_ENDPOINT") == null,
+                "this test describes the no-collector case; the environment has one configured");
+
+        Job job = IngestJobBuilder.build(ingest("i1", "v1"), s3Source("survival-source"), OperatorConfig.defaults());
+
+        List<String> names = job.getSpec().getTemplate().getSpec().getContainers().get(0).getEnv().stream()
+                .map(EnvVar::getName)
+                .filter(name -> name.startsWith("OTEL_"))
+                .toList();
+        assertEquals(List.of(), names, "no collector configured, so nothing to forward");
+    }
+
+    @Test
+    void propagatesTheTraceContextSoTheJobIsPartOfTheReconciliationsTrace() {
+        // The whole point of instrumenting the ingest image: a render that took forty minutes
+        // should be one trace from the operator's reconcile down to the dimension being written,
+        // not two unrelated ones.
+        Tracer tracer = SdkTracerProvider.builder().build().get("test");
+        Span span = tracer.spanBuilder("WorldIngest reconcile").startSpan();
+
+        Job job;
+        try (Scope ignored = span.makeCurrent()) {
+            job = IngestJobBuilder.build(ingest("i1", "v1"), s3Source("survival-source"), OperatorConfig.defaults());
+        } finally {
+            span.end();
+        }
+
+        String traceparent = job.getSpec().getTemplate().getSpec().getContainers().get(0).getEnv().stream()
+                .filter(env -> "TRACEPARENT".equals(env.getName()))
+                .map(EnvVar::getValue)
+                .findFirst()
+                .orElse(null);
+
+        assertNotNull(traceparent, "the job must carry the trace context of the reconciliation");
+        assertTrue(
+                traceparent.contains(span.getSpanContext().getTraceId()),
+                "traceparent must name the reconciliation's trace, was: " + traceparent);
     }
 }

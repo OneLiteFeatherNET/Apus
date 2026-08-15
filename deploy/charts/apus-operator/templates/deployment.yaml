@@ -64,6 +64,18 @@ spec:
               value: {{ .Values.bundles.s3Region | quote }}
             - name: APUS_BUNDLE_CREDENTIALS_SECRET
               value: {{ .Values.bundles.credentialsSecret | quote }}
+            {{- if .Values.otel.endpoint }}
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ .Values.otel.endpoint | quote }}
+            - name: OTEL_SERVICE_NAME
+              value: {{ .Values.otel.serviceName | default (include "apus-operator.fullname" .) | quote }}
+            - name: OTEL_LOGS_EXPORTER
+              value: {{ .Values.otel.logsExporter | quote }}
+            {{- range $name, $value := .Values.otel.extraEnv }}
+            - name: {{ $name }}
+              value: {{ $value | quote }}
+            {{- end }}
+            {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           volumeMounts:

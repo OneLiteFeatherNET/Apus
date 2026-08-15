@@ -79,6 +79,22 @@ resources:
   limits:
     memory: 512Mi
 
+# OpenTelemetry. The SDK reads the standard OTEL_* variables and is a no-op when no endpoint
+# is set, so leaving this empty ships the instrumentation without turning it on.
+#
+# The operator also forwards these to the ingest jobs it creates, together with the current
+# trace context -- so a slow ingest shows up as part of the reconciliation's trace rather
+# than as an unrelated one.
+otel:
+  # e.g. http://alloy-receiver.monitoring.svc:4317
+  endpoint: ""
+  # Overrides the service name a trace is attributed to; defaults to the release name.
+  serviceName: ""
+  # otlp exports log records alongside spans; none keeps logs on the console only.
+  logsExporter: otlp
+  # Extra OTEL_* variables, for anything this chart does not model (headers, sampler args).
+  extraEnv: {}
+
 nodeSelector: {}
 tolerations: []
 affinity: {}
