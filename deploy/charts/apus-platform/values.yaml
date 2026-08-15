@@ -91,6 +91,51 @@ ui:
   tolerations: []
   affinity: {}
 
+# The management console: tenants, quotas, cluster-wide renders. A second SPA image, served
+# under /console on the *same* host as the ui. Same origin on purpose -- the api module
+# configures no CORS, so a console on its own hostname could not call it at all.
+console:
+  # A handful of platform admins, not tenants. Set to false to ship the platform without a
+  # management UI: the Deployment, the Service and the ingress rule all disappear together.
+  enabled: true
+  image:
+    repository: harbor.onelitefeather.dev/apus/console
+    tag: ""
+    pullPolicy: IfNotPresent
+  # One replica: the audience is administrators, and a restart costs them a page reload.
+  replicaCount: 1
+  podSecurityContext:
+    runAsNonRoot: true
+    # The distroless :nonroot base runs as uid 65532, not 10001 like the Java images.
+    runAsUser: 65532
+    seccompProfile:
+      type: RuntimeDefault
+  securityContext:
+    allowPrivilegeEscalation: false
+    # The Nitro server only reads from the image; it needs no writable path.
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: ["ALL"]
+  resources:
+    requests:
+      cpu: 50m
+      # Same Nitro shell-per-request profile as the ui, at a fraction of the request rate --
+      # but the same floor: below this the image's own heap cap does not save it from OOMKill.
+      memory: 128Mi
+    limits:
+      memory: 256Mi
+  # Passed to the container verbatim. NUXT_PUBLIC_* reach the SPA at runtime because the image
+  # runs Nitro -- see ui/README.md, "Runtime configuration". The console needs the same three
+  # values as the ui, and shares the ui's OIDC client (see NOTES.txt for the redirect URIs the
+  # broker must have registered).
+  env: {}
+  envFrom: []
+  podAnnotations: {}
+  podLabels: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
 # OpenTelemetry for the API. The SDK is a no-op with no endpoint set, so leaving this empty
 # ships the instrumentation without turning it on. HTTP server spans come from Micronaut's
 # own instrumentation; the API adds spans only where the work is not already one request.
