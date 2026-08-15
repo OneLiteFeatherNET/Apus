@@ -29,7 +29,7 @@ contain `BlueMapHosting`/`BlueMapHostingSpec`/`BlueMapHostingStatus` and the alr
   `cert-manager.io` CRD among them.
 - `operator/src/test/java/net/onelitefeather/apus/operator/hosting/HostingResourceBuilderTest.java`
   — 16 tests, written before the implementation (TDD), covering every point the plan calls out as
-  "Tests, die zählen".
+  "tests that count".
 
 ## Design decisions worth flagging
 

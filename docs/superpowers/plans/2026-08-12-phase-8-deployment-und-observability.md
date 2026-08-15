@@ -167,11 +167,11 @@ Expected: PASS
 
 ```bash
 printf '\n# drift\n' >> deploy/crds/$(ls deploy/crds | head -1)
-./gradlew :operator:test --tests '*CrdsInSyncTest*' || echo "erkannt"
+./gradlew :operator:test --tests '*CrdsInSyncTest*' || echo "caught"
 git checkout deploy/crds
 ```
 
-Expected: `erkannt` — a test that does not notice drift is worthless.
+Expected: `caught` — a test that does not notice drift is worthless.
 
 - [ ] **Step 8: Commit**
 
