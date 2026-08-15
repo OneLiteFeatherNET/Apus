@@ -119,6 +119,16 @@ tasks.named("build") {
 tasks.test {
     dependsOn(generateCrds)
     systemProperty("apus.crd.dir", crdOutputDir.get().asFile.absolutePath)
+    // LogbackConfigurationTest validates every module's src/main/resources/logback.xml, which it
+    // reads straight off disk rather than from a classpath -- so Gradle cannot infer that those
+    // files are inputs of this task. Without declaring them, fixing (or breaking) one of them
+    // leaves `test` UP-TO-DATE and the check never runs, which is the same silence the test
+    // exists to prevent. Listed from the subprojects rather than globbed so a module that ships
+    // no logback.xml costs nothing; a missing file is simply not part of the input set.
+    inputs.files(rootProject.subprojects.map { it.file("src/main/resources/logback.xml") })
+        .withPropertyName("logbackConfigurations")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+        .optional()
     // OperatorIntegrationTest and BlueMapHostingIntegrationTest each start a k3s container and
     // are not part of the routine build/check run -- see the integrationTest task below for why.
     // Matched by naming convention (every real-cluster test class ends in "IntegrationTest")

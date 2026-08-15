@@ -26,7 +26,7 @@ services except for the logger name in the last block.
 
 ```xml
 <configuration>
-  <!-- Console: for a human reading `kubectl logs`. No JSON here on purpose -- nothing
+  <!-- Console: for a human reading `kubectl logs`. No JSON here on purpose, because nothing
        parses this stream, so it can stay legible. -->
   <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
     <encoder>
@@ -54,6 +54,16 @@ services except for the logger name in the last block.
   <logger name="io.fabric8.kubernetes.client" level="WARN"/>
 </configuration>
 ```
+
+Note the dashes in those comments, because this is not cosmetic: a double hyphen is illegal
+inside an XML comment. Logback answers one with a `JoranException`, abandons the whole
+configuration and attaches *neither* appender, so the service logs nothing at all — no console
+line for `kubectl logs`, and nothing reaching the collector either. Nothing fails at build time,
+because the file is only read at runtime. That is exactly what shipped in 0.4.0 for `operator`
+and `ingest`. Copy this template as it stands, and keep every comment free of `--`;
+`LogbackConfigurationTest` loads every `logback.xml` in the repository through `JoranConfigurator`
+and fails the build on any warning Logback reports, so a module added later is covered the day it
+ships one.
 
 The appender needs the SDK handed to it once at startup, before the first log line:
 

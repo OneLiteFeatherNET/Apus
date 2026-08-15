@@ -1,5 +1,5 @@
 <configuration>
-  <!-- Console: for a human reading `kubectl logs`. No JSON here on purpose -- nothing
+  <!-- Console: for a human reading `kubectl logs`. No JSON here on purpose, because nothing
        parses this stream, so it can stay legible. -->
   <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
     <encoder>
