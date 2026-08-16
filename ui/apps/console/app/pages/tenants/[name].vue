@@ -122,6 +122,20 @@ async function loadDirectory(): Promise<void> {
 
 watch(name, loadDirectory, { immediate: true })
 
+/**
+ * Team membership, fetched one team at a time when somebody opens it. Not up front: that would
+ * be one request per team on every page load, for a list most people only scan.
+ */
+const teamMembers = ref<Record<string, DirectoryUserResponse[]>>({})
+
+async function loadTeamMembers(teamId: string): Promise<void> {
+  try {
+    teamMembers.value = { ...teamMembers.value, [teamId]: await api.getTeamMembers(name.value, teamId) }
+  } catch (caught) {
+    directoryError.value = caught instanceof ApusApiError ? caught.message : 'Could not load that team.'
+  }
+}
+
 async function createTeam(displayName: string): Promise<void> {
   try {
     await api.createTeam(name.value, { displayName })
@@ -256,9 +270,11 @@ const metadata = computed<MetaItem[]>(() => {
           :tenant="tenant.name"
           :directory="tenantDirectory"
           :can-write="true"
+          :members="teamMembers"
           @create-team="createTeam"
           @invite="invite"
           @reset-password="resetPassword"
+          @load-members="loadTeamMembers"
         />
 
         <p v-if="directoryError" class="border-error/40 bg-error/5 text-error border p-3 text-sm">

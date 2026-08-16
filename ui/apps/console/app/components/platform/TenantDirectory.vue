@@ -19,13 +19,35 @@ const props = defineProps<{
   tenant: string
   directory: TenantDirectoryResponse
   canWrite: boolean
+  /**
+   * Who is in which team, keyed by team id. Absent for a team nobody has expanded yet — which is
+   * why this is a map rather than a field on the team: assignments are one request per team, and
+   * fetching all of them to render a list most people only scan would be a burst the identity
+   * provider throttles.
+   */
+  members?: Record<string, DirectoryUserResponse[]>
 }>()
 
 const emit = defineEmits<{
-  (event: 'create-team', displayName: string): void
+  /** `create-team` carries the name; `load-members` carries the team id. */
+  (event: 'create-team' | 'load-members', value: string): void
   (event: 'invite', payload: { email: string, displayName: string }): void
   (event: 'reset-password', user: DirectoryUserResponse): void
 }>()
+
+/** Which teams the reader has opened. Nothing is fetched until one is. */
+const expanded = ref<Set<string>>(new Set())
+
+function toggle(teamId: string): void {
+  const next = new Set(expanded.value)
+  if (next.has(teamId)) {
+    next.delete(teamId)
+  } else {
+    next.add(teamId)
+    if (!props.members?.[teamId]) emit('load-members', teamId)
+  }
+  expanded.value = next
+}
 
 const newTeamName = ref('')
 const inviteEmail = ref('')
@@ -80,10 +102,39 @@ function submitInvite(): void {
           <li
             v-for="team in directory.teams"
             :key="team.id"
-            class="border-default flex items-center justify-between gap-3 border p-3"
+            class="border-default flex flex-col gap-2 border p-3"
           >
-            <span class="text-highlighted text-sm">{{ team.displayName }}</span>
-            <span class="text-muted text-xs">{{ memberCountLabel(team.memberCount) }}</span>
+            <button
+              type="button"
+              class="hover:text-primary flex items-center justify-between gap-3 text-left"
+              @click="toggle(team.id)"
+            >
+              <span class="text-highlighted text-sm">{{ team.displayName }}</span>
+              <span class="text-muted text-xs">
+                {{ memberCountLabel(team.memberCount) }} · {{ expanded.has(team.id) ? 'Hide' : 'Who is in it' }}
+              </span>
+            </button>
+
+            <template v-if="expanded.has(team.id)">
+              <ul v-if="members?.[team.id]?.length" class="flex flex-col gap-1 pl-3">
+                <li
+                  v-for="member in members[team.id]"
+                  :key="member.id"
+                  class="text-muted text-xs"
+                >
+                  {{ member.displayName || member.email }}
+                  <span class="apus-value">({{ member.email }})</span>
+                </li>
+              </ul>
+              <!-- "Nobody" only once the answer is actually in: an empty list shown while the
+                   request is still out would read as a fact about the team. -->
+              <p v-else-if="members?.[team.id]" class="text-muted pl-3 text-xs">
+                Nobody is in this team yet.
+              </p>
+              <p v-else class="text-muted pl-3 text-xs">
+                Loading…
+              </p>
+            </template>
           </li>
         </ul>
         <p v-else class="text-muted text-sm">

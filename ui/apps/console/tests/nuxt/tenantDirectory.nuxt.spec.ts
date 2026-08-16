@@ -66,6 +66,34 @@ describe('TenantDirectory', () => {
     expect(wrapper.text()).toContain('Directory admin')
   })
 
+  it('shows who is in a team once it is opened', async () => {
+    // The assignment, rather than two lists side by side.
+    const wrapper = await mountSuspended(TenantDirectory, {
+      props: {
+        tenant: 'acme',
+        directory: directory(),
+        canWrite: true,
+        members: { t1: [{ id: 'u1', displayName: 'Alice', email: 'alice@acme.example', privileged: false }] }
+      }
+    })
+
+    await wrapper.find('button').trigger('click')
+
+    expect(wrapper.text()).toContain('alice@acme.example')
+  })
+
+  it('does not claim a team is empty while its membership is still loading', async () => {
+    // An empty list shown mid-request would read as a fact about the team.
+    const wrapper = await mountSuspended(TenantDirectory, {
+      props: { tenant: 'acme', directory: directory(), canWrite: true, members: {} }
+    })
+
+    await wrapper.find('button').trigger('click')
+
+    expect(wrapper.text()).toContain('Loading')
+    expect(wrapper.text()).not.toContain('Nobody is in this team yet')
+  })
+
   it('hides every changing action from someone who may only look', async () => {
     const wrapper = await mountSuspended(TenantDirectory, {
       props: { tenant: 'acme', directory: directory(), canWrite: false }

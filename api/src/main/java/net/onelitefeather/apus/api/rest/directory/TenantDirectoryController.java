@@ -120,6 +120,30 @@ public class TenantDirectoryController {
         }
     }
 
+    /**
+     * Who is in one team — the assignment, rather than the two separate lists.
+     *
+     * <p>The team must be a team <em>of this tenant</em>, checked by listing the tenant's teams
+     * first rather than by trusting the id in the path. Without that, the group guard would pass
+     * (the tenant's own group is managed) while the id pointed at any group in the directory, and
+     * this would become a way to read the membership of every group in the organisation.
+     */
+    @Get("/teams/{teamId}/members")
+    public HttpResponse<List<UserResponse>> teamMembers(
+            Authentication authentication, @PathVariable String tenant, @PathVariable String teamId) {
+        ApusPrincipal principal = principals.resolve(authentication);
+        String group = groupOf(principal, tenant);
+        guard.requireTenantAccess(principal, tenant, group);
+
+        boolean belongsToThisTenant =
+                directory.teamsIn(group).stream().anyMatch(team -> team.id().equals(teamId));
+        if (!belongsToThisTenant) {
+            throw new NotFoundException("no such team in tenant '" + tenant + "'");
+        }
+        return HttpResponse.ok(
+                directory.membersOf(teamId).stream().map(UserResponse::from).toList());
+    }
+
     @Post("/teams")
     public HttpResponse<TeamResponse> createTeam(
             Authentication authentication, @PathVariable String tenant, @Body CreateTeamRequest request) {

@@ -202,6 +202,11 @@ export function createApusApiClient(options: ApusApiClientOptions) {
       request<DirectoryCountsResponse>(`/api/tenants/${encodeURIComponent(tenant)}/directory/counts`),
     getTenantDirectory: (tenant: string) =>
       request<TenantDirectoryResponse>(`/api/tenants/${encodeURIComponent(tenant)}/directory`),
+    /** Who is in one team — the assignment, rather than the two lists side by side. */
+    getTeamMembers: (tenant: string, teamId: string) =>
+      request<DirectoryUserResponse[]>(
+        `/api/tenants/${encodeURIComponent(tenant)}/directory/teams/${encodeURIComponent(teamId)}/members`
+      ),
     createTeam: (tenant: string, body: CreateTeamRequest) =>
       request<DirectoryTeamResponse>(`/api/tenants/${encodeURIComponent(tenant)}/directory/teams`, {
         method: 'POST',

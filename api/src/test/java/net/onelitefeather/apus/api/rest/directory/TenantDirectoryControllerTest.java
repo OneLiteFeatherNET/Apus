@@ -153,6 +153,33 @@ class TenantDirectoryControllerTest {
         assertThrows(NotFoundException.class, () -> controller.read(platformAdmin(), "does-not-exist"));
     }
 
+    // --- assignments ------------------------------------------------------------------------------
+
+    @Test
+    void showsWhoIsInATeam() {
+        directory.putTeam(ACME_GROUP, new DirectoryTeam("t1", "Builders", 2));
+        directory.putMember("t1", DirectoryUser.member("u1", "Alice", "alice@acme.example"));
+        directory.putMember("t1", DirectoryUser.member("u2", "Carol", "carol@acme.example"));
+
+        var members = controller.teamMembers(owner("alice", ACME_GROUP), "acme", "t1").body();
+
+        assertEquals(2, members.size());
+        assertEquals("Alice", members.get(0).displayName());
+    }
+
+    @Test
+    void refusesToReadTheMembershipOfAGroupThatIsNotThisTenantsTeam() {
+        // Without checking that the team belongs to this tenant, the group guard would pass --
+        // the tenant's own group is managed -- while the id in the path pointed anywhere in the
+        // directory, which would make this a way to read every group's membership.
+        directory.putTeam(GLOBEX_GROUP, new DirectoryTeam("t-globex", "Their team", 1));
+        directory.putMember("t-globex", DirectoryUser.member("u-dana", "Dana", "dana@globex.example"));
+
+        assertThrows(
+                NotFoundException.class,
+                () -> controller.teamMembers(owner("alice", ACME_GROUP), "acme", "t-globex"));
+    }
+
     // --- creating and inviting -------------------------------------------------------------------
 
     @Test
