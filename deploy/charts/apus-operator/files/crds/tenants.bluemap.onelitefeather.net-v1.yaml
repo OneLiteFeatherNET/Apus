@@ -76,6 +76,10 @@ spec:
                 type: string
               pushTokenSecret:
                 type: string
+              redirectUris:
+                items:
+                  type: string
+                type: array
               storageUsedBytes:
                 type: integer
             type: object

@@ -28,6 +28,7 @@ public class TenantStatus {
     private String objectStoreUser;
     private Long storageUsedBytes;
     private String pushTokenSecret;
+    private List<String> redirectUris = new ArrayList<>();
     private List<Condition> conditions = new ArrayList<>();
 
     public String getNamespace() {
@@ -68,6 +69,27 @@ public class TenantStatus {
 
     public void setPushTokenSecret(String pushTokenSecret) {
         this.pushTokenSecret = pushTokenSecret;
+    }
+
+    /**
+     * The redirect URIs the identity provider must have registered for this tenant's own instance
+     * of the tenant application, or empty when no instance is provisioned.
+     *
+     * <p>Reported here because the operator cannot register them itself -- that needs Microsoft
+     * Graph application permissions on the app registration, a grant nobody has made -- and
+     * because a missing registration fails at sign-in with {@code AADSTS50011} from the broker,
+     * leaving nothing at all in this cluster's logs to find. So {@code kubectl get tenant -o yaml}
+     * answers the question instead, and the console shows the same two lines with a copy action.
+     *
+     * <p>Nothing here is a secret: these are two public URLs derived from the host and the
+     * tenant's name.
+     */
+    public List<String> getRedirectUris() {
+        return redirectUris;
+    }
+
+    public void setRedirectUris(List<String> redirectUris) {
+        this.redirectUris = redirectUris == null ? new ArrayList<>() : redirectUris;
     }
 
     public List<Condition> getConditions() {
