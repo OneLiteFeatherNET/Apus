@@ -1,7 +1,7 @@
 {
-  "name": "@onelitefeather/apus-ui",
+  "name": "@apus/ui-workspace",
   "version": "0.1.0",
-  "description": "Apus web UI -- platform and tenant dashboards over the api module's REST/SSE surface",
+  "description": "Apus web UI workspace -- the tenant application, the management console, and the layers they share",
   "private": true,
   "type": "module",
   "engines": {
@@ -9,36 +9,20 @@
   },
   "packageManager": "pnpm@11.20.0",
   "scripts": {
-    "dev": "nuxt dev",
-    "build": "nuxt build",
-    "generate": "nuxt generate",
-    "preview": "nuxt preview",
-    "postinstall": "nuxt prepare",
+    "dev:app": "pnpm --filter @apus/ui-app dev",
+    "dev:console": "pnpm --filter @apus/ui-console dev",
+    "build": "pnpm -r build",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
-    "typecheck": "vue-tsc --noEmit -p tsconfig.json",
-    "test": "vitest run -c vitest.config.ts && vitest run -c vitest.nuxt.config.ts",
-    "test:server": "nuxt build && vitest run -c vitest.server.config.ts",
-    "test:watch": "vitest -c vitest.config.ts"
-  },
-  "dependencies": {
-    "oidc-client-ts": "3.5.0"
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "test:server": "pnpm -r test:server"
   },
   "devDependencies": {
-    "@nuxt/eslint": "1.17.0",
-    "@nuxt/test-utils": "4.1.0",
-    "@nuxt/ui": "4.10.0",
-    "@types/node": "26.2.0",
-    "@vue/test-utils": "2.4.11",
-    "@vueuse/nuxt": "14.4.0",
+    "@typescript-eslint/parser": "8.67.0",
     "eslint": "10.8.1",
     "eslint-plugin-vuejs-accessibility": "2.5.0",
-    "happy-dom": "20.11.2",
-    "nuxt": "4.5.2",
-    "tailwindcss": "4.3.3",
     "typescript": "6.0.3",
-    "vitest": "4.1.10",
-    "vue": "3.5.41",
-    "vue-tsc": "3.3.9"
+    "vue-eslint-parser": "10.4.1"
   }
 }

@@ -1,0 +1,142 @@
+/*
+ * Apus design tokens.
+ *
+ * Nuxt UI 4's contract, read out of its own source rather than guessed at
+ * (dist/runtime/plugins/colors.js): every `--ui-color-<slot>-<step>` variable is generated *at
+ * runtime* by a Nuxt plugin from `appConfig.ui.colors`, as `var(--color-<name>-<step>)`. So a
+ * custom palette is not installed by defining `--ui-color-neutral-*` here -- the plugin would
+ * overwrite it on the next render. It is installed by defining a plain Tailwind colour ramp
+ * under its own name and pointing an app.config slot at it, which is what happens below.
+ *
+ * One trap worth naming: the plugin special-cases the literal value `neutral`, rewriting it to
+ * `--color-old-neutral-*` (Nuxt UI's own greyscale). Our neutral is therefore called `basalt`.
+ * Naming it `neutral` would silently resolve to Nuxt UI's grey and every shade here would be
+ * dead code.
+ *
+ * The semantic aliases (--ui-bg, --ui-text-muted, --ui-border, ...) are re-pointed per mode by
+ * the .light / .dark classes @nuxtjs/color-mode puts on <html>; we override the handful where
+ * our neutral wants a different step than the default. Everything downstream (`bg-elevated`,
+ * `text-muted`, `border-default`) then works unchanged, in both applications, in both modes.
+ *
+ * Status ramps (success / warning / error / info) are deliberately left as Nuxt UI ships them.
+ * They are well-tuned and accessible, they are identical in both applications by construction,
+ * and a "Failed" badge must look the same wherever an operator meets it -- worth more than
+ * colour-matching them to our accent.
+ */
+
+@theme static {
+  /* -------------------------------------------------------------------------------------------
+   * Basalt -- the shared neutral. A cool ink with a blue cast (hue 255), not a pure grey and not
+   * black: this product frames BlueMap's own bright aerial imagery, and a dead-neutral surround
+   * makes that imagery look dirty.
+   * ----------------------------------------------------------------------------------------- */
+  --color-basalt-50: oklch(0.985 0.002 255);
+  --color-basalt-100: oklch(0.965 0.004 255);
+  --color-basalt-200: oklch(0.925 0.006 255);
+  --color-basalt-300: oklch(0.860 0.008 255);
+  --color-basalt-400: oklch(0.700 0.010 255);
+  --color-basalt-500: oklch(0.570 0.012 255);
+  --color-basalt-600: oklch(0.460 0.014 255);
+  --color-basalt-700: oklch(0.370 0.016 255);
+  --color-basalt-800: oklch(0.260 0.018 255);
+  --color-basalt-900: oklch(0.190 0.020 255);
+  --color-basalt-950: oklch(0.145 0.020 255);
+
+  /* -------------------------------------------------------------------------------------------
+   * Verdigris -- the tenant application. Oxidised copper: Minecraft models copper ageing, and
+   * this product exists because worlds age and renders refresh them. Muted on purpose; a neon
+   * cyan here would be the default dashboard accent and would fight the status colours for
+   * attention on a page whose whole job is showing status.
+   * ----------------------------------------------------------------------------------------- */
+  --color-verdigris-50: oklch(0.965 0.020 168);
+  --color-verdigris-100: oklch(0.930 0.038 168);
+  --color-verdigris-200: oklch(0.870 0.060 168);
+  --color-verdigris-300: oklch(0.800 0.080 168);
+  --color-verdigris-400: oklch(0.730 0.095 168);
+  --color-verdigris-500: oklch(0.665 0.105 168);
+  --color-verdigris-600: oklch(0.585 0.098 168);
+  --color-verdigris-700: oklch(0.485 0.082 168);
+  --color-verdigris-800: oklch(0.390 0.065 168);
+  --color-verdigris-900: oklch(0.310 0.050 168);
+  --color-verdigris-950: oklch(0.220 0.038 168);
+
+  /* -------------------------------------------------------------------------------------------
+   * Lapis -- the management console. A hundred degrees away from verdigris, so an admin with
+   * both applications open never has to read the URL to know which one they are typing into.
+   * ----------------------------------------------------------------------------------------- */
+  --color-lapis-50: oklch(0.965 0.018 268);
+  --color-lapis-100: oklch(0.930 0.036 268);
+  --color-lapis-200: oklch(0.875 0.065 268);
+  --color-lapis-300: oklch(0.800 0.098 268);
+  --color-lapis-400: oklch(0.715 0.135 268);
+  --color-lapis-500: oklch(0.635 0.155 268);
+  --color-lapis-600: oklch(0.555 0.160 268);
+  --color-lapis-700: oklch(0.465 0.140 268);
+  --color-lapis-800: oklch(0.375 0.110 268);
+  --color-lapis-900: oklch(0.300 0.085 268);
+  --color-lapis-950: oklch(0.215 0.060 268);
+
+  /* Squares are this design's grammar. Nuxt UI's own default is already 0.25rem; restated here
+   * so a dependency bump cannot quietly round our corners. */
+  --ui-radius: 0.25rem;
+  --ui-container: 78rem;
+}
+
+/* ---------------------------------------------------------------------------------------------
+ * Apus-owned tokens. Prefixed, so nothing here can collide with a Nuxt UI variable that gains
+ * the same name in a later release.
+ * ------------------------------------------------------------------------------------------- */
+:root {
+  --apus-cell: 0.5rem;
+  --apus-cell-gap: 2px;
+  --apus-rail-stage: 1.25rem;
+  --apus-eyebrow-tracking: 0.14em;
+  --apus-font-mono: ui-monospace, "SF Mono", "Cascadia Mono", "Roboto Mono", Menlo, Consolas, monospace;
+}
+
+/* Dark mode wants one more step of separation between the page and a card than Nuxt UI's default
+ * gives (it points bg-muted and bg-elevated at the same neutral-800). Our surfaces stack three
+ * deep -- page, card, and the cell meter's own track -- and two of the three would otherwise be
+ * indistinguishable. */
+.dark {
+  --ui-bg: var(--ui-color-neutral-950);
+  --ui-bg-muted: var(--ui-color-neutral-900);
+  --ui-bg-elevated: var(--ui-color-neutral-800);
+  --ui-border: var(--ui-color-neutral-800);
+  --ui-border-muted: var(--ui-color-neutral-900);
+}
+
+@layer base {
+  /* One rule, applied everywhere: machine values are monospace, prose is not. Identifiers,
+   * phases, percentages, byte counts, bucket paths, versions and timestamps are all machine
+   * values. Tabular figures so a percentage counting up does not shift the layout under the
+   * reader's eye. */
+  .apus-value {
+    font-family: var(--apus-font-mono);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+  }
+
+  /* A mono eyebrow naming a resource kind -- SOURCE, MAP, RENDER, HOSTING. That is the CRD
+   * taxonomy, so the label encodes something true rather than decorating a heading. */
+  .apus-eyebrow {
+    font-family: var(--apus-font-mono);
+    font-size: 0.6875rem;
+    text-transform: uppercase;
+    letter-spacing: var(--apus-eyebrow-tracking);
+  }
+
+  /* Visible focus, defined once. Components must not restyle it away. */
+  :focus-visible {
+    outline: 2px solid var(--ui-color-primary-500);
+    outline-offset: 2px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}

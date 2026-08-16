@@ -1,21 +1,30 @@
 The apus-platform chart (REST API and dashboard) is installed.
 
-1. Check that both workloads came up:
+1. Check that the workloads came up:
 
    kubectl get deployment {{ include "apus-platform.api.fullname" . }} -n {{ .Release.Namespace }}
    kubectl get deployment {{ include "apus-platform.ui.fullname" . }} -n {{ .Release.Namespace }}
+{{- if .Values.console.enabled }}
+   kubectl get deployment {{ include "apus-platform.console.fullname" . }} -n {{ .Release.Namespace }}
+{{- end }}
 
 {{- if .Values.ingress.enabled }}
 
 2. The dashboard and API are reachable through the ingress:
 
    http{{ if .Values.ingress.tls.enabled }}s{{ end }}://{{ .Values.ingress.host }}/       (dashboard)
+{{- if .Values.console.enabled }}
+   http{{ if .Values.ingress.tls.enabled }}s{{ end }}://{{ .Values.ingress.host }}/console/  (management console)
+{{- end }}
    http{{ if .Values.ingress.tls.enabled }}s{{ end }}://{{ .Values.ingress.host }}/api    (API)
 {{- else }}
 
 2. ingress.enabled is false -- reach the workloads from inside the cluster only:
 
    kubectl port-forward svc/{{ include "apus-platform.ui.fullname" . }} 8080:80 -n {{ .Release.Namespace }}
+{{- if .Values.console.enabled }}
+   kubectl port-forward svc/{{ include "apus-platform.console.fullname" . }} 8082:80 -n {{ .Release.Namespace }}
+{{- end }}
    kubectl port-forward svc/{{ include "apus-platform.api.fullname" . }} 8081:80 -n {{ .Release.Namespace }}
 {{- end }}
 
@@ -38,4 +47,15 @@ The apus-platform chart (REST API and dashboard) is installed.
    API does not export Prometheus metrics yet, so there is nothing to scrape until Phase 8
    Task 5 ships. Once it does, /prometheus is Basic-Auth protected; a ServiceMonitor turned
    on before that endpoint carries credentials will fail to scrape.
+{{- end }}
+
+{{- if .Values.console.enabled }}
+
+6. The management console shares the dashboard's OIDC client -- it is a second application on
+   the same origin, not a second registration. Two redirect URIs must exist at the broker in
+   addition to the dashboard's own, or signing in to the console fails with an invalid
+   redirect_uri and nothing else to go on:
+
+   {{ if .Values.ingress.enabled }}http{{ if .Values.ingress.tls.enabled }}s{{ end }}://{{ .Values.ingress.host }}{{ else }}<the console's own origin>{{ end }}/console/auth/callback
+   {{ if .Values.ingress.enabled }}http{{ if .Values.ingress.tls.enabled }}s{{ end }}://{{ .Values.ingress.host }}{{ else }}<the console's own origin>{{ end }}/console/auth/silent-renew
 {{- end }}

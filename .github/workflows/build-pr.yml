@@ -49,12 +49,16 @@ jobs:
           node-version-file: ui/.nvmrc
           cache: pnpm
           cache-dependency-path: ui/pnpm-lock.yaml
+      # ui/ is a pnpm workspace (two apps over two layers, see ui/README.md): one install at
+      # the root, and the scripts below fan out with `pnpm -r`. lint is the exception -- one
+      # `eslint .` at the root covers both apps *and* the layers, which belong to no app's
+      # directory tree and would otherwise go unlinted.
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test
-      # Builds, then tests .output/server/index.mjs -- the container's CMD. Not part of
-      # `pnpm test` because it needs that build.
+      # Builds each app, then tests its .output/server/index.mjs -- the containers' CMD. Not
+      # part of `pnpm test` because it needs those builds.
       - run: pnpm test:server
 
   helm:

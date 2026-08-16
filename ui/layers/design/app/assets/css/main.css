@@ -1,0 +1,5 @@
+@import "tailwindcss";
+@import "@nuxt/ui";
+/* After @nuxt/ui, not before: our @theme block overrides its ramp defaults, and the later
+   declaration wins. */
+@import "./tokens.css";

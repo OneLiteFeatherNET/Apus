@@ -1,0 +1,84 @@
+{{- if .Values.console.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "apus-platform.console.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "apus-platform.componentLabels" (dict "ctx" . "component" "console") | nindent 4 }}
+spec:
+  replicas: {{ .Values.console.replicaCount }}
+  strategy:
+    # Stateless: no local state to lose by running old and new pods side by side.
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      {{- include "apus-platform.componentSelectorLabels" (dict "ctx" . "component" "console") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "apus-platform.componentLabels" (dict "ctx" . "component" "console") | nindent 8 }}
+        {{- with .Values.console.podLabels }}{{- toYaml . | nindent 8 }}{{- end }}
+      {{- with .Values.console.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.console.podSecurityContext | nindent 8 }}
+      containers:
+        - name: console
+          image: {{ include "apus-platform.image" (dict "image" .Values.console.image "ctx" .) }}
+          imagePullPolicy: {{ .Values.console.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.console.securityContext | nindent 12 }}
+          ports:
+            # Nitro's own default is 3000; the image pins PORT=8080 (see ui/Dockerfile.console).
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          {{- with .Values.console.env }}
+          env:
+            {{- range $name, $value := . }}
+            - name: {{ $name }}
+              value: {{ $value | quote }}
+            {{- end }}
+          {{- end }}
+          {{- with .Values.console.envFrom }}
+          envFrom:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          readinessProbe:
+            # /console/, not /: this SPA is served under app.baseURL, so the bare root answers
+            # 302 and the pod would flap between ready and not depending on how the probe
+            # treats a redirect. The prefix is where the shell actually is.
+            httpGet:
+              path: /console/
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /console/
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            {{- toYaml .Values.console.resources | nindent 12 }}
+      {{- with .Values.console.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.console.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.console.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

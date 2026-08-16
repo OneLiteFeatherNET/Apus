@@ -1,3 +1,8 @@
+packages:
+  - 'apps/*'
+  - 'layers/*'
+
+# Unchanged from the single-package layout: these three need their install scripts to run.
 allowBuilds:
   esbuild: true
   unrs-resolver: true

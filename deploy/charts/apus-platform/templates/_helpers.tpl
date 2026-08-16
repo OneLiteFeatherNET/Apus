@@ -20,8 +20,8 @@
 {{- end }}
 
 {{/*
-This chart deploys two workloads (api, ui) from one release, so a plain fullname would
-collide between them. Every per-component template goes through this helper instead --
+This chart deploys three workloads (api, ui, console) from one release, so a plain fullname
+would collide between them. Every per-component template goes through this helper instead --
 usage: {{ include "apus-platform.componentFullname" (dict "ctx" . "component" "api") }}
 */}}
 {{- define "apus-platform.componentFullname" -}}
@@ -35,6 +35,10 @@ usage: {{ include "apus-platform.componentFullname" (dict "ctx" . "component" "a
 
 {{- define "apus-platform.ui.fullname" -}}
 {{- include "apus-platform.componentFullname" (dict "ctx" . "component" "ui") }}
+{{- end }}
+
+{{- define "apus-platform.console.fullname" -}}
+{{- include "apus-platform.componentFullname" (dict "ctx" . "component" "console") }}
 {{- end }}
 
 {{/*

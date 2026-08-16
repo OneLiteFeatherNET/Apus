@@ -7,15 +7,28 @@ build/
 *.iml
 runner/vendor/
 
-# ui/ (Nuxt) -- not a Gradle module, see ui/README.md. Node dependencies and build/test
-# output never belong in the repository.
+# ui/ (Nuxt workspace) -- not a Gradle module, see ui/README.md. Node dependencies and
+# build/test output never belong in the repository. The patterns are unanchored on purpose:
+# each workspace package (apps/*, layers/*) has its own node_modules, .nuxt and .output, none
+# of which an `ui/node_modules/`-style anchored pattern would match.
+ui/**/node_modules/
+ui/**/.nuxt/
+ui/**/.output/
 ui/node_modules/
 ui/.nuxt/
 ui/.output/
 # No trailing slash: nuxt writes dist as a symlink, which `ui/dist/` would not match.
 ui/dist
+ui/**/dist
 ui/coverage/
+ui/**/coverage/
 ui/.env
-# Local marker @nuxt/test-utils writes recording which version last ran -- see
+ui/**/.env
+# Local marker @nuxt/test-utils writes recording which version last ran -- see each app's
 # vitest.nuxt.config.ts/tests/nuxt/ (added for the layout render regression test).
 ui/.nuxtrc
+ui/**/.nuxtrc
+
+# Playwright MCP writes page snapshots and console logs here while a design is being
+# checked in a browser. Scratch output, never part of the repository.
+.playwright-mcp/

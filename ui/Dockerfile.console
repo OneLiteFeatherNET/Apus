@@ -1,0 +1,47 @@
+# syntax=docker/dockerfile:1
+#
+# The Apus management console (image apus/console). Sibling of Dockerfile.app; the two differ
+# only in which workspace package they build. See ui/README.md, "Serving the built SPA".
+#
+# Build context is the repository root, matching what release-please.yml passes.
+
+########################################
+# Stage 1: build the SPA
+########################################
+# Version pinned to ui/.nvmrc (24); keep both in sync with the runtime stage below.
+FROM node:24-bookworm-slim AS build
+
+RUN corepack enable
+
+WORKDIR /src
+COPY ui/package.json ui/pnpm-lock.yaml ui/pnpm-workspace.yaml ./
+COPY ui/apps/console/package.json ./apps/console/
+COPY ui/layers/core/package.json ./layers/core/
+COPY ui/layers/design/package.json ./layers/design/
+RUN pnpm install --frozen-lockfile --filter @apus/ui-console...
+
+COPY ui/ ./
+RUN pnpm --filter @apus/ui-console build
+
+########################################
+# Stage 2: serve it
+########################################
+FROM gcr.io/distroless/nodejs24-debian12:nonroot
+
+WORKDIR /app
+COPY --from=build /src/apps/console/.output ./.output
+
+# Already the default for the :nonroot tag; repeated because the chart's runAsUser must match.
+USER 65532:65532
+
+# This app serves under app.baseURL '/console/'; the bare root answers 302. The chart's probes
+# therefore point at /console/, not / -- see console-deployment.yaml.
+ENV PORT=8080
+ENV HOST=0.0.0.0
+# Same cap as the tenant app; kept in step with console.resources in the apus-platform chart.
+ENV NODE_OPTIONS=--max-old-space-size=64
+
+EXPOSE 8080
+
+# The distroless entrypoint is already ["/nodejs/bin/node"].
+CMD ["/app/.output/server/index.mjs"]

@@ -37,6 +37,19 @@ spec:
                 name: {{ include "apus-platform.api.fullname" . }}
                 port:
                   name: http
+          {{- if .Values.console.enabled }}
+          # Between /api and /, for the same ordering reason: the catch-all below would
+          # otherwise swallow the console. No rewrite annotation -- the console owns the prefix
+          # itself via app.baseURL (ui/apps/console/nuxt.config.ts), which keeps this rule
+          # portable across ingress controllers that spell rewrites differently.
+          - path: /console
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "apus-platform.console.fullname" . }}
+                port:
+                  name: http
+          {{- end }}
           - path: /
             pathType: Prefix
             backend:
