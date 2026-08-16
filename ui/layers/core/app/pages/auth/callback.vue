@@ -20,10 +20,13 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="flex min-h-screen items-center justify-center p-6">
-    <p v-if="error" role="alert" class="text-red-600 dark:text-red-400">
+  <!-- `bg-default`/`text-error` rather than a palette colour: this page belongs to layers/core,
+       but it is rendered by applications that carry the design system, and a hardcoded red here
+       would be the one thing on screen that ignores the colour mode. -->
+  <div class="bg-default text-default flex min-h-screen items-center justify-center p-6">
+    <p v-if="error" role="alert" class="text-error text-sm">
       {{ error }}
     </p>
-    <p v-else>Signing you in…</p>
+    <p v-else class="text-muted text-sm">Signing you in…</p>
   </div>
 </template>

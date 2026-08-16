@@ -1,7 +1,12 @@
 # Apus UI — Split and Redesign: Design
 
 **As of:** 2026-08-15
-**Status:** Draft for approval
+**Status:** Built. Part A (workspace and delivery) and Part B (design system and redesign) are
+both implemented — see `docs/superpowers/plans/2026-08-15-ui-split-part-a-delivery.md` and
+`…-part-b-design.md`. Two things below were revised during implementation and the text now
+reflects what was built: explicit cross-layer imports need the `#core`/`#design` aliases (`~`
+resolves against the consuming app), and a custom palette is installed through a named Tailwind
+ramp plus an `app.config.ts` slot rather than by defining `--ui-color-*` directly.
 
 Today `ui/` is one Nuxt 4 SPA that carries two products at once: a tenant-facing application
 (`/tenant/*`) and a platform management console (`/platform/*`). This design splits them into

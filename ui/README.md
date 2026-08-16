@@ -61,6 +61,53 @@ The chart's `NOTES.txt` prints these on install. The construction lives in
 origin alone would return an admin signing in to the console into the *tenant app*, silently and
 with a working session.
 
+## The design system
+
+Tokens and components live in `layers/design`; both applications consume the same set and differ
+only in accent and density. Four rules hold it together, and breaking any of them is how it
+starts drifting back into a generic dashboard.
+
+**1. Tokens are the only source of colour.** No hex literal, no Tailwind palette colour
+(`text-blue-500`) in an app or a component. Everything resolves through the semantic tokens
+(`bg-default`, `bg-muted`, `bg-elevated`, `text-muted`, `border-default`, `text-primary`) that
+`app/assets/css/tokens.css` sets up.
+
+Installing a palette there is not a matter of defining `--ui-color-*`: Nuxt UI generates those at
+runtime from `appConfig.ui.colors` (see its `dist/runtime/plugins/colors.js`) and would overwrite
+anything written by hand. The supported path is a named Tailwind ramp plus an `app.config.ts`
+slot. **The neutral ramp is called `basalt`, not `neutral`** — that literal value is special-cased
+by the plugin to Nuxt UI's own greyscale, and a ramp named `neutral` would silently never be used.
+
+**2. No continuous progress bars, anywhere.** Every proportion — render progress, storage quota —
+is drawn as discrete cells by `CellMeter`. World data is a grid of regions and chunks and BlueMap
+renders it as a tile pyramid, so progress in this product is squares completing. The cells do not
+correspond to real tiles and must never be made to look as though they do: the API reports a
+percentage and says nothing about which tiles are done.
+
+`cellsFilled` and `displayPercent` (`layers/core/app/utils/pipeline.ts`) special-case both ends,
+and the reason is worth keeping: 99.6% must not fill the last cell *or* print "100%", because a
+full meter beside a running render sends someone looking for a map that does not exist yet.
+
+**3. Prose is humanist, every machine value is monospace.** Identifiers, phases, percentages, byte
+counts, bucket paths, versions and timestamps get `.apus-value`; sentences do not. Section labels
+are `.apus-eyebrow`, and they name a resource kind — `SOURCE`, `MAP`, `RENDER`, `HOSTING` — which
+is the CRD taxonomy rather than decoration. There are **no web fonts**: the images are distroless
+and the pages make no external requests, so a downloaded typeface would break both.
+
+**4. `layers/design` knows nothing about Apus's domain.** It imports exactly two things from
+`layers/core` — `PipelineStage` and the cell arithmetic — and nothing else. A design change should
+be reviewable without reading domain code.
+
+Accents: **verdigris** (hue 168) for the tenant app, **lapis** (hue 268) for the console. Minecraft
+models copper oxidising, and this product exists because worlds age and renders refresh them; the
+hundred degrees between them is what makes the two applications unmistakable at a glance. Status
+colours (success/warning/error/info) are Nuxt UI's own and are identical in both — a "Failed"
+badge must look the same wherever an operator meets it, which matters more than matching them to
+an accent.
+
+Dark and light are both first-class; `@nuxtjs/color-mode` follows the system and falls back to
+dark only when the visitor has expressed no preference.
+
 ### Why the console is same-origin
 
 The `api` module configures no CORS: `api/src/main/resources/application.yml` sets up JWT
@@ -414,14 +461,31 @@ Account and Tenant, plus one `isPlatformAdmin()`-gated anchor to `/console/` (a 
 `<ULink to>` — this router knows nothing about the other application's routes).
 `apps/console/app/components/layout/ConsoleHeader.vue` is the mirror image, with a link back.
 
-`apps/app/app/pages/index.vue` shows the signed-in user's subject, email, tenant and roles;
-`apps/console/app/pages/index.vue` is the platform view. The world-centric information
-architecture and the redesign of both are Part B of the split
-(`docs/superpowers/specs/2026-08-15-ui-split-and-redesign-design.md`, §4–§6), not yet built.
+The tenant app is organised around **worlds**, not around the API's resources. A world is a
+`BlueMapMap` joined with the source feeding it, the renders that produced it and the hosting that
+serves it — a join `buildWorlds` (`layers/core/app/utils/worlds.ts`) does client-side over four
+existing list calls, because every one of those relationships is already carried in the response
+bodies. `/` lists them with their end-to-end state; `/worlds/[name]` shows one whole.
+
+```text
+/                    Worlds -- the entry point
+/worlds/[name]       One world: pipeline, public URL, live render, history, configuration
+/sources             Sources, and /sources/new -- the guided four-step connect flow
+/renders             History across all worlds, and /renders/[id] -- live progress and log
+/hosting             Published addresses
+/account             The signed-in user and their roles
+```
+
+The console has `/`, `/tenants`, `/tenants/new`, `/tenants/[name]` and `/renders`.
+
+**Screens must not offer what the API cannot do.** There is no endpoint to create a map or a
+hosting — they are declared through GitOps — so the empty states say what happens next and who
+does it, rather than showing a button that would have to fail. Adding one later means adding the
+endpoint first.
 
 ## Tests
 
-`pnpm test` fans out across the workspace: `layers/core`'s plain-Vitest unit specs (112 tests)
+`pnpm test` fans out across the workspace: `layers/core`'s plain-Vitest unit specs (135 tests)
 plus each app's Nuxt-context component tests. Covered, per the "what carries logic" standard:
 
 - `apiClient.spec.ts` — request/response wiring (auth header, JSON body, URL-encoding, 204
@@ -440,6 +504,13 @@ plus each app's Nuxt-context component tests. Covered, per the "what carries log
 - `oidc.spec.ts` — `buildOidcRedirectUris` for both applications' base paths, plus the
   slash-normalisation cases (missing trailing slash, empty base, trailing slash on the origin,
   a nested prefix).
+- `pipeline.spec.ts` — the cell arithmetic, both ends included: 99.6% must leave a cell empty and
+  print 99%, 0.4% must light one and print 1%, and a one-cell meter must still tell finished from
+  started.
+- `worlds.spec.ts` — the world join: the full chain, a `sourceRef` naming something the caller
+  cannot see, a map with no source at all, renders belonging to no map, a render with no
+  `startTime` to sort by, a hosting that lists the map but is not serving, and the orderings that
+  keep the list from reshuffling between polls.
 
 Some things do get a real Nuxt context, because nothing else catches them. Each app has a
 `tests/nuxt/defaultLayout.nuxt.spec.ts`: a component referenced under its bare filename rather
