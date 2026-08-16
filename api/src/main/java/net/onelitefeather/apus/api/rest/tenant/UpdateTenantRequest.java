@@ -31,6 +31,12 @@ import java.util.List;
  * quota does not have to first re-read and resend the current allowed domains. There is
  * deliberately no way to change {@code displayName} here -- out of this endpoint's stated scope
  * (design spec §10.3: quota and domains only).
+ *
+ * <p>{@code policy} follows the same rule at the field level -- omitted leaves the current entries
+ * untouched -- but a <b>present list replaces all of them</b>. Entry-level patching is
+ * deliberately not offered: with a free-form key space a merge would need a delete sentinel, and
+ * "send the list you want to hold" is both easier to reason about and easier to render a form for.
  */
 @Serdeable
-public record UpdateTenantRequest(String storageQuota, Long maxObjects, List<String> allowedHostingDomains) {}
+public record UpdateTenantRequest(
+        String storageQuota, Long maxObjects, List<String> allowedHostingDomains, List<PolicyEntryRequest> policy) {}

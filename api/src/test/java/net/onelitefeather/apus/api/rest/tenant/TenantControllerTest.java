@@ -102,7 +102,7 @@ class TenantControllerTest {
         tenant.getSpec().getStorage().setQuota("100Gi");
         repository.put(tenant);
 
-        var request = new UpdateTenantRequest("500Gi", 42_000L, List.of("*.acme.example.net"));
+        var request = new UpdateTenantRequest("500Gi", 42_000L, List.of("*.acme.example.net"), null);
         var response = controller.update(platformAdmin(), "acme", request);
 
         assertEquals(200, response.getStatus().getCode());
@@ -121,7 +121,7 @@ class TenantControllerTest {
         tenant.getSpec().getHosting().setAllowedDomains(List.of("maps.acme.example.net"));
         repository.put(tenant);
 
-        var request = new UpdateTenantRequest(null, null, null);
+        var request = new UpdateTenantRequest(null, null, null, null);
         var response = controller.update(platformAdmin(), "acme", request);
 
         assertEquals("100Gi", response.body().storage().quota());
@@ -134,13 +134,13 @@ class TenantControllerTest {
         tenant.getMetadata().setName("acme");
         repository.put(tenant);
 
-        var request = new UpdateTenantRequest("500Gi", null, null);
+        var request = new UpdateTenantRequest("500Gi", null, null, null);
         assertThrows(ForbiddenException.class, () -> controller.update(tenantOwner(), "acme", request));
     }
 
     @Test
     void updateRejectsAnUnknownTenant() {
-        var request = new UpdateTenantRequest("500Gi", null, null);
+        var request = new UpdateTenantRequest("500Gi", null, null, null);
         assertThrows(NotFoundException.class, () -> controller.update(platformAdmin(), "does-not-exist", request));
     }
 }
