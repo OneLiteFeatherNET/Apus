@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/OneLiteFeatherNET/Apus/compare/apus-v0.5.0...apus-v0.6.0) (2026-08-16)
+
+
+### Features
+
+* **ui:** split the management console from the tenant app and redesign both ([#51](https://github.com/OneLiteFeatherNET/Apus/issues/51)) ([a071d1a](https://github.com/OneLiteFeatherNET/Apus/commit/a071d1adf2c422410c760bff4dd21e6c53f796d2))
+
 ## [0.5.0](https://github.com/OneLiteFeatherNET/Apus/compare/apus-v0.4.1...apus-v0.5.0) (2026-08-15)
 
 
