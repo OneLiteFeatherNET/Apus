@@ -13,6 +13,7 @@
  * mind on step three.
  */
 import { ApusApiError } from '#core/utils/apiErrors'
+import { parseDurationSeconds } from '#core/utils/policy'
 import type { CreateWorldSourceRequest } from '#core/utils/apiTypes'
 
 type SourceType = CreateWorldSourceRequest['type']
@@ -23,6 +24,24 @@ const TYPES: { value: SourceType, label: string, when: string }[] = [
   { value: 'push', label: 'Push from the server', when: 'The Apus plugin runs on your Paper server and pushes worlds as they are saved.' },
   { value: 'upload', label: 'Manual upload', when: 'You will upload an archive yourself whenever the world should be updated.' }
 ]
+
+// The platform may restrict what this tenant is allowed to choose. Offering a type it cannot
+// create, only to refuse it three steps later, is exactly the flow the policy exists to avoid.
+const { sourceTypes, pollMinimumSeconds, keepVersionsMaximum } = useTenantPolicy()
+
+const offeredTypes = computed(() =>
+  sourceTypes.value === null ? TYPES : TYPES.filter(entry => sourceTypes.value!.includes(entry.value))
+)
+
+/** Seconds back into the spelling the field expects, so the message names a value you can type. */
+function formatSeconds(total: number): string {
+  const hours = Math.floor(total / 3600)
+  const minutes = Math.floor((total % 3600) / 60)
+  const seconds = total % 60
+  return [hours ? `${hours}h` : '', minutes ? `${minutes}m` : '', seconds ? `${seconds}s` : '']
+    .filter(part => part !== '')
+    .join('') || '0s'
+}
 
 const step = ref(1)
 const submitting = ref(false)
@@ -47,6 +66,9 @@ const selectedType = computed(() => TYPES.find(entry => entry.value === type.val
 const NAME_PATTERN = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/
 
 function validateStep(): string | null {
+  if (step.value === 1 && sourceTypes.value !== null && !sourceTypes.value.includes(type.value)) {
+    return 'This source type is not available for your tenant.'
+  }
   if (step.value === 2) {
     if (!name.value) return 'Give the source a name.'
     if (!NAME_PATTERN.test(name.value)) {
@@ -64,6 +86,19 @@ function validateStep(): string | null {
   if (step.value === 3) {
     if (worlds.value.some(world => !world.name)) return 'Every world needs a name.'
     if (keepVersions.value < 1) return 'Keep at least one snapshot.'
+    // Checked here rather than only at submit so the reader learns the rule while still on the
+    // field it applies to.
+    const minimum = pollMinimumSeconds.value
+    if (minimum !== null && poll.value) {
+      const requested = parseDurationSeconds(poll.value)
+      if (requested !== null && requested < minimum) {
+        return `Your tenant's shortest permitted interval is ${formatSeconds(minimum)}.`
+      }
+    }
+    const maximum = keepVersionsMaximum.value
+    if (maximum !== null && keepVersions.value > maximum) {
+      return `Your tenant may keep at most ${maximum} snapshots.`
+    }
   }
   return null
 }
@@ -168,8 +203,12 @@ const steps = ['Type', 'Connection', 'Worlds', 'Review']
       <legend class="text-highlighted mb-2 text-base font-medium">
         Where do your world files come from?
       </legend>
+      <p v-if="sourceTypes !== null" class="text-muted text-sm">
+        Your platform limits which source types this tenant may use.
+      </p>
+
       <label
-        v-for="entry in TYPES"
+        v-for="entry in offeredTypes"
         :key="entry.value"
         class="border-default hover:bg-muted flex cursor-pointer items-start gap-3 border p-4"
         :class="type === entry.value ? 'border-primary' : ''"

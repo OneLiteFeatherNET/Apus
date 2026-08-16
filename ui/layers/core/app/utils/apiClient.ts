@@ -1,6 +1,8 @@
 import { ApusApiError, defaultMessageForStatus } from './apiErrors'
 import { parseSseStream } from './sse'
 import type {
+  PolicyEntryResponse,
+  PolicyKeyResponse,
   BlueMapHostingResponse,
   BlueMapMapResponse,
   BlueMapRenderResponse,
@@ -144,6 +146,10 @@ export function createApusApiClient(options: ApusApiClientOptions) {
   return {
     // -- Tenants: platform-admin only (design spec §10.3, §11.1) -------------------------------
     listTenants: () => request<TenantResponse[]>('/api/tenants'),
+    /** The catalogue of options the API can actually enforce -- see PolicyKeyController. */
+    listPolicyKeys: () => request<PolicyKeyResponse[]>('/api/policy-keys'),
+    /** The caller's own tenant's options. Any tenant role; the tenant comes from the token. */
+    getTenantPolicy: () => request<PolicyEntryResponse[]>('/api/tenant/policy'),
     createTenant: (body: CreateTenantRequest) =>
       request<TenantResponse>('/api/tenants', { method: 'POST', body: JSON.stringify(body) }),
     /** Changes an existing tenant's quota and/or allowed hosting domains -- `displayName` is

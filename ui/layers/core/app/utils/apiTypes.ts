@@ -23,12 +23,46 @@ export interface ConditionResponse {
 // Tenants -- GET/POST /api/tenants, platform-admin only (design spec §10.3, §11.1)
 // ---------------------------------------------------------------------------------------------
 
+/**
+ * api/src/main/java/net/onelitefeather/apus/api/rest/tenant/PolicyEntryResponse.java
+ *
+ * `enforced` is computed by the API from its own registry on every read, not stored: whether a
+ * key bites is a property of the api module's code. An entry with `enforced: false` is recorded
+ * and displayed and changes nothing, and the console has to say so -- see PolicyEditor.vue.
+ */
+export interface PolicyEntryResponse {
+  key: string
+  type: PolicyValueType
+  value: string
+  locked: boolean
+  enforced: boolean
+}
+
+/** The five types a policy value may declare -- api/.../policy/PolicyType.java. */
+export type PolicyValueType = 'string' | 'integer' | 'boolean' | 'duration' | 'stringList'
+
+/** api/src/main/java/net/onelitefeather/apus/api/rest/tenant/PolicyEntryRequest.java */
+export interface PolicyEntryRequest {
+  key: string
+  type: PolicyValueType
+  value: string
+  locked: boolean
+}
+
+/** api/src/main/java/net/onelitefeather/apus/api/rest/tenant/PolicyKeyResponse.java */
+export interface PolicyKeyResponse {
+  key: string
+  type: PolicyValueType
+  description: string
+}
+
 /** api/src/main/java/net/onelitefeather/apus/api/rest/tenant/TenantResponse.java */
 export interface TenantResponse {
   name: string
   displayName: string
   storage: TenantStorageResponse
   allowedHostingDomains: string[]
+  policy: PolicyEntryResponse[]
   namespace: string
   objectStoreUser: string
   storageUsedBytes: number | null
@@ -60,6 +94,8 @@ export interface UpdateTenantRequest {
   storageQuota?: string | null
   maxObjects?: number | null
   allowedHostingDomains?: string[] | null
+  /** A present list replaces every entry; omitting it leaves them untouched. */
+  policy?: PolicyEntryRequest[] | null
 }
 
 // ---------------------------------------------------------------------------------------------

@@ -11,6 +11,7 @@ import { ApusApiError } from '#core/utils/apiErrors'
 import { parseQuotaBytes } from '#core/utils/storageUsage'
 import { validateAllowedDomains } from '#core/utils/domainValidation'
 import type { MetaItem } from '#design/components/MetaList.vue'
+import type { PolicyEntryResponse, PolicyKeyResponse } from '#core/utils/apiTypes'
 
 const route = useRoute()
 const name = computed(() => String(route.params.name ?? ''))
@@ -21,7 +22,20 @@ const tenant = computed(() => tenants.value.find(candidate => candidate.name ===
 const storageQuota = ref('')
 const maxObjects = ref<number | null>(null)
 const domainsText = ref('')
+const policyEntries = ref<PolicyEntryResponse[]>([])
+const knownKeys = ref<PolicyKeyResponse[]>([])
 const dirty = ref(false)
+
+// The catalogue is the same for every tenant and never changes within a session, so it is read
+// once. Its failure is not the page's failure: without it the editor loses its descriptions and
+// type hints, which is a smaller loss than refusing to render the options at all.
+onMounted(async () => {
+  try {
+    knownKeys.value = await api.listPolicyKeys()
+  } catch {
+    knownKeys.value = []
+  }
+})
 
 // Seed the form once the tenant arrives, but never overwrite edits in progress -- a refresh
 // landing mid-typing that silently reverted someone's input would be maddening.
@@ -30,6 +44,7 @@ watch(tenant, current => {
   storageQuota.value = current.storage.quota ?? ''
   maxObjects.value = current.storage.maxObjects
   domainsText.value = current.allowedHostingDomains.join('\n')
+  policyEntries.value = current.policy.map(entry => ({ ...entry }))
 }, { immediate: true })
 
 const domains = computed(() =>
@@ -59,7 +74,14 @@ async function save(): Promise<void> {
     await api.updateTenant(name.value, {
       storageQuota: storageQuota.value.trim() || null,
       maxObjects: maxObjects.value,
-      allowedHostingDomains: domains.value
+      allowedHostingDomains: domains.value,
+      // A present list replaces every entry, which is exactly what this form holds.
+      policy: policyEntries.value.map(entry => ({
+        key: entry.key,
+        type: entry.type,
+        value: entry.value,
+        locked: entry.locked
+      }))
     })
     dirty.value = false
     saved.value = true
@@ -170,6 +192,8 @@ const metadata = computed<MetaItem[]>(() => {
             </UButton>
           </div>
         </section>
+
+        <PlatformPolicyEditor v-model="policyEntries" :known-keys="knownKeys" @update:model-value="dirty = true" />
 
         <section class="flex flex-col gap-3">
           <SectionLabel as="h2">
