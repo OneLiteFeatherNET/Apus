@@ -17,6 +17,7 @@
  */
 package net.onelitefeather.apus.api.security;
 
+import io.micronaut.core.annotation.Order;
 import io.micronaut.http.HttpRequest;
 import io.micronaut.http.annotation.RequestFilter;
 import io.micronaut.http.annotation.ServerFilter;
@@ -52,7 +53,20 @@ import org.slf4j.LoggerFactory;
  * <p>Every impersonated request is logged with the real subject before it is served.
  */
 @ServerFilter("/api/**")
+// Explicitly after Micronaut's own security filter, because this reads the Authentication that
+// filter puts on the request. Left to the default ordering it could run first, find no
+// authentication, and refuse every impersonated request -- a failure that would look like a
+// permission problem and send somebody looking at roles.
+//
+// A literal because an annotation value must be a constant expression and
+// ServerFilterPhase.SECURITY.after() is a method call. ImpersonationFilterOrderTest asserts the
+// two agree, so a Micronaut release that renumbers the phases fails a test rather than silently
+// reordering this filter.
+@Order(ImpersonationFilter.ORDER)
 public class ImpersonationFilter {
+
+    /** {@code ServerFilterPhase.SECURITY.after()}; see the {@link Order} annotation above. */
+    public static final int ORDER = 39250;
 
     private static final Logger LOGGER = LoggerFactory.getLogger(ImpersonationFilter.class);
 
