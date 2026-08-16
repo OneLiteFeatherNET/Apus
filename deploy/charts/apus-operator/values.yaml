@@ -39,6 +39,43 @@ bundles:
   s3Region: us-east-1
   credentialsSecret: apus-bundle-credentials
 
+# One instance of the tenant application per tenant, served at https://<host>/t/<tenant>/.
+# The operator creates a Deployment, a Service and an Ingress in each tenant's own namespace
+# -- the Ingress has to live there, since an Ingress may only reference a Service in its own
+# namespace.
+#
+# Off by default: an empty host disables the feature entirely. An instance with no host would
+# have nothing to serve it, and a Deployment nobody can reach costs a pod per tenant.
+#
+# One image serves every tenant. NUXT_APP_BASE_URL moves the served prefix at runtime, so a
+# tenant instance differs from the platform chart's own `ui` in exactly one variable.
+#
+# Registering the two redirect URIs each instance needs is a manual step -- the operator has no
+# permission on the app registration. They are reported on Tenant.status.redirectUris; see the
+# notes printed after install.
+tenantUi:
+  # e.g. apus.example.dev -- the same host the apus-platform ingress serves.
+  host: ""
+  image:
+    repository: harbor.onelitefeather.dev/apus/ui
+    # Empty falls back to .Chart.AppVersion, like every other image here.
+    tag: ""
+  # Must match the apus-platform ingress's class: both serve paths on the same host.
+  ingressClassName: nginx
+  # Handed to every instance as NUXT_PUBLIC_*. None is a secret -- this is a public OIDC client
+  # and all of it ends up in the served HTML by design. Every value is identical between
+  # tenants; only the base path differs, and the operator computes that.
+  #
+  # The origin only, with no /api suffix: the typed client already asks for paths beginning
+  # with /api, so a suffix here produces /api/api/tenants and a bare 403.
+  apiBaseUrl: ""
+  oidc:
+    issuer: ""
+    clientId: ""
+    # Entra-specific and not optional there: asking for only `openid profile email` returns a
+    # token addressed to Microsoft Graph, which the API rejects.
+    scope: ""
+
 metrics:
   enabled: true
   port: 8080

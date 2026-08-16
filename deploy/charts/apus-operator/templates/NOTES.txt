@@ -39,6 +39,30 @@ The apus-operator is installed.
 {{- end }}
 {{- end }}
 
+{{- if .Values.tenantUi.host }}
+
+IMPORTANT: every tenant needs two redirect URIs registered by hand.
+
+tenantUi.host is set, so each Tenant gets its own instance of the tenant application at
+https://{{ .Values.tenantUi.host }}/t/<tenant>/. The operator cannot register that instance's
+redirect URIs with your identity provider -- doing so needs application permissions on the
+app registration that this chart does not ask for and nobody has granted.
+
+Until they are registered, signing in to a tenant's instance fails at the identity provider
+(Entra reports AADSTS50011) and nothing appears in this cluster's logs at all. Read the two
+URIs for a tenant off its status:
+
+   kubectl get tenant <name> -o jsonpath='{.status.redirectUris}'
+
+They are always these two:
+
+   https://{{ .Values.tenantUi.host }}/t/<tenant>/auth/callback
+   https://{{ .Values.tenantUi.host }}/t/<tenant>/auth/silent-renew
+
+A wildcard is not a shortcut here: Entra strips the query string when a wildcard redirect URI
+matches, and the authorization code lives in that query string.
+{{- end }}
+
 This chart only installs the operator: the CRDs, the controller and its RBAC. It has no
 user interface. The `apus-platform` chart installs the REST API and the dashboard that let
 you manage tenants, worlds and renders without talking to the Kubernetes API directly.

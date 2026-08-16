@@ -64,6 +64,22 @@ spec:
               value: {{ .Values.bundles.s3Region | quote }}
             - name: APUS_BUNDLE_CREDENTIALS_SECRET
               value: {{ .Values.bundles.credentialsSecret | quote }}
+            # An empty host switches the per-tenant application instance off entirely, which is
+            # the default -- the operator checks this one value and creates nothing at all.
+            - name: APUS_TENANT_UI_HOST
+              value: {{ .Values.tenantUi.host | quote }}
+            - name: APUS_TENANT_UI_IMAGE
+              value: {{ include "apus-operator.image" (dict "image" .Values.tenantUi.image "ctx" .) | quote }}
+            - name: APUS_TENANT_UI_INGRESS_CLASS
+              value: {{ .Values.tenantUi.ingressClassName | quote }}
+            - name: APUS_TENANT_UI_API_BASE_URL
+              value: {{ .Values.tenantUi.apiBaseUrl | quote }}
+            - name: APUS_TENANT_UI_OIDC_ISSUER
+              value: {{ .Values.tenantUi.oidc.issuer | quote }}
+            - name: APUS_TENANT_UI_OIDC_CLIENT_ID
+              value: {{ .Values.tenantUi.oidc.clientId | quote }}
+            - name: APUS_TENANT_UI_OIDC_SCOPE
+              value: {{ .Values.tenantUi.oidc.scope | quote }}
             {{- if .Values.otel.endpoint }}
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
               value: {{ .Values.otel.endpoint | quote }}
