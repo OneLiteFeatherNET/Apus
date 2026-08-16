@@ -67,18 +67,32 @@ Add the permissions. These are **application** permissions, not delegated:
 ```bash
 GRAPH=00000003-0000-0000-c000-000000000000
 
-# Group.ReadWrite.All   62a82d76-70ea-41e2-9197-370581804d09
-# User.ReadWrite.All    741f803b-c850-494e-b5df-cde7c675a1ca
-# User.Invite.All       09850681-111b-4a89-9bed-3f2cae46d706
-# User.Read.All         df021288-bdef-4463-88db-98f22de89214
+# Group.ReadWrite.All                62a82d76-70ea-41e2-9197-370581804d09  teams
+# User.Invite.All                    09850681-111b-4a89-9bed-3f2cae46d706  invitations
+# User.Read.All                      df021288-bdef-4463-88db-98f22de89214  people, assignments
+# User-PasswordProfile.ReadWrite.All cc117bb9-00cf-4eb8-b580-ea2a878fe8f7  password reset
 for ID in 62a82d76-70ea-41e2-9197-370581804d09 \
-          741f803b-c850-494e-b5df-cde7c675a1ca \
           09850681-111b-4a89-9bed-3f2cae46d706 \
-          df021288-bdef-4463-88db-98f22de89214; do
+          df021288-bdef-4463-88db-98f22de89214 \
+          cc117bb9-00cf-4eb8-b580-ea2a878fe8f7; do
   az ad app permission add --id "$DIR_APP_ID" --api "$GRAPH" --api-permissions "$ID=Role"
 done
 
 az ad app permission admin-consent --id "$DIR_APP_ID"
+```
+
+**`User.ReadWrite.All` is deliberately not in that list, and `User-PasswordProfile.ReadWrite.All`
+is.** Microsoft split password resets out of `User.ReadWrite.All` into a permission of their own,
+so the broad one would not actually let Apus reset a password — and asking for it anyway would
+grant the ability to rewrite every attribute of every account for nothing in return. All four ids
+above were read back from the Graph service principal in this tenant rather than copied from
+memory:
+
+```bash
+az ad sp show --id 00000003-0000-0000-c000-000000000000 \
+  --query "appRoles[?value=='Group.ReadWrite.All' || value=='User.Invite.All' \
+            || value=='User.Read.All' || value=='User-PasswordProfile.ReadWrite.All'].{v:value,id:id}" \
+  -o table
 ```
 
 **What you are granting, plainly.** These are directory-wide, and Entra offers no narrower

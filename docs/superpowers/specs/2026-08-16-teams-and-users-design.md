@@ -67,8 +67,13 @@ role-gated.
 | --- | --- | --- |
 | `Group.ReadWrite.All` | create a team, list teams, read membership | Application |
 | `User.Invite.All` | invite a user | Application |
-| `User.ReadWrite.All` | reset a password (`passwordProfile`) | Application |
 | `User.Read.All` | show users and assignments | Application |
+| `User-PasswordProfile.ReadWrite.All` | reset a password | Application |
+
+**Not `User.ReadWrite.All`.** Microsoft split password resets out of it into a permission of
+their own, so the broad one would not actually let Apus reset a password — while granting the
+ability to rewrite every attribute of every account in the directory. Asking for it would be
+strictly more power for strictly less capability.
 
 All require admin consent. Granted deliberately, and the cost is stated in §3 rather than
 buried.
