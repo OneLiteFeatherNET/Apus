@@ -28,8 +28,11 @@ import io.micronaut.security.annotation.Secured;
 import io.micronaut.security.authentication.Authentication;
 import io.micronaut.security.rules.SecurityRule;
 import java.util.List;
+import net.onelitefeather.apus.api.policy.TenantPolicy;
+import net.onelitefeather.apus.api.policy.TenantPolicyReader;
 import net.onelitefeather.apus.api.rest.render.BlueMapRenderRepository;
 import net.onelitefeather.apus.api.rest.render.BlueMapRenderResponse;
+import net.onelitefeather.apus.api.rest.support.BadRequestException;
 import net.onelitefeather.apus.api.rest.support.NotFoundException;
 import net.onelitefeather.apus.api.rest.support.TenantAccess;
 import net.onelitefeather.apus.api.security.ApusPrincipal;
@@ -64,16 +67,22 @@ public class BlueMapMapController {
     private final BlueMapRenderRepository renderRepository;
     private final PrincipalResolver principalResolver;
     private final TenantResolver tenantResolver;
+    private final TenantPolicy tenantPolicy;
+    private final TenantPolicyReader policyReader;
 
     public BlueMapMapController(
             BlueMapMapRepository mapRepository,
             BlueMapRenderRepository renderRepository,
             PrincipalResolver principalResolver,
-            TenantResolver tenantResolver) {
+            TenantResolver tenantResolver,
+            TenantPolicy tenantPolicy,
+            TenantPolicyReader policyReader) {
         this.mapRepository = mapRepository;
         this.renderRepository = renderRepository;
         this.principalResolver = principalResolver;
         this.tenantResolver = tenantResolver;
+        this.tenantPolicy = tenantPolicy;
+        this.policyReader = policyReader;
     }
 
     @Get
@@ -109,12 +118,20 @@ public class BlueMapMapController {
         // non-existent one, before a BlueMapRender referencing it is ever created.
         findOwnMap(namespace, id);
 
+        boolean force = request != null && request.force();
+        // After the ownership check: a caller who may not see this map at all must get the same
+        // 404 they would have got anyway, rather than learning from a policy message that it
+        // exists somewhere.
+        tenantPolicy.rejectForceRender(policyReader.forPrincipal(principal), force).ifPresent(message -> {
+            throw new BadRequestException(message);
+        });
+
         BlueMapRender render = new BlueMapRender();
         render.getMetadata().setGenerateName(id + "-");
         Ref mapRef = new Ref();
         mapRef.setName(id);
         render.getSpec().setMapRef(mapRef);
-        render.getSpec().setForce(request != null && request.force());
+        render.getSpec().setForce(force);
 
         BlueMapRender created = renderRepository.create(namespace, render);
         LOGGER.info(

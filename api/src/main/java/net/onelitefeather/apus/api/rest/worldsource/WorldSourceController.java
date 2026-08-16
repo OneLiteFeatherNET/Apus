@@ -28,6 +28,9 @@ import io.micronaut.security.rules.SecurityRule;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import net.onelitefeather.apus.api.policy.PolicyEntryView;
+import net.onelitefeather.apus.api.policy.TenantPolicy;
+import net.onelitefeather.apus.api.policy.TenantPolicyReader;
 import net.onelitefeather.apus.api.rest.support.BadRequestException;
 import net.onelitefeather.apus.api.rest.support.TenantAccess;
 import net.onelitefeather.apus.api.security.ApusPrincipal;
@@ -60,12 +63,20 @@ public class WorldSourceController {
     private final WorldSourceRepository repository;
     private final PrincipalResolver principalResolver;
     private final TenantResolver tenantResolver;
+    private final TenantPolicy tenantPolicy;
+    private final TenantPolicyReader policyReader;
 
     public WorldSourceController(
-            WorldSourceRepository repository, PrincipalResolver principalResolver, TenantResolver tenantResolver) {
+            WorldSourceRepository repository,
+            PrincipalResolver principalResolver,
+            TenantResolver tenantResolver,
+            TenantPolicy tenantPolicy,
+            TenantPolicyReader policyReader) {
         this.repository = repository;
         this.principalResolver = principalResolver;
         this.tenantResolver = tenantResolver;
+        this.tenantPolicy = tenantPolicy;
+        this.policyReader = policyReader;
     }
 
     @Get
@@ -93,6 +104,20 @@ public class WorldSourceController {
         if (request.type() == null || !VALID_TYPES.contains(request.type())) {
             throw new BadRequestException("type must be one of " + VALID_TYPES);
         }
+
+        // Shape first, policy second, write third. A request that is both malformed and
+        // policy-violating reports the malformation, because that is the one the caller can fix
+        // without asking an administrator to change a rule.
+        List<PolicyEntryView> policy = policyReader.forPrincipal(principal);
+        tenantPolicy.rejectSourceType(policy, request.type()).ifPresent(message -> {
+            throw new BadRequestException(message);
+        });
+        tenantPolicy.rejectPoll(policy, request.poll()).ifPresent(message -> {
+            throw new BadRequestException(message);
+        });
+        tenantPolicy.rejectKeepVersions(policy, request.keepVersions()).ifPresent(message -> {
+            throw new BadRequestException(message);
+        });
 
         WorldSource source = new WorldSource();
         source.getMetadata().setName(request.name());

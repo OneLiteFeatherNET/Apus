@@ -27,6 +27,9 @@ import java.util.List;
 import java.util.Map;
 import net.onelitefeather.apus.api.security.ForbiddenException;
 import net.onelitefeather.apus.api.security.TenantResolver;
+import net.onelitefeather.apus.api.policy.TenantPolicy;
+import net.onelitefeather.apus.api.policy.TenantPolicyReader;
+import net.onelitefeather.apus.api.rest.tenant.InMemoryTenantRepository;
 import net.onelitefeather.apus.api.support.PrincipalResolver;
 import net.onelitefeather.apus.operator.api.WorldSource;
 import org.junit.jupiter.api.Test;
@@ -34,8 +37,13 @@ import org.junit.jupiter.api.Test;
 class WorldSourceControllerTest {
 
     private final InMemoryWorldSourceRepository repository = new InMemoryWorldSourceRepository();
-    private final WorldSourceController controller =
-            new WorldSourceController(repository, new PrincipalResolver(), new TenantResolver());
+    private final InMemoryTenantRepository tenants = new InMemoryTenantRepository();
+    private final WorldSourceController controller = new WorldSourceController(
+            repository,
+            new PrincipalResolver(),
+            new TenantResolver(),
+            new TenantPolicy(),
+            new TenantPolicyReader(tenants));
 
     private static Authentication viewer(String tenant) {
         return Authentication.build("carol", List.of("tenant-viewer"), Map.of(PrincipalResolver.TENANT_CLAIM, tenant));

@@ -27,6 +27,9 @@ import java.util.Map;
 import net.onelitefeather.apus.api.rest.support.NotFoundException;
 import net.onelitefeather.apus.api.security.ForbiddenException;
 import net.onelitefeather.apus.api.security.TenantResolver;
+import net.onelitefeather.apus.api.policy.TenantPolicy;
+import net.onelitefeather.apus.api.policy.TenantPolicyReader;
+import net.onelitefeather.apus.api.rest.tenant.InMemoryTenantRepository;
 import net.onelitefeather.apus.api.support.PrincipalResolver;
 import net.onelitefeather.apus.operator.api.BlueMapMap;
 import org.junit.jupiter.api.Test;
@@ -43,8 +46,14 @@ class BlueMapMapControllerTest {
 
     private final InMemoryBlueMapMapRepository mapRepository = new InMemoryBlueMapMapRepository();
     private final InMemoryBlueMapRenderRepository renderRepository = new InMemoryBlueMapRenderRepository();
+    private final InMemoryTenantRepository tenants = new InMemoryTenantRepository();
     private final BlueMapMapController controller = new BlueMapMapController(
-            mapRepository, renderRepository, new PrincipalResolver(), new TenantResolver());
+            mapRepository,
+            renderRepository,
+            new PrincipalResolver(),
+            new TenantResolver(),
+            new TenantPolicy(),
+            new TenantPolicyReader(tenants));
 
     private static Authentication viewer(String tenant) {
         return Authentication.build("carol", List.of("tenant-viewer"), Map.of(PrincipalResolver.TENANT_CLAIM, tenant));
