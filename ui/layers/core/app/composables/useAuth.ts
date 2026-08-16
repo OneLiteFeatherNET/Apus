@@ -38,7 +38,14 @@ function getUserManager(): UserManager {
     silent_redirect_uri: uris.silentRedirectUri,
     post_logout_redirect_uri: uris.postLogoutRedirectUri,
     response_type: 'code',
-    scope: 'openid profile email',
+    // Configurable, because "which scope yields a usable access token" is a property of the
+    // broker, not of this app. The default is right for a broker that treats the OIDC scopes as
+    // sufficient (Keycloak, Zitadel). Microsoft Entra does not: asking for only `openid profile
+    // email` there returns an access token addressed to Microsoft Graph, carrying none of Apus's
+    // app roles and signed for a different audience, so the api module rejects every request and
+    // nothing in the UI can explain why. Entra needs the API's own scope named explicitly --
+    // `api://<client-id>/access_as_user openid profile email`. See ui/README.md, "Authentication".
+    scope: config.public.oidcScope,
     automaticSilentRenew: true,
     userStore: new WebStorageStateStore({ store: new InMemoryWebStorage() })
   })

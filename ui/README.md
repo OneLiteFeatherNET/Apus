@@ -341,11 +341,40 @@ widely used, and — critically for the storage decision below — it exposes a 
 this deployment shape.
 
 Flow: Authorization Code + PKCE, public client (no client secret — there is nowhere safe to
-keep one in a pure SPA). Configuration is three environment variables
-(`NUXT_PUBLIC_API_BASE_URL`, `NUXT_PUBLIC_OIDC_ISSUER`, `NUXT_PUBLIC_OIDC_CLIENT_ID`), matching
-the design spec's instruction to keep the broker choice (§15: Keycloak vs. Zitadel, undecided)
+keep one in a pure SPA). Configuration is four environment variables
+(`NUXT_PUBLIC_API_BASE_URL`, `NUXT_PUBLIC_OIDC_ISSUER`, `NUXT_PUBLIC_OIDC_CLIENT_ID`,
+`NUXT_PUBLIC_OIDC_SCOPE`), matching the design spec's instruction to keep the broker choice
 out of code entirely. They are read at runtime, not baked in — see "Runtime configuration"
 above for how the deployment supplies them.
+
+### The scope is broker-specific, and getting it wrong fails silently
+
+`NUXT_PUBLIC_OIDC_SCOPE` defaults to `openid profile email`, which is right for a broker that
+treats the OIDC scopes as enough to mint an access token for its own APIs — Keycloak and Zitadel
+both do.
+
+**Microsoft Entra does not.** Asking Entra for only those three returns an access token addressed
+to Microsoft Graph: a different audience, a different issuer (`sts.windows.net`, not the v2.0
+issuer the API validates against), and none of Apus's app roles. Every API call 401s, the UI has
+no way to explain why, and nothing in the broker's own logs looks wrong. Entra needs its API scope
+named explicitly:
+
+```bash
+NUXT_PUBLIC_OIDC_SCOPE="api://<client-id>/access_as_user openid profile email"
+```
+
+Two Entra-side settings belong with it. The app registration's
+`api.requestedAccessTokenVersion` must be `2`, or the access token carries the v1 issuer and fails
+issuer validation for the same invisible reason. And roles reach the token as **app roles**
+(`appRoles` with `value: platform-admin`, `tenant-owner`, `tenant-operator`, `tenant-viewer`),
+assigned to users or groups — Entra emits those under the `roles` claim, which is what
+`PrincipalResolver` reads.
+
+**Still open on Entra: the `organization` claim.** `PrincipalResolver.TENANT_CLAIM` expects a
+string claim naming the caller's tenant, and Entra does not emit one without a claims-mapping
+policy or a directory extension attribute. Until that is configured, an Entra-issued token
+resolves to `tenant: null` — which is enough for the management console (`platform-admin` needs
+only `roles`) but leaves the tenant application with no tenant to read.
 
 ### Token storage — binding requirement, and the reasoning
 
