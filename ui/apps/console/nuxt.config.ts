@@ -56,7 +56,10 @@ export default defineNuxtConfig({
       // The same public client as the tenant app. Only the redirect URI differs, and the
       // broker must have /console/auth/callback and /console/auth/silent-renew registered
       // alongside the app's -- see ui/README.md, "Two applications, one OIDC client".
-      oidcClientId: ''
+      oidcClientId: '',
+      // Which scopes to request. Must match the tenant app's: same client, same API, same token.
+      // See layers/core, app/composables/useAuth.ts for why this is not hardcoded.
+      oidcScope: 'openid profile email'
     }
   },
   typescript: {

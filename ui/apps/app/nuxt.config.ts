@@ -45,7 +45,11 @@ export default defineNuxtConfig({
       oidcIssuer: '',
       // The public (no client secret) OIDC client registered for this SPA at the broker. The
       // console shares it; only the redirect URI differs (layers/core, app/utils/oidc.ts).
-      oidcClientId: ''
+      oidcClientId: '',
+      // Which scopes to request. The default suits a broker where the OIDC scopes alone yield an
+      // access token this API accepts. Microsoft Entra needs its own API scope named as well --
+      // see layers/core, app/composables/useAuth.ts, and ui/README.md, "Authentication".
+      oidcScope: 'openid profile email'
     }
   },
   app: {
