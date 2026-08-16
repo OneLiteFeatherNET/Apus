@@ -26,12 +26,14 @@
 ### Task 1: `TenantUiConfig` and its wiring into `OperatorConfig`
 
 **Files:**
+
 - Create: `operator/src/main/java/net/onelitefeather/apus/operator/TenantUiConfig.java`
 - Modify: `operator/src/main/java/net/onelitefeather/apus/operator/OperatorConfig.java`
 - Test: `operator/src/test/java/net/onelitefeather/apus/operator/TenantUiConfigTest.java`
 - Test (modify): `operator/src/test/java/net/onelitefeather/apus/operator/OperatorConfigTest.java`
 
 **Interfaces:**
+
 - Consumes: nothing.
 - Produces: `TenantUiConfig(String host, String image, String ingressClassName, String apiBaseUrl, String oidcIssuer, String oidcClientId, String oidcScope)` with `boolean enabled()` and `static TenantUiConfig disabled()` / `static TenantUiConfig fromEnvironment(Function<String,String>)`; `OperatorConfig.tenantUi()` returning it.
 
@@ -235,10 +237,12 @@ git commit --no-gpg-sign -m "feat(operator): configure the per-tenant applicatio
 ### Task 2: `TenantUiResourceBuilder`
 
 **Files:**
+
 - Create: `operator/src/main/java/net/onelitefeather/apus/operator/tenant/TenantUiResourceBuilder.java`
 - Test: `operator/src/test/java/net/onelitefeather/apus/operator/tenant/TenantUiResourceBuilderTest.java`
 
 **Interfaces:**
+
 - Consumes: `TenantUiConfig` (Task 1); `Tenant`, `Labels`, `TenantReconciler.namespaceFor`.
 - Produces:
   - `static String basePath(Tenant)` → `/t/<name>/`
@@ -683,10 +687,12 @@ git commit --no-gpg-sign -m "feat(operator): build the per-tenant application in
 ### Task 3: `Tenant.status.redirectUris`
 
 **Files:**
+
 - Modify: `operator/src/main/java/net/onelitefeather/apus/operator/api/TenantStatus.java`
 - Test (modify): `operator/src/test/java/net/onelitefeather/apus/operator/api/ApusResourceTest.java`
 
 **Interfaces:**
+
 - Consumes: nothing.
 - Produces: `TenantStatus.getRedirectUris()` / `setRedirectUris(List<String>)`, defaulting to an empty list.
 
@@ -766,10 +772,12 @@ git commit --no-gpg-sign -m "feat(operator): report the redirect URIs a tenant i
 ### Task 4: `TenantReconciler` provisions the instance
 
 **Files:**
+
 - Modify: `operator/src/main/java/net/onelitefeather/apus/operator/tenant/TenantReconciler.java`
 - Test (modify): `operator/src/test/java/net/onelitefeather/apus/operator/tenant/TenantReconcilerTest.java`
 
 **Interfaces:**
+
 - Consumes: `TenantUiResourceBuilder` (Task 2), `TenantUiConfig` (Task 1), `TenantStatus.setRedirectUris` (Task 3).
 - Produces: no new public API — behaviour only.
 
@@ -963,6 +971,7 @@ git commit --no-gpg-sign -m "feat(operator): provision an application instance p
 ### Task 5: Operator RBAC and chart
 
 **Files:**
+
 - Modify: `deploy/charts/apus-operator/values.yaml`
 - Modify: `deploy/charts/apus-operator/templates/deployment.yaml`
 - Modify: `deploy/charts/apus-operator/templates/rbac.yaml`
@@ -970,6 +979,7 @@ git commit --no-gpg-sign -m "feat(operator): provision an application instance p
 - Modify: `deploy/charts/apus-operator/values.schema.json` (if the chart has one — check)
 
 **Interfaces:**
+
 - Consumes: the `APUS_TENANT_UI_*` variable names from Task 1.
 - Produces: the `tenantUi` value block.
 
@@ -1056,11 +1066,13 @@ git commit --no-gpg-sign -m "feat(chart): expose the per-tenant application inst
 ### Task 6: The console shows the redirect URIs
 
 **Files:**
+
 - Modify: the console's tenant view (find it: `rg -l 'tenant' ui/apps/console/app/pages`)
 - Modify: whichever API response type carries a tenant (find it: `rg -n 'redirectUris|pushTokenSecret' api/src/main/java`)
 - Test: beside the component being changed, matching the existing component-test style
 
 **Interfaces:**
+
 - Consumes: `Tenant.status.redirectUris` from Task 3.
 - Produces: no new API.
 
