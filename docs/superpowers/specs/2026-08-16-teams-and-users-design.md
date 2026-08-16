@@ -122,13 +122,22 @@ would be both slow and a good way to meet Graph's throttling.
 All under the existing role model: `platform-admin` for anything cross-tenant, `tenant-owner`
 for a tenant's own directory.
 
-| Method | Path | Role |
+All under `/api/tenants/{name}/directory`, so one prefix carries the whole capability and it is
+obvious from a path which requests reach the identity provider at all.
+
+| Method | Path | Who |
 | --- | --- | --- |
-| `GET` | `/api/tenants/{name}/teams` | `platform-admin`, or `tenant-owner` of that tenant |
-| `POST` | `/api/tenants/{name}/teams` | as above |
-| `GET` | `/api/tenants/{name}/users` | as above |
-| `POST` | `/api/tenants/{name}/users/invitations` | as above |
-| `POST` | `/api/tenants/{name}/users/{id}/password-reset` | as above |
+| `GET` | `…/directory/counts` | read: `platform-admin`, or a member of that tenant |
+| `GET` | `…/directory` | read |
+| `GET` | `…/directory/teams/{teamId}/members` | read — the assignment itself |
+| `POST` | `…/directory/teams` | write: `platform-admin` or `tenant-owner` |
+| `POST` | `…/directory/invitations` | write |
+| `POST` | `…/directory/users/{userId}/password-reset` | write, plus §3's checks on the target |
+
+**A team id in a path is checked against this tenant's teams, not trusted.** The group guard
+would pass on its own — the tenant's own group is managed — while the id pointed at any group in
+the directory, which would turn the members endpoint into a way to read every group in the
+organisation.
 
 A tenant-owner naming a tenant that is not theirs gets `404`, not `403` — the same rule the rest
 of the API already follows, so a probe cannot map which tenants exist.
