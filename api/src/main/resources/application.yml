@@ -13,6 +13,13 @@ micronaut:
         signatures:
           jwks:
             apus-issuer:
-              jwks-uri: ${APUS_JWT_JWKS_URI}
+              # `url`, not `jwks-uri`. JwksSignatureConfigurationProperties has setUrl() and no
+              # setJwksUri(), so `jwks-uri` binds to nothing at all -- and does it silently: the
+              # configuration bean is still created, ReactiveJwksSignature is still wired, and
+              # the fetcher is simply handed a null URL. No request is made, no exception is
+              # thrown, nothing above DEBUG is logged, and every token fails signature validation
+              # with a bare 401 no matter which broker issued it. JwksSignatureConfigurationTest
+              # exists to keep this bound.
+              url: ${APUS_JWT_JWKS_URI}
         claims-validators:
           issuer: ${APUS_JWT_ISSUER}
