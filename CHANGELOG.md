@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/OneLiteFeatherNET/Apus/compare/apus-v0.7.2...apus-v0.8.0) (2026-08-16)
+
+
+### Features
+
+* **api:** tenant options with override and lock ([#60](https://github.com/OneLiteFeatherNET/Apus/issues/60)) ([91ee70f](https://github.com/OneLiteFeatherNET/Apus/commit/91ee70f585f5300e5be101051789265626109e7b))
+
 ## [0.7.2](https://github.com/OneLiteFeatherNET/Apus/compare/apus-v0.7.1...apus-v0.7.2) (2026-08-16)
 
 
