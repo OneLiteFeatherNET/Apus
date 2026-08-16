@@ -23,6 +23,13 @@ dependencies {
     implementation(platform(libs.micronaut.core.bom))
     implementation(libs.micronaut.http.server.netty)
     implementation(libs.micronaut.runtime)
+    // Not only for making outbound calls of our own -- Micronaut Security fetches the remote JWK
+    // Set through this client, and without it on the *runtime* classpath the fetch yields an
+    // empty key set and logs nothing at all. Every token then fails signature validation with a
+    // bare 401, no matter which broker issued it, and the only trace is a DEBUG line reading
+    // "JWK Set Key IDs:" with nothing after it. It was a testImplementation dependency until
+    // this was found against a live issuer.
+    implementation(libs.micronaut.http.client)
     annotationProcessor(platform(libs.micronaut.core.bom))
     annotationProcessor(libs.micronaut.inject.java)
 
@@ -96,11 +103,12 @@ dependencies {
     // every existing test called controller/repository methods directly instead of going
     // through the real embedded server -- so role enforcement and 404-vs-403 error mapping over
     // the actual HTTP/security-filter path were never proven. `micronaut-test-junit5` provides
-    // `@MicronautTest`/`TestPropertyProvider`; `micronaut-http-client` backs the `@Client("/")
-    // HttpClient` it injects. Both test-only: production code never makes outbound HTTP calls.
+    // `@MicronautTest`/`TestPropertyProvider`, and the `@Client("/") HttpClient` it injects is
+    // backed by micronaut-http-client, which is now an `implementation` dependency above --
+    // the claim that "production code never makes outbound HTTP calls" was wrong: Micronaut
+    // Security fetches the JWK Set with it.
     testImplementation(platform(libs.micronaut.test.bom))
     testImplementation(libs.micronaut.test.junit5)
-    testImplementation(libs.micronaut.http.client)
     testAnnotationProcessor(platform(libs.micronaut.core.bom))
     testAnnotationProcessor(libs.micronaut.inject.java)
 
