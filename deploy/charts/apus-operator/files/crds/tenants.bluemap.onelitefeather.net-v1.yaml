@@ -30,6 +30,11 @@ spec:
                       type: string
                     type: array
                 type: object
+              identity:
+                properties:
+                  groupId:
+                    type: string
+                type: object
               policy:
                 items:
                   properties:

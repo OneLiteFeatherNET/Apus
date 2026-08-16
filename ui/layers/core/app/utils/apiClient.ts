@@ -7,9 +7,16 @@ import type {
   BlueMapMapResponse,
   BlueMapRenderResponse,
   ClusterRenderResponse,
+  CreateTeamRequest,
   CreateTenantRequest,
   CreateWorldSourceRequest,
+  DirectoryCountsResponse,
+  DirectoryTeamResponse,
+  DirectoryUserResponse,
+  InviteUserRequest,
+  PasswordResetResponse,
   RenderProgressEvent,
+  TenantDirectoryResponse,
   TenantResponse,
   TriggerRenderRequest,
   UpdateTenantRequest,
@@ -30,6 +37,12 @@ export interface ApusApiClientOptions {
   getAccessToken: () => Promise<string | null> | string | null
   /** Defaults to the global `fetch`; override in tests. */
   fetchImpl?: FetchLike
+  /**
+   * The impersonation session, if one is active: `{ tenant, user }` where `user` is `null` to act
+   * as the tenant itself. Returning something here cannot grant access — the API decides — so
+   * this is a request to be served as somebody, never a claim to be them.
+   */
+  getImpersonation?: () => { tenant: string, user: string | null } | null
 }
 
 export interface SseHandlers<T> {
@@ -57,6 +70,23 @@ export function createApusApiClient(options: ApusApiClientOptions) {
     return await options.getAccessToken()
   }
 
+  /**
+   * Impersonation is two headers and nothing else. Sending them can never grant anything: the
+   * API's `ImpersonationFilter` applies `ImpersonationPolicy`, which strips the platform role and
+   * refuses a tenant the caller may not act in.
+   *
+   * Applied to every request while a session is active — including the SSE stream — so a page
+   * that happens to make three calls does not answer as three different people.
+   */
+  function applyImpersonation(headers: Headers): void {
+    const actingAs = options.getImpersonation?.()
+    if (!actingAs?.tenant) return
+    headers.set('X-Apus-Act-As-Tenant', actingAs.tenant)
+    if (actingAs.user) {
+      headers.set('X-Apus-Act-As-User', actingAs.user)
+    }
+  }
+
   async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     const token = await resolveToken()
     const headers = new Headers(init.headers)
@@ -67,6 +97,7 @@ export function createApusApiClient(options: ApusApiClientOptions) {
     if (token) {
       headers.set('Authorization', `Bearer ${token}`)
     }
+    applyImpersonation(headers)
 
     let response: Response
     try {
@@ -120,6 +151,9 @@ export function createApusApiClient(options: ApusApiClientOptions) {
     if (token) {
       headers.set('Authorization', `Bearer ${token}`)
     }
+    // The stream too, or a page viewed as a tenant would show that tenant's maps alongside the
+    // platform admin's own render progress.
+    applyImpersonation(headers)
 
     let response: Response
     try {
@@ -159,6 +193,31 @@ export function createApusApiClient(options: ApusApiClientOptions) {
         method: 'PATCH',
         body: JSON.stringify(body)
       }),
+
+    // -- A tenant's teams and people ------------------------------------------------------------
+    // Reads never fail the page: the API answers 200 with `unavailableReason` set when the
+    // identity provider cannot be reached, so a tenant whose storage and renders are fine stays
+    // readable while Microsoft is throttling.
+    getDirectoryCounts: (tenant: string) =>
+      request<DirectoryCountsResponse>(`/api/tenants/${encodeURIComponent(tenant)}/directory/counts`),
+    getTenantDirectory: (tenant: string) =>
+      request<TenantDirectoryResponse>(`/api/tenants/${encodeURIComponent(tenant)}/directory`),
+    createTeam: (tenant: string, body: CreateTeamRequest) =>
+      request<DirectoryTeamResponse>(`/api/tenants/${encodeURIComponent(tenant)}/directory/teams`, {
+        method: 'POST',
+        body: JSON.stringify(body)
+      }),
+    inviteUser: (tenant: string, body: InviteUserRequest) =>
+      request<DirectoryUserResponse>(`/api/tenants/${encodeURIComponent(tenant)}/directory/invitations`, {
+        method: 'POST',
+        body: JSON.stringify(body)
+      }),
+    /** The temporary password comes back once and is never retrievable again -- show it, never store it. */
+    resetPassword: (tenant: string, userId: string) =>
+      request<PasswordResetResponse>(
+        `/api/tenants/${encodeURIComponent(tenant)}/directory/users/${encodeURIComponent(userId)}/password-reset`,
+        { method: 'POST' }
+      ),
 
     // -- World sources: caller's own tenant -----------------------------------------------------
     listSources: () => request<WorldSourceResponse[]>('/api/sources'),
