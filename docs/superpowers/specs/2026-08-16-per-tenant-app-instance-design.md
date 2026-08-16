@@ -53,6 +53,21 @@ a compute resource makes that request mandatory for every pod, and an empty limi
 no default to fall back on. A Deployment without explicit requests would be created happily and
 then never produce a pod. The builder therefore sets requests unconditionally.
 
+Proven rather than argued, with `kubectl apply --dry-run=server` against that namespace — server
+dry-run runs the admission plugins without creating anything. Without requests the API server
+answers `pods "…" is forbidden: failed quota: apus-tenant: must specify requests.cpu for: ui;
+requests.memory for: ui`. With them, admitted.
+
+**And a `PodSecurity "restricted"` warning came back with it, which caught a real defect.** The
+same dry-run warned that the probe pod violated `restricted`. The platform chart hardens its own
+`ui` Deployment — `runAsNonRoot`, uid 65532, `RuntimeDefault` seccomp, no privilege escalation,
+read-only root, all capabilities dropped — and the first version of the builder here applied none
+of it to the *same image*. It is only a warning on this cluster today, so nothing would have
+failed; it would simply have been the same software running less restricted because a controller
+created it instead of Helm, and it would turn into a hard rejection the moment a platform sets
+tenant namespaces to enforce. The builder now applies the identical settings, and the hardened
+pod passes the same dry-run with no warning at all.
+
 ## 1. The address
 
 `https://<host>/t/<tenant>/`, on the same host the platform already serves.
@@ -157,6 +172,8 @@ one instance among several.
 | --- | --- |
 | Resource shape | Unit tests over a pure `TenantUiResourceBuilder`: base URL env is `/t/<name>/`, ingress path is `/t/<name>`, host and image come from config, labels and owner reference match the reconciler's |
 | Resource requests | Asserted explicitly, with the quota finding named in the test — the one mistake here produces a Deployment that looks healthy and has no pods |
+| Hardening | Asserted against the platform chart's values for the same image, so the two cannot drift apart silently |
+| Admission, for real | A k3s integration test reconciles a tenant with the feature on and waits for a **Pod**, not a Deployment: only a cluster with quota admission can fail that assertion. It sits with the module's other `*IntegrationTest` classes, which need Docker and run neither in `check` nor in CI |
 | Feature off | With no host configured, reconciling creates no Deployment, no Service and no Ingress, and sets no `redirectUris` — the default must be inert |
 | Feature on | Reconciling creates all three, and `status.redirectUris` carries exactly the two URIs from §4 |
 | Idempotence | Reconciling twice leaves one Deployment, matching how the namespace and quota paths already behave |

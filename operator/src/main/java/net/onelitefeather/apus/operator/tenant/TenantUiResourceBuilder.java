@@ -24,11 +24,15 @@ import io.fabric8.kubernetes.api.model.ContainerPortBuilder;
 import io.fabric8.kubernetes.api.model.EnvVar;
 import io.fabric8.kubernetes.api.model.EnvVarBuilder;
 import io.fabric8.kubernetes.api.model.OwnerReference;
+import io.fabric8.kubernetes.api.model.PodSecurityContext;
+import io.fabric8.kubernetes.api.model.PodSecurityContextBuilder;
 import io.fabric8.kubernetes.api.model.Probe;
 import io.fabric8.kubernetes.api.model.ProbeBuilder;
 import io.fabric8.kubernetes.api.model.Quantity;
 import io.fabric8.kubernetes.api.model.ResourceRequirements;
 import io.fabric8.kubernetes.api.model.ResourceRequirementsBuilder;
+import io.fabric8.kubernetes.api.model.SecurityContext;
+import io.fabric8.kubernetes.api.model.SecurityContextBuilder;
 import io.fabric8.kubernetes.api.model.Service;
 import io.fabric8.kubernetes.api.model.ServiceBuilder;
 import io.fabric8.kubernetes.api.model.ServicePort;
@@ -140,6 +144,7 @@ public final class TenantUiResourceBuilder {
                 .withPorts(containerPort())
                 .withEnv(env(tenant, config))
                 .withResources(resources())
+                .withSecurityContext(containerSecurityContext())
                 .withReadinessProbe(probe(tenant))
                 .withLivenessProbe(probe(tenant))
                 .build();
@@ -162,6 +167,7 @@ public final class TenantUiResourceBuilder {
                 .endMetadata()
                 .withNewSpec()
                 .withContainers(container)
+                .withSecurityContext(podSecurityContext())
                 .endSpec()
                 .endTemplate()
                 .endSpec()
@@ -299,6 +305,36 @@ public final class TenantUiResourceBuilder {
                 .endHttpGet()
                 .withInitialDelaySeconds(5)
                 .withPeriodSeconds(10)
+                .build();
+    }
+
+    /**
+     * The same hardening the platform chart applies to its own {@code ui} Deployment, which runs
+     * this identical image. Not optional and not configurable: an instance created by a
+     * controller must not end up less restricted than the same software installed by Helm, and
+     * these four settings are exactly what {@code PodSecurity "restricted"} asks for -- a warning
+     * on every tenant pod today, and a rejection the moment a platform sets tenant namespaces to
+     * enforce it.
+     */
+    private static PodSecurityContext podSecurityContext() {
+        return new PodSecurityContextBuilder()
+                .withRunAsNonRoot(true)
+                // The distroless :nonroot base runs as 65532, unlike the Java images' 10001.
+                .withRunAsUser(65532L)
+                .withNewSeccompProfile()
+                .withType("RuntimeDefault")
+                .endSeccompProfile()
+                .build();
+    }
+
+    /** See {@link #podSecurityContext()}. The Nitro server only ever reads from the image. */
+    private static SecurityContext containerSecurityContext() {
+        return new SecurityContextBuilder()
+                .withAllowPrivilegeEscalation(false)
+                .withReadOnlyRootFilesystem(true)
+                .withNewCapabilities()
+                .withDrop("ALL")
+                .endCapabilities()
                 .build();
     }
 

@@ -126,6 +126,29 @@ class TenantUiResourceBuilderTest {
     }
 
     /**
+     * The platform chart hardens its own {@code ui} pod, and this runs the identical image. An
+     * instance that skipped it would be the same software running with fewer restrictions purely
+     * because a controller created it rather than Helm -- and it trips a {@code
+     * PodSecurity "restricted"} warning on every tenant pod today, which becomes a rejection the
+     * moment anyone sets that namespace to enforce.
+     */
+    @Test
+    void theInstanceIsHardenedTheSameWayThePlatformHardensTheSameImage() {
+        Deployment deployment = TenantUiResourceBuilder.deployment(tenant(), config(), LABELS, OWNER);
+        var pod = deployment.getSpec().getTemplate().getSpec();
+        var security = containerOf(deployment).getSecurityContext();
+
+        assertEquals(Boolean.TRUE, pod.getSecurityContext().getRunAsNonRoot());
+        // The distroless :nonroot base runs as 65532, not the 10001 the Java images use.
+        assertEquals(65532L, pod.getSecurityContext().getRunAsUser());
+        assertEquals(
+                "RuntimeDefault", pod.getSecurityContext().getSeccompProfile().getType());
+        assertEquals(Boolean.FALSE, security.getAllowPrivilegeEscalation());
+        assertEquals(Boolean.TRUE, security.getReadOnlyRootFilesystem());
+        assertEquals(List.of("ALL"), security.getCapabilities().getDrop());
+    }
+
+    /**
      * With {@code NUXT_APP_BASE_URL} set, the bare root 404s -- a probe there would restart a
      * perfectly healthy pod forever, and it would do so only once the feature was actually
      * switched on in a cluster.
