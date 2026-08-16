@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.2](https://github.com/OneLiteFeatherNET/Apus/compare/apus-v0.7.1...apus-v0.7.2) (2026-08-16)
+
+
+### Bug Fixes
+
+* **api:** name the JWKS endpoint `url`, the property Micronaut actually binds ([#57](https://github.com/OneLiteFeatherNET/Apus/issues/57)) ([c741a1f](https://github.com/OneLiteFeatherNET/Apus/commit/c741a1f6964a99390a399f5cb5d127416413b696))
+
 ## [0.7.1](https://github.com/OneLiteFeatherNET/Apus/compare/apus-v0.7.0...apus-v0.7.1) (2026-08-16)
 
 
