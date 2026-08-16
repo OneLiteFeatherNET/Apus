@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.1](https://github.com/OneLiteFeatherNET/Apus/compare/apus-v0.7.0...apus-v0.7.1) (2026-08-16)
+
+
+### Bug Fixes
+
+* **api:** put the HTTP client on the runtime classpath so JWKS validation works ([#55](https://github.com/OneLiteFeatherNET/Apus/issues/55)) ([4a58ae6](https://github.com/OneLiteFeatherNET/Apus/commit/4a58ae60056d4102a33bcfbd49ae3349643339ac))
+
 ## [0.7.0](https://github.com/OneLiteFeatherNET/Apus/compare/apus-v0.6.0...apus-v0.7.0) (2026-08-16)
 
 
