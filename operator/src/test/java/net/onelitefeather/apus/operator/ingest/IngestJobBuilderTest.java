@@ -37,6 +37,7 @@ import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import net.onelitefeather.apus.operator.OperatorConfig;
+import net.onelitefeather.apus.operator.TenantUiConfig;
 import net.onelitefeather.apus.operator.api.Labels;
 import net.onelitefeather.apus.operator.api.WorldIngest;
 import net.onelitefeather.apus.operator.api.WorldSource;
@@ -227,7 +228,8 @@ class IngestJobBuilderTest {
                 "apus-bundles",
                 "http://rgw.example.svc:80",
                 "us-east-1",
-                "apus-bundle-credentials");
+                "apus-bundle-credentials",
+                TenantUiConfig.disabled());
 
         Job job = IngestJobBuilder.build(ingest("i1", "v1"), s3Source("survival-source"), config);
 

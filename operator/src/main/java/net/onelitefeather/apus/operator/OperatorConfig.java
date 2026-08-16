@@ -46,6 +46,10 @@ import java.util.function.Function;
  *     how {@code RenderJobBuilder} is handed a bucket secret name already scoped to the map's
  *     namespace -- carrying the bundle bucket's {@code AWS_ACCESS_KEY_ID}/{@code
  *     AWS_SECRET_ACCESS_KEY}
+ * @param tenantUi settings for the per-tenant instance of the tenant application, provisioned by
+ *     {@code TenantReconciler}. Grouped into its own record rather than flattened into seven more
+ *     components here, because they belong to one optional feature that is off unless a host is
+ *     configured -- see {@link TenantUiConfig}
  */
 public record OperatorConfig(
         String rookNamespace,
@@ -57,7 +61,8 @@ public record OperatorConfig(
         String bundleBucket,
         String bundleS3Endpoint,
         String bundleS3Region,
-        String bundleCredentialsSecretName) {
+        String bundleCredentialsSecretName,
+        TenantUiConfig tenantUi) {
 
     private static final String DEFAULT_ROOK_NAMESPACE = "rook-ceph-fr01";
     private static final String DEFAULT_CEPH_OBJECT_STORE = "feather-s3";
@@ -82,7 +87,8 @@ public record OperatorConfig(
                 DEFAULT_BUNDLE_BUCKET,
                 DEFAULT_BUNDLE_S3_ENDPOINT,
                 DEFAULT_BUNDLE_S3_REGION,
-                DEFAULT_BUNDLE_CREDENTIALS_SECRET);
+                DEFAULT_BUNDLE_CREDENTIALS_SECRET,
+                TenantUiConfig.disabled());
     }
 
     /**
@@ -95,7 +101,8 @@ public record OperatorConfig(
      * <p>Recognised variables: {@code APUS_ROOK_NAMESPACE}, {@code APUS_CEPH_OBJECT_STORE},
      * {@code APUS_BUCKET_STORAGE_CLASS}, {@code APUS_RUNNER_IMAGE}, {@code APUS_INGEST_IMAGE},
      * {@code APUS_HOSTING_IMAGE}, {@code APUS_BUNDLE_BUCKET}, {@code APUS_BUNDLE_S3_ENDPOINT},
-     * {@code APUS_BUNDLE_S3_REGION}, {@code APUS_BUNDLE_CREDENTIALS_SECRET}.
+     * {@code APUS_BUNDLE_S3_REGION}, {@code APUS_BUNDLE_CREDENTIALS_SECRET}, plus the {@code
+     * APUS_TENANT_UI_*} set {@link TenantUiConfig#fromEnvironment(Function)} reads.
      */
     public static OperatorConfig fromEnvironment(Function<String, String> env) {
         return new OperatorConfig(
@@ -108,7 +115,8 @@ public record OperatorConfig(
                 valueOrDefault(env.apply("APUS_BUNDLE_BUCKET"), DEFAULT_BUNDLE_BUCKET),
                 valueOrDefault(env.apply("APUS_BUNDLE_S3_ENDPOINT"), DEFAULT_BUNDLE_S3_ENDPOINT),
                 valueOrDefault(env.apply("APUS_BUNDLE_S3_REGION"), DEFAULT_BUNDLE_S3_REGION),
-                valueOrDefault(env.apply("APUS_BUNDLE_CREDENTIALS_SECRET"), DEFAULT_BUNDLE_CREDENTIALS_SECRET));
+                valueOrDefault(env.apply("APUS_BUNDLE_CREDENTIALS_SECRET"), DEFAULT_BUNDLE_CREDENTIALS_SECRET),
+                TenantUiConfig.fromEnvironment(env));
     }
 
     private static String valueOrDefault(String value, String defaultValue) {

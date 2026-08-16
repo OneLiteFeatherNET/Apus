@@ -32,6 +32,7 @@ import java.util.Map;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import net.onelitefeather.apus.operator.OperatorConfig;
+import net.onelitefeather.apus.operator.TenantUiConfig;
 import net.onelitefeather.apus.operator.api.BlueMapMap;
 import net.onelitefeather.apus.operator.api.BlueMapRender;
 import net.onelitefeather.apus.operator.api.Labels;
@@ -159,7 +160,8 @@ class RenderJobBuilderTest {
                 "apus-bundles",
                 "http://rgw.rook-ceph-fr01.svc:80",
                 "us-east-1",
-                "apus-bundle-credentials");
+                "apus-bundle-credentials",
+                TenantUiConfig.disabled());
 
         Job job = RenderJobBuilder.build(render(), map(), "bucket-secret", config);
 
