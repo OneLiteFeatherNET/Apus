@@ -195,6 +195,8 @@ const metadata = computed<MetaItem[]>(() => {
 
         <PlatformPolicyEditor v-model="policyEntries" :known-keys="knownKeys" @update:model-value="dirty = true" />
 
+        <PlatformRedirectUris :uris="tenant.redirectUris" />
+
         <section class="flex flex-col gap-3">
           <SectionLabel as="h2">
             Details
