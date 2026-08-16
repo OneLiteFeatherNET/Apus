@@ -27,6 +27,13 @@ public class TenantSpec {
     private StorageQuota storage = new StorageQuota();
     private Hosting hosting = new Hosting();
 
+    /**
+     * Platform-set options for this tenant, and which of them it may not deviate from. Never
+     * {@code null} -- an empty list means unregulated, and the tenant behaves as it did before
+     * any policy existed.
+     */
+    private List<PolicyEntry> policy = new ArrayList<>();
+
     public String getDisplayName() {
         return displayName;
     }
@@ -49,6 +56,19 @@ public class TenantSpec {
 
     public void setHosting(Hosting hosting) {
         this.hosting = hosting;
+    }
+
+    public List<PolicyEntry> getPolicy() {
+        return policy;
+    }
+
+    /**
+     * Absorbs {@code null}, which is what Fabric8 deserialises an absent field to. Every reader
+     * treats "no policy" as "unregulated"; without this each of them would need the same null
+     * check, and one of them would eventually forget it.
+     */
+    public void setPolicy(List<PolicyEntry> policy) {
+        this.policy = policy == null ? new ArrayList<>() : policy;
     }
 
     /** Hard storage limit, enforced by Ceph rather than by this operator. */
