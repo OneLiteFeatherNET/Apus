@@ -294,17 +294,27 @@ probes point at `/console/` and not `/`.
 the key in SCREAMING_SNAKE_CASE (`apiBaseUrl` ← `NUXT_PUBLIC_API_BASE_URL`). The
 `apus-platform` chart passes them generically through `ui.env` / `console.env` (a map handed to
 the container verbatim) and the matching `envFrom`, so a new key needs no chart change. Both
-applications read the same three values:
+applications read the same values:
 
 ```yaml
 ui:
   env: &uiEnv
-    NUXT_PUBLIC_API_BASE_URL: https://apus.example.net/api
+    # The origin only -- no /api suffix. See below.
+    NUXT_PUBLIC_API_BASE_URL: https://apus.example.net
     NUXT_PUBLIC_OIDC_ISSUER: https://id.example.net/realms/apus
     NUXT_PUBLIC_OIDC_CLIENT_ID: apus-ui
+    NUXT_PUBLIC_OIDC_SCOPE: openid profile email
 console:
   env: *uiEnv
 ```
+
+**`NUXT_PUBLIC_API_BASE_URL` is an origin, not an API root.** Every method of the typed client
+already asks for a path beginning with `/api` — `createApusApiClient` concatenates
+`baseUrl + '/api/tenants'` — so a `/api` suffix here produces `/api/api/tenants`. An ingress
+routing `/api` by prefix forwards that happily, the API has no such route, and Micronaut's
+security filter answers a bare `403`. That is indistinguishable from a missing `platform-admin`
+role at the point where you read it, which is what makes the mistake expensive: this example
+carried the suffix until it cost an afternoon in production.
 
 None of these are secrets: this is a public OIDC client, and every value ends up in the served
 HTML by design. `NUXT_PUBLIC_OIDC_CLIENT_ID` is deliberately the same for both — see "Two

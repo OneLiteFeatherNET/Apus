@@ -48,8 +48,11 @@ export default defineNuxtConfig({
   modules: ['@nuxt/eslint'],
   runtimeConfig: {
     public: {
-      // Base URL of the `api` module (design spec §11.1). No default -- an empty value would
-      // silently point every request at the SPA's own origin.
+      // Where the api module is reachable: the *origin only*, no /api suffix. Every method of
+      // the typed client already asks for a path beginning with /api, so a suffix here produces
+      // /api/api/... -- which an ingress forwards, the API has no route for, and the security
+      // filter answers 403, indistinguishable from a missing role. No default: an empty value
+      // would silently point every request at the SPA's own origin.
       apiBaseUrl: '',
       // Must match `APUS_JWT_ISSUER` on the `api` module -- see that module's application.yml.
       oidcIssuer: '',
