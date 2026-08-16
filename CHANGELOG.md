@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/OneLiteFeatherNET/Apus/compare/apus-v0.6.0...apus-v0.7.0) (2026-08-16)
+
+
+### Features
+
+* **ui:** make the OIDC scope configurable ([#53](https://github.com/OneLiteFeatherNET/Apus/issues/53)) ([b592400](https://github.com/OneLiteFeatherNET/Apus/commit/b592400b38054d4d3e2eac1b3bd9ba1a90f0fb4b))
+
 ## [0.6.0](https://github.com/OneLiteFeatherNET/Apus/compare/apus-v0.5.0...apus-v0.6.0) (2026-08-16)
 
 
