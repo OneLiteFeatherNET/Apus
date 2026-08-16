@@ -132,6 +132,11 @@ public class TenantController {
         if (request.allowedHostingDomains() != null) {
             spec.getHosting().setAllowedDomains(request.allowedHostingDomains());
         }
+        if (request.policy() != null) {
+            // A present list replaces every entry -- see UpdateTenantRequest's Javadoc for why
+            // entry-level patching is not offered over a free-form key space.
+            spec.setPolicy(PolicyWrite.toEntries(request.policy()));
+        }
 
         Tenant updated = repository.update(tenant);
         LOGGER.info("tenant '{}' updated", name);

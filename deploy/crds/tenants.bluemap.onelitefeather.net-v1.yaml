@@ -28,6 +28,19 @@ spec:
                       type: string
                     type: array
                 type: object
+              policy:
+                items:
+                  properties:
+                    key:
+                      type: string
+                    locked:
+                      type: boolean
+                    type:
+                      type: string
+                    value:
+                      type: string
+                  type: object
+                type: array
               storage:
                 properties:
                   maxObjects:

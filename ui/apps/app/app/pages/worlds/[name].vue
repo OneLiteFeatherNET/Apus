@@ -24,6 +24,10 @@ const { worlds, loading, error, refresh } = useWorlds()
 const world = computed<World | null>(() => worlds.value.find(candidate => candidate.name === name.value) ?? null)
 
 const api = useApiClient()
+// The platform may forbid forced renders for this tenant. Disabled rather than hidden: a control
+// that vanishes leaves the reader wondering whether they misremembered it, while a disabled one
+// with a sentence beside it answers the question.
+const { forceRenderAllowed } = useTenantPolicy()
 const starting = ref(false)
 const actionError = ref<string | null>(null)
 const confirmForce = ref(false)
@@ -102,11 +106,20 @@ const historyColumns: DataTableColumn[] = [
           <UButton size="sm" :loading="starting" @click="startRender(false)">
             Start a render
           </UButton>
-          <UButton size="sm" variant="subtle" @click="confirmForce = true">
+          <UButton
+            size="sm"
+            variant="subtle"
+            :disabled="forceRenderAllowed === false"
+            @click="confirmForce = true"
+          >
             Force a full re-render
           </UButton>
         </template>
       </PageHeader>
+
+      <p v-if="forceRenderAllowed === false" class="text-muted text-sm">
+        Forced re-renders are not available for your tenant. Your platform administrator sets this.
+      </p>
 
       <p v-if="actionError" class="text-error text-sm">
         {{ actionError }}
