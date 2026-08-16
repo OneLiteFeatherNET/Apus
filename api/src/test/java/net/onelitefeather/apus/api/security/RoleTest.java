@@ -24,6 +24,7 @@ import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.junit.jupiter.params.provider.ValueSource;
 
@@ -61,5 +62,17 @@ class RoleTest {
     @ValueSource(strings = {"   "})
     void fromClaimRejectsNullBlankAndEmpty(String claim) {
         assertTrue(Role.fromClaim(claim).isEmpty());
+    }
+
+    /**
+     * Every role must survive a round trip, for every role there is. Impersonation builds an
+     * authentication of its own and spells roles with {@code claimValue()}; if one of them did
+     * not read back, that session would silently hold fewer roles than it was granted -- and the
+     * failure would look like a permission problem, not like a spelling one.
+     */
+    @ParameterizedTest
+    @EnumSource(Role.class)
+    void claimValueIsTheExactInverseOfFromClaim(Role role) {
+        assertEquals(Optional.of(role), Role.fromClaim(role.claimValue()));
     }
 }

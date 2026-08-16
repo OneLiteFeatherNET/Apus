@@ -66,4 +66,17 @@ public enum Role {
             default -> Optional.empty();
         };
     }
+
+    /**
+     * The claim value this role appears as in a token -- the exact inverse of {@link
+     * #fromClaim(String)}.
+     *
+     * <p>Needed because impersonation builds an {@code Authentication} of its own and must spell
+     * the roles the way {@link #fromClaim} will read them back. Derived from the enum name rather
+     * than written out a second time, so the two cannot drift: a fifth role added to this enum is
+     * spelled correctly here without anybody remembering to come back.
+     */
+    public String claimValue() {
+        return name().toLowerCase(Locale.ROOT).replace('_', '-');
+    }
 }
