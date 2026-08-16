@@ -55,10 +55,22 @@ const inviteName = ref('')
 
 const unavailable = computed(() => props.directory.unavailableReason)
 
-function memberCountLabel(count: number | null): string {
-  // Never "0 members" for a count we never got -- see the component comment.
-  if (count === null) return 'Unknown size'
-  return count === 1 ? '1 member' : `${count} members`
+/**
+ * A team's size, from whichever source actually knows it.
+ *
+ * The list endpoint usually does not: Graph reports `members@odata.count` for the group being
+ * listed, not for each nested group in the result, so the count is normally absent. Rather than
+ * printing "Unknown size" against every row — technically honest, useless to read — the label
+ * simply says nothing about size until the team is opened, at which point the loaded membership
+ * is an exact count.
+ *
+ * What it never does is print a zero it did not measure.
+ */
+function memberCountLabel(teamId: string, count: number | null): string {
+  const loaded = props.members?.[teamId]
+  const known = loaded ? loaded.length : count
+  if (known === null || known === undefined) return ''
+  return known === 1 ? '1 member' : `${known} members`
 }
 
 function submitTeam(): void {
@@ -111,7 +123,10 @@ function submitInvite(): void {
             >
               <span class="text-highlighted text-sm">{{ team.displayName }}</span>
               <span class="text-muted text-xs">
-                {{ memberCountLabel(team.memberCount) }} · {{ expanded.has(team.id) ? 'Hide' : 'Who is in it' }}
+                <template v-if="memberCountLabel(team.id, team.memberCount)">
+                  {{ memberCountLabel(team.id, team.memberCount) }} ·
+                </template>
+                {{ expanded.has(team.id) ? 'Hide' : 'Who is in it' }}
               </span>
             </button>
 

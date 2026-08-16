@@ -22,8 +22,10 @@ describe('TenantDirectory', () => {
     expect(wrapper.text()).toContain('Alice')
   })
 
-  it('says a team of unknown size is unknown rather than showing a zero', async () => {
-    // A zero that means "we could not count" is a lie somebody would act on.
+  it('says nothing about the size of a team it did not count, rather than showing a zero', async () => {
+    // Graph reports members@odata.count for the group being listed, not for each nested group in
+    // the result, so this is the normal case rather than an edge one. A zero here would be a lie
+    // somebody would act on; "Unknown size" against every row would be honest and useless.
     const wrapper = await mountSuspended(TenantDirectory, {
       props: {
         tenant: 'acme',
@@ -33,7 +35,26 @@ describe('TenantDirectory', () => {
     })
 
     expect(wrapper.text()).not.toContain('0 members')
-    expect(wrapper.text()).toContain('Unknown')
+    expect(wrapper.text()).not.toContain('members')
+    expect(wrapper.text()).toContain('Who is in it')
+  })
+
+  it('counts a team exactly once its membership has been loaded', async () => {
+    const wrapper = await mountSuspended(TenantDirectory, {
+      props: {
+        tenant: 'acme',
+        directory: directory({ teams: [{ id: 't1', displayName: 'Builders', memberCount: null }] }),
+        canWrite: true,
+        members: {
+          t1: [
+            { id: 'u1', displayName: 'Alice', email: 'alice@acme.example', privileged: false },
+            { id: 'u2', displayName: 'Carol', email: 'carol@acme.example', privileged: false }
+          ]
+        }
+      }
+    })
+
+    expect(wrapper.text()).toContain('2 members')
   })
 
   it('says why the directory is unavailable instead of showing an empty list', async () => {
