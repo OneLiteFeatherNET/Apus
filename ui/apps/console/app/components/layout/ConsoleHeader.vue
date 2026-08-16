@@ -1,31 +1,19 @@
 <script setup lang="ts">
 const { user, logout } = useAuth()
+const account = computed(() => user.value?.profile.email ?? user.value?.profile.sub ?? 'Account')
 </script>
 
 <template>
-  <header class="flex items-center justify-between border-b border-default px-6 py-4">
+  <div class="flex flex-wrap items-center justify-between gap-3 px-6 py-3">
+    <span class="apus-eyebrow text-dimmed">Management console</span>
     <div class="flex items-center gap-3">
-      <span class="text-lg font-semibold">Apus</span>
-      <!-- Named, not just implied by the URL: an admin has both applications open at once and
-           the two shells are otherwise identical until the Part B redesign lands. -->
-      <span class="text-muted text-sm">Console</span>
-    </div>
-    <div class="flex items-center gap-4">
-      <span v-if="user" class="text-sm text-muted">
-        {{ user.profile.email ?? user.profile.sub }}
-      </span>
-      <!-- A separate application, so a plain anchor and not <ULink to>: this router knows
-           nothing about the tenant app's routes and would refuse to resolve them. -->
-      <a href="/" class="text-sm font-medium text-muted hover:text-default">
-        Tenant app
-      </a>
-      <UButton
-        variant="ghost"
-        size="sm"
-        @click="logout"
-      >
+      <span class="apus-value text-muted max-w-56 truncate text-sm">{{ account }}</span>
+      <!-- A separate application, so a plain anchor: this router knows nothing about the tenant
+           app's routes and would refuse to resolve them. -->
+      <a href="/" class="text-muted hover:text-highlighted text-sm sm:hidden">Tenant app</a>
+      <UButton variant="ghost" size="sm" @click="logout">
         Sign out
       </UButton>
     </div>
-  </header>
+  </div>
 </template>

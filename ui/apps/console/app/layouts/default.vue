@@ -1,8 +1,11 @@
 <template>
-  <div class="min-h-screen">
-    <LayoutConsoleHeader />
-    <main class="p-6">
-      <slot />
-    </main>
-  </div>
+  <AppShell variant="side">
+    <template #nav>
+      <LayoutConsoleSidebar />
+    </template>
+    <template #header>
+      <LayoutConsoleHeader />
+    </template>
+    <slot />
+  </AppShell>
 </template>

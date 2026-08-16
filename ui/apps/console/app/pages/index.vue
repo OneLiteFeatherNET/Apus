@@ -1,66 +1,138 @@
 <script setup lang="ts">
-// Platform dashboard (design spec §11.2): tenants, their storage quota vs. observed usage,
-// their allowed hosting domains, and cluster-wide job visibility. `platform-admin` only.
-//
-// The role check below is a UX convenience, same as the "Platform" nav link in AppNav.vue --
-// see app/utils/role.ts's module Javadoc. It only decides what this page *shows*; the api
-// module re-checks `platform-admin` on every request underneath it and answers with 403
-// otherwise (TenantController.requirePlatformAdmin). Nothing here should be mistaken for the
-// actual access-control boundary.
-import type { TenantResponse } from '#core/utils/apiTypes'
-import { ApusApiError } from '#core/utils/apiErrors'
+/**
+ * The console's overview: how many tenants, what is rendering across the cluster right now, and
+ * who is close to their storage limit.
+ *
+ * The last one is the reason this page exists rather than a link straight to the tenant list. A
+ * tenant hitting its quota fails renders with no retry (design spec §12), so "who is about to"
+ * is the single most useful thing an operator can be told on arrival.
+ */
+import type { ClusterRenderResponse } from '#core/utils/apiTypes'
 
-const { principal } = useAuth()
-const allowed = computed(() => isPlatformAdmin(principal.value))
+const { tenants, loading, error, refresh } = useTenants()
 
 const api = useApiClient()
-const tenants = ref<TenantResponse[]>([])
-const loading = ref(false)
-const loadError = ref<string | null>(null)
+const clusterRenders = ref<ClusterRenderResponse[]>([])
+const rendersLoading = ref(true)
 
-async function refresh(): Promise<void> {
-  if (!allowed.value) return
-  loading.value = true
-  loadError.value = null
+async function loadRenders(): Promise<void> {
+  rendersLoading.value = true
   try {
-    tenants.value = await api.listTenants()
-  } catch (error) {
-    loadError.value = error instanceof ApusApiError ? error.message : 'Could not load tenants.'
+    clusterRenders.value = await api.listClusterRenders()
+  } catch {
+    clusterRenders.value = []
   } finally {
-    loading.value = false
+    rendersLoading.value = false
   }
 }
 
-onMounted(refresh)
+onMounted(loadRenders)
+
+const running = computed(() => clusterRenders.value.filter(entry => entry.render.phase === 'Running'))
+const nearQuota = computed(() => tenants.value.filter(tenant => tenant.usage.level !== 'ok'))
+const worstUsage = computed(() => {
+  const ratios = tenants.value.map(tenant => tenant.usage.ratio).filter((ratio): ratio is number => ratio !== null)
+  return ratios.length ? Math.round(Math.max(...ratios) * 100) : null
+})
 </script>
 
 <template>
-  <div v-if="!allowed" class="max-w-xl">
-    <UAlert
-      icon="i-lucide-lock"
-      color="neutral"
-      variant="subtle"
-      title="Platform administrators only"
-      description="This area manages tenants across the whole platform. It is shown only to accounts with the platform-admin role -- the api module enforces that independently on every request."
-    />
-  </div>
+  <PlatformGate>
+    <div class="flex flex-col gap-8 p-6 sm:p-10">
+      <PageHeader
+        eyebrow="Platform"
+        title="Overview"
+        description="The state of the platform right now."
+      >
+        <template #actions>
+          <UButton size="sm" variant="subtle" :loading="loading || rendersLoading" @click="refresh(); loadRenders()">
+            Refresh
+          </UButton>
+        </template>
+      </PageHeader>
 
-  <div v-else class="max-w-4xl space-y-10">
-    <div>
-      <h1 class="text-2xl font-semibold">
-        Platform
-      </h1>
-      <p class="text-muted mt-1 text-sm">
-        Tenants, their storage quota, and which hostnames each may use for hosted maps.
-      </p>
+      <ErrorState
+        v-if="error"
+        :status="error.status"
+        :message="error.message"
+        retryable
+        @retry="refresh"
+      />
+
+      <template v-else>
+        <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <StatTile label="Tenants" :value="tenants.length" hint="Every tenant on this platform." />
+          <StatTile
+            label="Renders in flight"
+            :value="running.length"
+            hint="Running across all tenants."
+          />
+          <StatTile
+            label="Highest storage use"
+            :value="worstUsage === null ? '—' : `${worstUsage}%`"
+            :percent="worstUsage ?? undefined"
+            meter-label="Highest tenant storage use"
+            :tone="worstUsage !== null && worstUsage >= 95 ? 'error' : worstUsage !== null && worstUsage >= 80 ? 'warning' : 'primary'"
+            hint="A tenant at its limit fails renders with no retry."
+          />
+        </div>
+
+        <section v-if="nearQuota.length" class="flex flex-col gap-3">
+          <SectionLabel as="h2">
+            Close to their storage limit
+          </SectionLabel>
+          <ul class="flex flex-col gap-2">
+            <li
+              v-for="tenant in nearQuota"
+              :key="tenant.name"
+              class="border-default flex flex-wrap items-center justify-between gap-3 border p-3"
+            >
+              <NuxtLink
+                :to="`/tenants/${encodeURIComponent(tenant.name)}`"
+                class="apus-value text-highlighted hover:text-primary text-sm"
+              >{{ tenant.name }}</NuxtLink>
+              <span class="apus-value text-muted text-xs">
+                {{ tenant.usage.usedLabel }} of {{ tenant.usage.quotaLabel }}
+              </span>
+              <CellMeter
+                v-if="tenant.usage.ratio !== null"
+                :percent="tenant.usage.ratio * 100"
+                :cells="16"
+                :tone="tenant.usage.level === 'critical' ? 'error' : 'warning'"
+                :label="`${tenant.name} storage use`"
+              />
+            </li>
+          </ul>
+        </section>
+
+        <section class="flex flex-col gap-3">
+          <SectionLabel as="h2">
+            Rendering now
+          </SectionLabel>
+          <p v-if="rendersLoading" class="text-muted text-sm">
+            Loading…
+          </p>
+          <p v-else-if="running.length === 0" class="text-muted text-sm">
+            Nothing is rendering anywhere on the platform.
+          </p>
+          <ul v-else class="flex flex-col gap-2">
+            <li
+              v-for="entry in running"
+              :key="`${entry.tenant}/${entry.render.name}`"
+              class="border-default flex flex-wrap items-center justify-between gap-3 border p-3"
+            >
+              <span class="apus-value text-muted text-xs">{{ entry.tenant }}</span>
+              <span class="apus-value text-highlighted text-sm">{{ entry.render.name }}</span>
+              <CellMeter
+                :percent="entry.render.progress.percent"
+                :cells="16"
+                :live="true"
+                :label="`${entry.render.name} progress`"
+              />
+            </li>
+          </ul>
+        </section>
+      </template>
     </div>
-
-    <UAlert v-if="loadError" color="error" variant="subtle" :title="loadError" />
-
-    <PlatformTenantList :tenants="tenants" :loading="loading" @updated="refresh" />
-
-    <PlatformCreateTenantForm @created="refresh" />
-
-    <PlatformClusterRenderTable />
-  </div>
+  </PlatformGate>
 </template>

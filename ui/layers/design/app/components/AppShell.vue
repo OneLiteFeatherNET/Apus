@@ -34,7 +34,9 @@ onMounted(() => {
       Skip to content
     </a>
 
-    <div :class="variant === 'side' ? 'flex min-h-screen' : ''">
+    <!-- Column below sm, row above: a side rail beside the content needs width the phone does not
+         have, so on a narrow screen it becomes a bar across the top instead of squeezing both. -->
+    <div :class="variant === 'side' ? 'flex min-h-screen flex-col sm:flex-row' : ''">
       <slot name="nav" />
 
       <div class="flex min-w-0 flex-1 flex-col">
