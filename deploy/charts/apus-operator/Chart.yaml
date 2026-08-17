@@ -4,8 +4,8 @@ description: The Apus operator and its custom resource definitions — renders M
 type: application
 # Both markers are rewritten by release-please in the root track, so the chart
 # version and the images it deploys always come from the same release.
-version: "0.8.0" # x-release-please-version
-appVersion: "0.8.0" # x-release-please-version
+version: "0.9.0" # x-release-please-version
+appVersion: "0.9.0" # x-release-please-version
 home: https://github.com/OneLiteFeatherNET/Apus
 sources:
   - https://github.com/OneLiteFeatherNET/Apus
