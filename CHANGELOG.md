@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.1](https://github.com/OneLiteFeatherNET/Apus/compare/apus-v0.9.0...apus-v0.9.1) (2026-08-17)
+
+
+### Bug Fixes
+
+* the api jar did not start, and nothing in the build noticed ([#65](https://github.com/OneLiteFeatherNET/Apus/issues/65)) ([633f308](https://github.com/OneLiteFeatherNET/Apus/commit/633f308caec0d32e09121b611f68d10212ce92ee))
+
 ## [0.9.0](https://github.com/OneLiteFeatherNET/Apus/compare/apus-v0.8.0...apus-v0.9.0) (2026-08-17)
 
 
