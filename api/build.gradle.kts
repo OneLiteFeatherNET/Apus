@@ -160,6 +160,81 @@ tasks {
     }
 }
 
+// Boots the shadowed jar and fails if the application context does not start.
+//
+// This exists because of an outage that every other check in this repository was blind to. A
+// @Scheduled(fixedDelay = "60s") annotation -- a spelling Micronaut's converter rejects -- made the
+// context fail during start(). It was published, rolled out, and the single api replica went into
+// CrashLoopBackOff, taking the whole API down. The entire test suite passed throughout.
+//
+// It passed for a reason worth knowing: the failure only happens in the *shadowed* jar. On the
+// plain test classpath the very same annotation converts fine, so no @MicronautTest -- not even one
+// that starts an embedded server -- can see it. Only running the artifact that ships can.
+//
+// Deliberately not a Test task: there is no test to write. The assertion is "the jar we are about
+// to publish starts", and the only way to make it is to start it.
+val startupSmokeTest by tasks.registering {
+    group = "verification"
+    description = "Boots the shadowed api jar and fails if the Micronaut context does not start."
+    dependsOn(tasks.shadowJar)
+
+    val jar = tasks.shadowJar.flatMap { it.archiveFile }
+    val javaLauncher = javaToolchains.launcherFor(java.toolchain)
+    inputs.file(jar)
+    outputs.upToDateWhen { false }
+
+    doLast {
+        val process = ProcessBuilder(
+            javaLauncher.get().executablePath.asFile.absolutePath,
+            "-jar",
+            jar.get().asFile.absolutePath,
+        ).apply {
+            redirectErrorStream(true)
+            // Everything it would reach is pointed somewhere unreachable on purpose. The question
+            // is only whether startup gets far enough to announce itself.
+            environment()["APUS_JWT_ISSUER"] = "https://issuer.invalid/v2.0"
+            environment()["APUS_JWT_JWKS_URI"] = "http://127.0.0.1:1/unused-jwks-endpoint"
+            environment()["KUBECONFIG"] = "/dev/null"
+            environment()["MICRONAUT_SERVER_PORT"] = "0"
+        }.start()
+
+        val output = StringBuilder()
+        var started = false
+        try {
+            process.inputStream.bufferedReader().use { reader ->
+                val deadline = System.currentTimeMillis() + 90_000
+                while (System.currentTimeMillis() < deadline) {
+                    val line = reader.readLine() ?: break
+                    output.appendLine(line)
+                    // Micronaut prints this only once the context is fully up.
+                    if (line.contains("Startup completed") || line.contains("Server Running")) {
+                        started = true
+                        break
+                    }
+                    // Fail fast and loudly rather than waiting out the timeout.
+                    if (line.contains("Error starting Micronaut server")) {
+                        break
+                    }
+                }
+            }
+        } finally {
+            process.destroyForcibly()
+            process.waitFor()
+        }
+
+        if (!started) {
+            throw GradleException(
+                "the shadowed api jar did not start -- this is what reaches the cluster:\n\n$output",
+            )
+        }
+        logger.lifecycle("startupSmokeTest: the shadowed api jar starts")
+    }
+}
+
+tasks.named("check") {
+    dependsOn(startupSmokeTest)
+}
+
 // TenantIsolationIntegrationTest starts a k3s container (via Testcontainers), applies the
 // `:operator` module's generated CRDs to it, and proves cross-tenant isolation over a real,
 // JWT-authenticated HTTP call against a real API server -- minutes of work and Docker, exactly

@@ -17,7 +17,16 @@
  */
 package net.onelitefeather.apus.operator.rook;
 
-/** Desired state of a Rook CephObjectStoreUser. Plain data, no Kubernetes access. */
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+
+/**
+ * Desired state of a Rook CephObjectStoreUser. Plain data, no Kubernetes access.
+ *
+ * <p>Tolerates unmodelled fields like the status types do. A spec is read back as well as written:
+ * this operator reads an existing user before touching it, and a field somebody set through
+ * {@code kubectl} -- or one a Rook upgrade defaults in -- must not make that read throw.
+ */
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class CephObjectStoreUserSpec {
 
     private String store;

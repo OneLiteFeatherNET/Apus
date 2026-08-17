@@ -85,4 +85,52 @@ class RookResourceSerialisationTest {
         assertEquals("Bound", claim.getStatus().getPhase());
         assertEquals("apus-friends-survival", claim.getSpec().getBucketName());
     }
+
+    /**
+     * Rook owns these CRDs and may add a field to them whenever it likes -- and it did.
+     *
+     * <p>The JSON below is copied verbatim from a live {@code CephObjectStoreUser} in
+     * {@code rook-ceph-fr01}. Only {@code phase} was modelled here, so reading that object threw
+     * {@code UnrecognizedPropertyException: Unrecognized field "info"} -- inside {@code
+     * TenantReconciler}, which reads the existing user before touching it. Every reconciliation of
+     * every tenant failed from the moment Rook populated {@code status.info}, and because a tenant
+     * only reconciles when something changes, nothing appeared broken until a release needed one.
+     * The operator then exhausted its retries and the tenant silently never got its application
+     * instance.
+     *
+     * <p>The fix is not to add {@code info}: it is to stop caring what else Rook sends. A model of
+     * somebody else's resource has no business failing on a field it does not read.
+     */
+    @Test
+    void aRookStatusWithFieldsWeDoNotModelIsReadAnyway() {
+        String json =
+                """
+                {"apiVersion":"ceph.rook.io/v1","kind":"CephObjectStoreUser",\
+                "metadata":{"name":"apus-onelitefeather-dev","namespace":"rook-ceph-fr01"},\
+                "spec":{"store":"feather-s3","displayName":"apus-onelitefeather-dev"},\
+                "status":{"info":{"secretName":"rook-ceph-object-user-feather-s3-apus-onelitefeather-dev"},\
+                "observedGeneration":1,"phase":"Ready"}}""";
+
+        CephObjectStoreUser user = Serialization.unmarshal(json, CephObjectStoreUser.class);
+
+        assertEquals("Ready", user.getStatus().getPhase());
+        assertEquals("feather-s3", user.getSpec().getStore());
+    }
+
+    /** The same tolerance on the other Rook resource, before it costs anything to learn. */
+    @Test
+    void anObjectBucketClaimWithFieldsWeDoNotModelIsReadAnyway() {
+        String json =
+                """
+                {"apiVersion":"objectbucket.io/v1alpha1","kind":"ObjectBucketClaim",\
+                "metadata":{"name":"apus-friends-survival","namespace":"bluemap-friends"},\
+                "spec":{"bucketName":"apus-friends-survival","storageClassName":"ceph-bucket-fr01",\
+                "objectBucketName":"obc-bluemap-friends-apus-friends-survival"},\
+                "status":{"phase":"Bound","conditions":[],"somethingRookAddsLater":true}}""";
+
+        ObjectBucketClaim claim = Serialization.unmarshal(json, ObjectBucketClaim.class);
+
+        assertEquals("Bound", claim.getStatus().getPhase());
+        assertEquals("apus-friends-survival", claim.getSpec().getBucketName());
+    }
 }
