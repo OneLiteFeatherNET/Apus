@@ -17,10 +17,18 @@
  */
 package net.onelitefeather.apus.operator.rook;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-/** Desired state of a Rook ObjectBucketClaim. Plain data, no Kubernetes access. */
+/**
+ * Desired state of a Rook ObjectBucketClaim. Plain data, no Kubernetes access.
+ *
+ * <p>Tolerates unmodelled fields for the same reason {@link CephObjectStoreUserSpec} does: Rook
+ * fills in defaults of its own (e.g. {@code objectBucketName}), and reading a claim back must not
+ * fail over one.
+ */
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class ObjectBucketClaimSpec {
 
     private String bucketName;

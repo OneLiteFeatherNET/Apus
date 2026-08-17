@@ -17,7 +17,16 @@
  */
 package net.onelitefeather.apus.operator.rook;
 
-/** Observed state of a Rook ObjectBucketClaim. */
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+
+/**
+ * Observed state of a Rook ObjectBucketClaim.
+ *
+ * <p>Ignores unmodelled fields for the same reason {@link CephObjectStoreUserStatus} does, and
+ * before it costs anything to learn: Rook owns this CRD, and reading one of its objects must not
+ * fail over a field this operator never looks at.
+ */
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class ObjectBucketClaimStatus {
 
     /** Rook sets this to "Bound" once the bucket exists and credentials are written. */
