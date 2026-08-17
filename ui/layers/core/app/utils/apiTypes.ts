@@ -66,6 +66,13 @@ export interface TenantResponse {
   namespace: string
   objectStoreUser: string
   storageUsedBytes: number | null
+  /**
+   * The redirect URIs the identity provider must have registered before anyone can sign in to
+   * this tenant's own application instance. Empty when the tenant has no instance. The operator
+   * cannot register them itself, and a missing registration fails at the provider with nothing
+   * to see in the cluster -- which is why they are shown rather than filed in a runbook.
+   */
+  redirectUris: string[]
   conditions: ConditionResponse[]
 }
 

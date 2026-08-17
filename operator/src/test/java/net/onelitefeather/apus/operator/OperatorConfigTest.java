@@ -18,6 +18,8 @@
 package net.onelitefeather.apus.operator;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -79,5 +81,26 @@ class OperatorConfigTest {
         assertEquals("http://rgw.de.svc:80", config.bundleS3Endpoint());
         assertEquals("eu-central-1", config.bundleS3Region());
         assertEquals("bundle-creds-de", config.bundleCredentialsSecretName());
+    }
+
+    /**
+     * The per-tenant application instance is off unless a host is configured, and the defaults
+     * must leave it that way -- an operator that started provisioning a Deployment per tenant on
+     * a plain upgrade would be a surprise nobody asked for.
+     */
+    @Test
+    void theTenantApplicationInstanceIsOffByDefault() {
+        assertFalse(OperatorConfig.defaults().tenantUi().enabled());
+        assertFalse(OperatorConfig.fromEnvironment(name -> null).tenantUi().enabled());
+    }
+
+    @Test
+    void fromEnvironmentCarriesTheTenantUiSettings() {
+        Map<String, String> env = Map.of("APUS_TENANT_UI_HOST", "apus.example.dev");
+
+        OperatorConfig config = OperatorConfig.fromEnvironment(env::get);
+
+        assertTrue(config.tenantUi().enabled());
+        assertEquals("apus.example.dev", config.tenantUi().host());
     }
 }

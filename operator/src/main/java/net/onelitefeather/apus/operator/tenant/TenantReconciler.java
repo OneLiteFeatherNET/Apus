@@ -34,9 +34,11 @@ import io.javaoperatorsdk.operator.api.reconciler.Reconciler;
 import io.javaoperatorsdk.operator.api.reconciler.UpdateControl;
 import io.opentelemetry.api.common.Attributes;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import net.onelitefeather.apus.operator.OperatorConfig;
+import net.onelitefeather.apus.operator.TenantUiConfig;
 import net.onelitefeather.apus.operator.api.Conditions;
 import net.onelitefeather.apus.operator.api.Labels;
 import net.onelitefeather.apus.operator.api.Tenant;
@@ -77,6 +79,15 @@ import org.slf4j.LoggerFactory;
  * module for how it is read back. The raw token is never logged and never written to {@code
  * Tenant.status} -- only {@link net.onelitefeather.apus.operator.api.TenantStatus#getPushTokenSecret()},
  * the Secret's (non-secret, fixed) name, is.
+ *
+ * <p><b>Application instance:</b> when a host is configured ({@link
+ * net.onelitefeather.apus.operator.TenantUiConfig}), a tenant also gets its own instance of the
+ * tenant application -- a Deployment, Service and Ingress serving {@code
+ * https://<host>/t/<name>/} from the tenant's own namespace, built by {@link
+ * TenantUiResourceBuilder}. The feature is off unless a host is set, because an instance with no
+ * host would have nothing to serve it. The two redirect URIs the identity provider still has to
+ * be told about are reported on {@code status.redirectUris}; the operator cannot register them
+ * itself.
  *
  * <p><b>Rook not (yet) installed:</b> {@link #reconcile} checks {@link
  * io.fabric8.kubernetes.client.Client#supports(Class)} for {@link CephObjectStoreUser} before
@@ -308,6 +319,53 @@ public class TenantReconciler implements Reconciler<Tenant> {
                         .endMetadata()
                         .build())
                 .createOr(NonDeletingOperation::update);
+
+        provisionApplicationInstance(tenant, namespace, tenantName, tenantUid, ownerReference);
+    }
+
+    /**
+     * Creates (or updates) this tenant's own instance of the tenant application, served at
+     * {@code https://<host>/t/<name>/}: a Deployment, a Service and an Ingress, all three in the
+     * tenant's own namespace, which is where the Ingress has to be anyway -- an Ingress may only
+     * reference a Service in its own namespace.
+     *
+     * <p>Skipped entirely, and this is the default, when no host is configured: an instance with
+     * no host would have nothing to serve it, so creating one would burn a pod per tenant for
+     * nothing. {@code status.redirectUris} is cleared in that case rather than left stale, so a
+     * platform that switches the feature back off does not keep advertising URIs for an instance
+     * that no longer exists.
+     */
+    private void provisionApplicationInstance(
+            Tenant tenant, String namespace, String tenantName, String tenantUid, OwnerReference ownerReference) {
+        TenantUiConfig tenantUi = config.tenantUi();
+        if (!tenantUi.enabled()) {
+            tenant.getStatus().setRedirectUris(List.of());
+            return;
+        }
+
+        Map<String, String> labels = tenantUiLabels(tenantName, tenantUid);
+
+        client.apps()
+                .deployments()
+                .inNamespace(namespace)
+                .resource(TenantUiResourceBuilder.deployment(tenant, tenantUi, labels, ownerReference))
+                .createOr(NonDeletingOperation::update);
+
+        client.services()
+                .inNamespace(namespace)
+                .resource(TenantUiResourceBuilder.service(tenant, labels, ownerReference))
+                .createOr(NonDeletingOperation::update);
+
+        client.network()
+                .v1()
+                .ingresses()
+                .inNamespace(namespace)
+                .resource(TenantUiResourceBuilder.ingress(tenant, tenantUi, labels, ownerReference))
+                .createOr(NonDeletingOperation::update);
+
+        // Reported, not registered: see TenantUiResourceBuilder#redirectUris for why the operator
+        // cannot add these to the app registration itself.
+        tenant.getStatus().setRedirectUris(TenantUiResourceBuilder.redirectUris(tenant, tenantUi));
     }
 
     /**
@@ -384,6 +442,21 @@ public class TenantReconciler implements Reconciler<Tenant> {
      * FabricPushTokenRepository} in the {@code api} module actually queries by, since a raw push
      * token carries no namespace of its own to look the Secret up by name directly.
      */
+    /**
+     * The application instance's labels. Deliberately <em>not</em> {@link #tenantLabels}: these
+     * double as the Deployment's pod selector and the Service's, and every other resource here
+     * carries {@code app.kubernetes.io/name: tenant}. Two workloads in one namespace sharing a
+     * selector would each take the other's pods, so this set names the component instead.
+     */
+    private static Map<String, String> tenantUiLabels(String tenantName, String tenantUid) {
+        Map<String, String> labels = Labels.standard("tenant-ui", tenantName);
+        labels.put(Labels.TENANT, tenantName);
+        if (tenantUid != null && !tenantUid.isBlank()) {
+            labels.put(Labels.TENANT_UID, tenantUid);
+        }
+        return labels;
+    }
+
     private static Map<String, String> pushTokenLabels(String tenantName, String tenantUid) {
         Map<String, String> labels = new HashMap<>(tenantLabels(tenantName, tenantUid));
         labels.put(PushTokenSecrets.LABEL_KEY, PushTokenSecrets.LABEL_VALUE);

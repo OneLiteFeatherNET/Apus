@@ -19,6 +19,7 @@ package net.onelitefeather.apus.operator.tenant;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.fabric8.kubernetes.api.model.Namespace;
@@ -27,13 +28,16 @@ import io.fabric8.kubernetes.api.model.ObjectMetaBuilder;
 import io.fabric8.kubernetes.api.model.ResourceQuota;
 import io.fabric8.kubernetes.api.model.Secret;
 import io.fabric8.kubernetes.api.model.SecretBuilder;
+import io.fabric8.kubernetes.api.model.apps.Deployment;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.server.mock.EnableKubernetesMockClient;
 import io.fabric8.kubernetes.client.server.mock.KubernetesMockServer;
 import io.javaoperatorsdk.operator.api.reconciler.UpdateControl;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import net.onelitefeather.apus.operator.OperatorConfig;
+import net.onelitefeather.apus.operator.TenantUiConfig;
 import net.onelitefeather.apus.operator.api.Conditions;
 import net.onelitefeather.apus.operator.api.Labels;
 import net.onelitefeather.apus.operator.api.Tenant;
@@ -427,5 +431,148 @@ class TenantReconcilerTest {
 
         assertTrue(control.isPatchStatus());
         assertEquals(TenantReconciler.RESOURCE_CONFLICT_REASON, readyReason(tenant));
+    }
+
+    /**
+     * The defaults with the per-tenant application instance switched on. Everything else is copied
+     * from {@link OperatorConfig#defaults()} so this helper cannot drift from it.
+     */
+    private static OperatorConfig configWithTenantUi() {
+        OperatorConfig defaults = OperatorConfig.defaults();
+        return new OperatorConfig(
+                defaults.rookNamespace(),
+                defaults.cephObjectStore(),
+                defaults.bucketStorageClass(),
+                defaults.runnerImage(),
+                defaults.ingestImage(),
+                defaults.hostingImage(),
+                defaults.bundleBucket(),
+                defaults.bundleS3Endpoint(),
+                defaults.bundleS3Region(),
+                defaults.bundleCredentialsSecretName(),
+                new TenantUiConfig(
+                        "apus.example.dev",
+                        "apus/ui:1.2.3",
+                        "cloudflare-tunnel",
+                        "https://apus.example.dev",
+                        "https://issuer.example/v2.0",
+                        "client-id",
+                        "api://client-id/access_as_user openid"));
+    }
+
+    private Deployment tenantUiDeployment(String namespace) {
+        return client.apps()
+                .deployments()
+                .inNamespace(namespace)
+                .withName(TenantUiResourceBuilder.RESOURCE_NAME)
+                .get();
+    }
+
+    /**
+     * The default, and the reason it is asserted first: a platform that has not opted in must get
+     * no per-tenant instance at all. An operator that started provisioning a Deployment per tenant
+     * on a plain upgrade would be a surprise nobody asked for, and one that costs a pod per
+     * tenant.
+     */
+    @Test
+    void provisionsNoApplicationInstanceWhenNoHostIsConfigured() {
+        TenantReconciler reconciler = new TenantReconciler(client, OperatorConfig.defaults());
+        Tenant tenant = tenant("friends", "500Gi");
+
+        reconciler.reconcile(tenant, null);
+
+        assertNull(tenantUiDeployment("bluemap-friends"));
+        assertNull(client.services()
+                .inNamespace("bluemap-friends")
+                .withName(TenantUiResourceBuilder.RESOURCE_NAME)
+                .get());
+        assertNull(client.network()
+                .v1()
+                .ingresses()
+                .inNamespace("bluemap-friends")
+                .withName(TenantUiResourceBuilder.RESOURCE_NAME)
+                .get());
+        assertTrue(tenant.getStatus().getRedirectUris().isEmpty());
+    }
+
+    @Test
+    void provisionsTheApplicationInstanceOnceAHostIsConfigured() {
+        TenantReconciler reconciler = new TenantReconciler(client, configWithTenantUi());
+        Tenant tenant = tenant("friends", "500Gi");
+
+        reconciler.reconcile(tenant, null);
+
+        Deployment deployment = tenantUiDeployment("bluemap-friends");
+        assertNotNull(deployment);
+        assertEquals(
+                "apus/ui:1.2.3",
+                deployment
+                        .getSpec()
+                        .getTemplate()
+                        .getSpec()
+                        .getContainers()
+                        .get(0)
+                        .getImage());
+        assertNotNull(client.services()
+                .inNamespace("bluemap-friends")
+                .withName(TenantUiResourceBuilder.RESOURCE_NAME)
+                .get());
+        assertNotNull(client.network()
+                .v1()
+                .ingresses()
+                .inNamespace("bluemap-friends")
+                .withName(TenantUiResourceBuilder.RESOURCE_NAME)
+                .get());
+    }
+
+    @Test
+    void reportsTheRedirectUrisThatStillHaveToBeRegisteredByHand() {
+        TenantReconciler reconciler = new TenantReconciler(client, configWithTenantUi());
+        Tenant tenant = tenant("friends", "500Gi");
+
+        reconciler.reconcile(tenant, null);
+
+        assertEquals(
+                List.of(
+                        "https://apus.example.dev/t/friends/auth/callback",
+                        "https://apus.example.dev/t/friends/auth/silent-renew"),
+                tenant.getStatus().getRedirectUris());
+    }
+
+    @Test
+    void reconcilingTwiceLeavesOneApplicationInstance() {
+        TenantReconciler reconciler = new TenantReconciler(client, configWithTenantUi());
+        Tenant tenant = tenant("friends", "500Gi");
+
+        reconciler.reconcile(tenant, null);
+        reconciler.reconcile(tenant, null);
+
+        assertEquals(
+                1,
+                client.apps()
+                        .deployments()
+                        .inNamespace("bluemap-friends")
+                        .list()
+                        .getItems()
+                        .size());
+    }
+
+    /**
+     * The instance's labels double as the Deployment's pod selector, so they must not be the
+     * plain tenant label set every other resource here carries -- two workloads in one namespace
+     * sharing a selector would each take the other's pods.
+     */
+    @Test
+    void theApplicationInstanceSelectorIsNotTheTenantsGenericLabelSet() {
+        TenantReconciler reconciler = new TenantReconciler(client, configWithTenantUi());
+        Tenant tenant = tenant("friends", "500Gi");
+
+        reconciler.reconcile(tenant, null);
+
+        Map<String, String> selector =
+                tenantUiDeployment("bluemap-friends").getSpec().getSelector().getMatchLabels();
+        assertEquals("tenant-ui", selector.get(Labels.NAME));
+        assertEquals("friends", selector.get(Labels.TENANT));
+        assertEquals(tenant.getMetadata().getUid(), selector.get(Labels.TENANT_UID));
     }
 }

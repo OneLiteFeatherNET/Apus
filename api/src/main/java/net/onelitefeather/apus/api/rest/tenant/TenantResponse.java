@@ -27,6 +27,13 @@ import net.onelitefeather.apus.operator.api.Tenant;
  * Its own type, not the custom resource itself -- {@code Tenant} carries a finalizer,
  * {@code resourceVersion}, and other managed fields that are the operator's business, not an
  * API consumer's, and would change shape with every CRD revision if reused directly here.
+ *
+ * <p>{@code redirectUris} is the one field here that is not merely informational: it names the
+ * two URIs an administrator still has to register with the identity provider before anyone can
+ * sign in to that tenant's own application instance. The operator cannot register them, and a
+ * missing registration fails at sign-in with {@code AADSTS50011} and leaves nothing in the
+ * cluster's logs -- so it has to reach the console, where the person who created the tenant is
+ * standing. Empty for a tenant with no instance, never null.
  */
 @Serdeable
 public record TenantResponse(
@@ -38,6 +45,7 @@ public record TenantResponse(
         String namespace,
         String objectStoreUser,
         Long storageUsedBytes,
+        List<String> redirectUris,
         List<ConditionResponse> conditions) {
 
     public static TenantResponse from(Tenant tenant) {
@@ -52,6 +60,7 @@ public record TenantResponse(
                 status.getNamespace(),
                 status.getObjectStoreUser(),
                 status.getStorageUsedBytes(),
+                List.copyOf(status.getRedirectUris()),
                 status.getConditions().stream().map(ConditionResponse::from).toList());
     }
 

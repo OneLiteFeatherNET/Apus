@@ -134,4 +134,22 @@ class ApusResourceTest {
                 new BlueMapRender().getStatus(),
                 "BlueMapRender.getStatus() must not be null right after construction");
     }
+
+    @Test
+    void aTenantStartsWithNoRedirectUris() {
+        // A tenant with no application instance must report an empty list, never null: every
+        // reader of this field would otherwise have to guard, and the console renders nothing
+        // at all rather than an empty "redirect URIs" box.
+        assertTrue(new TenantStatus().getRedirectUris().isEmpty());
+    }
+
+    @Test
+    void aTenantStatusAbsorbsNullRedirectUris() {
+        // `kubectl edit` and a round-trip through Jackson can both put null here.
+        TenantStatus status = new TenantStatus();
+
+        status.setRedirectUris(null);
+
+        assertTrue(status.getRedirectUris().isEmpty());
+    }
 }

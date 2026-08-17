@@ -37,6 +37,7 @@ import io.javaoperatorsdk.operator.api.reconciler.UpdateControl;
 import java.util.List;
 import java.util.UUID;
 import net.onelitefeather.apus.operator.OperatorConfig;
+import net.onelitefeather.apus.operator.TenantUiConfig;
 import net.onelitefeather.apus.operator.api.BlueMapHosting;
 import net.onelitefeather.apus.operator.api.BlueMapMap;
 import net.onelitefeather.apus.operator.api.Conditions;
@@ -293,7 +294,8 @@ class BlueMapHostingReconcilerTest {
                 "apus-bundles",
                 "http://rgw.example.svc:80",
                 "us-east-1",
-                "apus-bundle-credentials");
+                "apus-bundle-credentials",
+                TenantUiConfig.disabled());
         BlueMapHostingReconciler reconciler = new BlueMapHostingReconciler(client, config);
         BlueMapHosting hosting = hosting("friends-maps", "map.friends.example.net", "survival-overworld");
 

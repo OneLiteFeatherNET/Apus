@@ -143,4 +143,41 @@ class TenantControllerTest {
         var request = new UpdateTenantRequest("500Gi", null, null, null);
         assertThrows(NotFoundException.class, () -> controller.update(platformAdmin(), "does-not-exist", request));
     }
+
+    /**
+     * The operator reports the redirect URIs a tenant's own application instance needs, because
+     * it cannot register them with the identity provider itself. They have to reach the console,
+     * or the person who just created a tenant walks away without being told what remains -- and
+     * the failure they eventually hit (AADSTS50011 at sign-in) leaves no trace in this cluster.
+     */
+    @Test
+    void listReportsTheRedirectUrisTheOperatorPublished() {
+        Tenant tenant = new Tenant();
+        tenant.getMetadata().setName("acme");
+        tenant.getStatus()
+                .setRedirectUris(List.of(
+                        "https://apus.example.dev/t/acme/auth/callback",
+                        "https://apus.example.dev/t/acme/auth/silent-renew"));
+        repository.put(tenant);
+
+        var response = controller.list(platformAdmin());
+
+        assertEquals(
+                List.of(
+                        "https://apus.example.dev/t/acme/auth/callback",
+                        "https://apus.example.dev/t/acme/auth/silent-renew"),
+                response.body().get(0).redirectUris());
+    }
+
+    /** A tenant with no application instance reports an empty list, never null. */
+    @Test
+    void listReportsNoRedirectUrisForATenantWithoutAnInstance() {
+        Tenant tenant = new Tenant();
+        tenant.getMetadata().setName("acme");
+        repository.put(tenant);
+
+        var response = controller.list(platformAdmin());
+
+        assertTrue(response.body().get(0).redirectUris().isEmpty());
+    }
 }

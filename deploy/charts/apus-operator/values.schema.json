@@ -28,6 +28,34 @@
         }
       }
     },
+    "tenantUi": {
+      "type": "object",
+      "description": "One instance of the tenant application per tenant. Not required: an empty host disables it, which is the default.",
+      "properties": {
+        "host": { "type": "string" },
+        "image": {
+          "type": "object",
+          "properties": {
+            "repository": { "type": "string", "minLength": 1 },
+            "tag": { "type": "string" }
+          }
+        },
+        "ingressClassName": { "type": "string", "minLength": 1 },
+        "apiBaseUrl": {
+          "type": "string",
+          "description": "Origin only, with no /api suffix -- the typed client already asks for /api paths, so a suffix here produces /api/api/tenants and a bare 403.",
+          "not": { "pattern": "/api/?$" }
+        },
+        "oidc": {
+          "type": "object",
+          "properties": {
+            "issuer": { "type": "string" },
+            "clientId": { "type": "string" },
+            "scope": { "type": "string" }
+          }
+        }
+      }
+    },
     "replicaCount": { "type": "integer", "minimum": 1, "maximum": 1 }
   }
 }
