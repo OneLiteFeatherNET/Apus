@@ -6,16 +6,51 @@
  * Observed usage is an observation, not a control -- Ceph enforces the quota, Apus only reports
  * what it sees (see storageUsage.ts's module Javadoc).
  */
-import type { DataTableColumn } from '#design/components/DataTable.vue'
+import type { DataTableColumn, } from '#design/components/DataTable.vue'
+import type { DirectoryCountsResponse } from '#core/utils/apiTypes'
 
 const { tenants, loading, error, refresh } = useTenants()
+const api = useApiClient()
 
 const columns: DataTableColumn[] = [
   { key: 'name', label: 'Tenant' },
   { key: 'storage', label: 'Storage' },
+  { key: 'people', label: 'Teams / people', numeric: true, secondary: true },
   { key: 'domains', label: 'Domains', numeric: true, secondary: true },
   { key: 'namespace', label: 'Namespace', secondary: true }
 ]
+
+/**
+ * Counts per tenant, fetched one request at a time after the table is already on screen.
+ *
+ * Deliberately not part of the tenant list itself: these come from the identity provider, which
+ * is somebody else's service and will be slow or throttling at some point. Blocking the table on
+ * them would make every tenant unreadable whenever Microsoft has a bad minute, and the storage
+ * column — the one an operator actually scans — has nothing to do with the directory.
+ *
+ * A tenant whose counts fail simply keeps its dash. The API already answers 200 with a reason
+ * rather than an error, so this only catches a genuinely broken request.
+ */
+const counts = ref<Record<string, DirectoryCountsResponse>>({})
+
+watch(tenants, async list => {
+  for (const tenant of list) {
+    if (counts.value[tenant.name]) continue
+    try {
+      counts.value = { ...counts.value, [tenant.name]: await api.getDirectoryCounts(tenant.name) }
+    } catch {
+      // Leave it absent: the cell shows a dash, which is honest about not knowing.
+    }
+  }
+}, { immediate: true })
+
+function peopleLabel(name: string): string {
+  const row = counts.value[name]
+  // A dash, never "0 / 0" -- a zero here would say this tenant has nobody in it, which is
+  // something an administrator would act on.
+  if (!row || row.teams === null || row.users === null) return '—'
+  return `${row.teams} / ${row.users}`
+}
 </script>
 
 <template>
@@ -89,6 +124,10 @@ const columns: DataTableColumn[] = [
               {{ row.usage.usedLabel }} of {{ row.usage.quotaLabel }}
             </span>
           </div>
+        </template>
+
+        <template #cell-people="{ row }">
+          <span class="apus-value text-muted text-xs">{{ peopleLabel(row.name) }}</span>
         </template>
 
         <template #cell-domains="{ row }">

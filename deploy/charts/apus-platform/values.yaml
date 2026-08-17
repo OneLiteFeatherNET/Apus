@@ -13,6 +13,31 @@ auth:
   # next task has somewhere to point once it lands.
   audience: apus
 
+# Teams, invitations and password resets, through Microsoft Graph.
+#
+# Off by default, and the API says so rather than failing to start: this needs Graph application
+# permissions with admin consent -- Group.ReadWrite.All, User.ReadWrite.All, User.Invite.All --
+# which a platform may reasonably decline to grant. Without them the console shows those panels
+# as unavailable and everything else works unchanged.
+#
+# Those permissions are directory-wide; Entra has no "these groups only" variant. What narrows
+# them is Apus's own DirectoryGuard, which refuses any group no Tenant claims via
+# spec.identity.groupId, any user outside one, and any password reset aimed at a privileged
+# directory account.
+#
+# The registration named here MUST NOT be the one the browser uses. That one is a SPA -- a public
+# client, which cannot hold a secret and cannot use the client-credentials flow at all.
+directory:
+  enabled: false
+  # The Entra tenant (directory) id.
+  tenantId: ""
+  # The confidential app registration's client id.
+  clientId: ""
+  clientSecret:
+    # A Secret you create; this chart never templates the value itself.
+    secretName: apus-directory-credentials
+    key: client-secret
+
 api:
   image:
     repository: harbor.onelitefeather.dev/apus/api

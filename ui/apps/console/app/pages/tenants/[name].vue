@@ -11,7 +11,13 @@ import { ApusApiError } from '#core/utils/apiErrors'
 import { parseQuotaBytes } from '#core/utils/storageUsage'
 import { validateAllowedDomains } from '#core/utils/domainValidation'
 import type { MetaItem } from '#design/components/MetaList.vue'
-import type { PolicyEntryResponse, PolicyKeyResponse } from '#core/utils/apiTypes'
+import type {
+  PolicyEntryResponse,
+  PolicyKeyResponse,
+  TenantDirectoryResponse,
+  DirectoryUserResponse,
+  PasswordResetResponse
+} from '#core/utils/apiTypes'
 
 const route = useRoute()
 const name = computed(() => String(route.params.name ?? ''))
@@ -90,6 +96,70 @@ async function save(): Promise<void> {
     saveError.value = caught instanceof ApusApiError ? caught.message : 'Could not save this tenant.'
   } finally {
     saving.value = false
+  }
+}
+
+// -- Teams and people ------------------------------------------------------------------------
+// Loaded separately from the tenant itself, and its failure is its own: the API answers 200 with
+// `unavailableReason` when the identity provider is unreachable, so this only ever throws when
+// something is genuinely wrong with the request -- which must not take the rest of the page down.
+const tenantDirectory = ref<TenantDirectoryResponse | null>(null)
+const directoryError = ref<string | null>(null)
+const temporaryPassword = ref<PasswordResetResponse | null>(null)
+
+async function loadDirectory(): Promise<void> {
+  if (!name.value) return
+  try {
+    tenantDirectory.value = await api.getTenantDirectory(name.value)
+    directoryError.value = null
+  } catch (caught) {
+    tenantDirectory.value = null
+    directoryError.value = caught instanceof ApusApiError
+      ? caught.message
+      : 'Could not load this tenant\'s teams and people.'
+  }
+}
+
+watch(name, loadDirectory, { immediate: true })
+
+/**
+ * Team membership, fetched one team at a time when somebody opens it. Not up front: that would
+ * be one request per team on every page load, for a list most people only scan.
+ */
+const teamMembers = ref<Record<string, DirectoryUserResponse[]>>({})
+
+async function loadTeamMembers(teamId: string): Promise<void> {
+  try {
+    teamMembers.value = { ...teamMembers.value, [teamId]: await api.getTeamMembers(name.value, teamId) }
+  } catch (caught) {
+    directoryError.value = caught instanceof ApusApiError ? caught.message : 'Could not load that team.'
+  }
+}
+
+async function createTeam(displayName: string): Promise<void> {
+  try {
+    await api.createTeam(name.value, { displayName })
+    await loadDirectory()
+  } catch (caught) {
+    directoryError.value = caught instanceof ApusApiError ? caught.message : 'Could not create that team.'
+  }
+}
+
+async function invite(payload: { email: string, displayName: string }): Promise<void> {
+  try {
+    await api.inviteUser(name.value, { email: payload.email, displayName: payload.displayName || null })
+    await loadDirectory()
+  } catch (caught) {
+    directoryError.value = caught instanceof ApusApiError ? caught.message : 'Could not send that invitation.'
+  }
+}
+
+async function resetPassword(user: DirectoryUserResponse): Promise<void> {
+  try {
+    temporaryPassword.value = await api.resetPassword(name.value, user.id)
+    directoryError.value = null
+  } catch (caught) {
+    directoryError.value = caught instanceof ApusApiError ? caught.message : 'Could not reset that password.'
   }
 }
 
@@ -194,6 +264,42 @@ const metadata = computed<MetaItem[]>(() => {
         </section>
 
         <PlatformPolicyEditor v-model="policyEntries" :known-keys="knownKeys" @update:model-value="dirty = true" />
+
+        <PlatformTenantDirectory
+          v-if="tenantDirectory"
+          :tenant="tenant.name"
+          :directory="tenantDirectory"
+          :can-write="true"
+          :members="teamMembers"
+          @create-team="createTeam"
+          @invite="invite"
+          @reset-password="resetPassword"
+          @load-members="loadTeamMembers"
+        />
+
+        <p v-if="directoryError" class="border-error/40 bg-error/5 text-error border p-3 text-sm">
+          {{ directoryError }}
+        </p>
+
+        <!-- Shown once and never again: it exists here and nowhere else. -->
+        <div
+          v-if="temporaryPassword"
+          class="border-warning/40 bg-warning/5 flex flex-col gap-2 border p-4"
+        >
+          <p class="text-highlighted text-sm">
+            Temporary password for {{ temporaryPassword.userId }} — copy it now, it is not shown again.
+          </p>
+          <p class="apus-value text-highlighted text-sm break-all">
+            {{ temporaryPassword.temporaryPassword }}
+          </p>
+          <div>
+            <UButton size="sm" variant="subtle" @click="temporaryPassword = null">
+              Done
+            </UButton>
+          </div>
+        </div>
+
+        <PlatformImpersonationPanel :tenant="tenant.name" :users="tenantDirectory?.users ?? []" />
 
         <PlatformRedirectUris :uris="tenant.redirectUris" />
 

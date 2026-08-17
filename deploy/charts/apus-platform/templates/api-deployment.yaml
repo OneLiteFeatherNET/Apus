@@ -49,6 +49,23 @@ spec:
               value: {{ .Values.auth.issuer | quote }}
             - name: APUS_JWT_JWKS_URI
               value: {{ .Values.auth.jwksUri | quote }}
+            {{- if .Values.directory.enabled }}
+            # Teams, invitations and password resets. A *second*, confidential app registration
+            # -- never the SPA's: a public client cannot hold a secret or use client credentials
+            # at all, so Graph application permissions there would be unusable and would suggest
+            # the browser held them.
+            - name: APUS_DIRECTORY_TENANT_ID
+              value: {{ .Values.directory.tenantId | quote }}
+            - name: APUS_DIRECTORY_CLIENT_ID
+              value: {{ .Values.directory.clientId | quote }}
+            # From a Secret via secretKeyRef, never inlined: a Deployment manifest is readable by
+            # anything allowed to read Deployments in this namespace.
+            - name: APUS_DIRECTORY_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.directory.clientSecret.secretName | quote }}
+                  key: {{ .Values.directory.clientSecret.key | quote }}
+            {{- end }}
             {{- if .Values.otel.endpoint }}
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
               value: {{ .Values.otel.endpoint | quote }}

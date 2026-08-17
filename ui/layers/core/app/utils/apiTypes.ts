@@ -76,6 +76,58 @@ export interface TenantResponse {
   conditions: ConditionResponse[]
 }
 
+/** api/src/main/java/net/onelitefeather/apus/api/rest/directory/DirectoryResponses.java */
+export interface DirectoryTeamResponse {
+  id: string
+  displayName: string
+  /**
+   * `null` rather than `0` when the directory could be asked for the team but not for its size.
+   * A zero meaning "not counted" is a lie somebody would act on, and `null` is the one value a
+   * template cannot mistake for a number.
+   */
+  memberCount: number | null
+}
+
+export interface DirectoryUserResponse {
+  id: string
+  displayName: string
+  email: string
+  /**
+   * Holds a directory role that makes this account un-resettable through Apus. The API refuses
+   * regardless; this only exists so the console can disable the button rather than let somebody
+   * press it and be told no.
+   */
+  privileged: boolean
+}
+
+/** Counts beside a tenant. Both `null` together, with a reason, when the directory is unreachable. */
+export interface DirectoryCountsResponse {
+  teams: number | null
+  users: number | null
+  unavailableReason: string | null
+}
+
+export interface TenantDirectoryResponse {
+  teams: DirectoryTeamResponse[]
+  users: DirectoryUserResponse[]
+  unavailableReason: string | null
+}
+
+/** The temporary password exists here and nowhere else. Shown once, never stored. */
+export interface PasswordResetResponse {
+  userId: string
+  temporaryPassword: string
+}
+
+export interface CreateTeamRequest {
+  displayName: string
+}
+
+export interface InviteUserRequest {
+  email: string
+  displayName?: string | null
+}
+
 /** `TenantResponse.StorageResponse` -- never carries Ceph credentials, quota only. */
 export interface TenantStorageResponse {
   quota: string | null

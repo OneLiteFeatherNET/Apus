@@ -34,6 +34,9 @@ public class TenantSpec {
      */
     private List<PolicyEntry> policy = new ArrayList<>();
 
+    /** How this tenant's members are recognised in the identity provider. See {@link Identity}. */
+    private Identity identity = new Identity();
+
     public String getDisplayName() {
         return displayName;
     }
@@ -69,6 +72,44 @@ public class TenantSpec {
      */
     public void setPolicy(List<PolicyEntry> policy) {
         this.policy = policy == null ? new ArrayList<>() : policy;
+    }
+
+    public Identity getIdentity() {
+        return identity;
+    }
+
+    /** Absorbs {@code null}, the same way {@link #setPolicy} does and for the same reason. */
+    public void setIdentity(Identity identity) {
+        this.identity = identity == null ? new Identity() : identity;
+    }
+
+    /**
+     * Ties this tenant to a group in the identity provider, which is how a signed-in user is
+     * recognised as one of its members.
+     *
+     * <p>Before this existed, {@code PrincipalResolver} in the {@code api} module read a claim
+     * named {@code organization} that the app registration never emitted -- neither {@code
+     * groupMembershipClaims} nor {@code optionalClaims} was configured -- so every user resolved
+     * to "no tenant" and the tenant application had nothing to show anybody. A group id is
+     * something the provider genuinely puts in a token, and it is the same identifier the
+     * directory operations (teams, invitations) are scoped by.
+     *
+     * <p>Empty is allowed and means what it did before: membership is not derived from groups,
+     * and no directory operation is permitted against this tenant -- rather than "any group",
+     * which would make an unconfigured tenant the widest one on the platform.
+     */
+    public static class Identity {
+
+        /** Object id of the group whose members belong to this tenant. Empty means unconfigured. */
+        private String groupId;
+
+        public String getGroupId() {
+            return groupId;
+        }
+
+        public void setGroupId(String groupId) {
+            this.groupId = groupId == null || groupId.isBlank() ? null : groupId;
+        }
     }
 
     /** Hard storage limit, enforced by Ceph rather than by this operator. */
