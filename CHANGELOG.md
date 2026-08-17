@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.9.0](https://github.com/OneLiteFeatherNET/Apus/compare/apus-v0.8.0...apus-v0.9.0) (2026-08-17)
+
+
+### Features
+
+* an app UI instance per tenant ([#62](https://github.com/OneLiteFeatherNET/Apus/issues/62)) ([e0d87d1](https://github.com/OneLiteFeatherNET/Apus/commit/e0d87d10940201c4ec9cd3e20f318ad60bbcd603))
+* teams, users and impersonation ([#63](https://github.com/OneLiteFeatherNET/Apus/issues/63)) ([bff3ead](https://github.com/OneLiteFeatherNET/Apus/commit/bff3ead07679e7d56528a8c3a8c98a634287d643))
+
 ## [0.8.0](https://github.com/OneLiteFeatherNET/Apus/compare/apus-v0.7.2...apus-v0.8.0) (2026-08-16)
 
 
