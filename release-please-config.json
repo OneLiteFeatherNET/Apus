@@ -11,23 +11,38 @@
       "package-name": "apus",
       "changelog-path": "CHANGELOG.md",
       "extra-files": [
-        { "type": "generic", "path": "build.gradle.kts" },
-        { "type": "generic", "path": "deploy/charts/apus-operator/Chart.yaml" },
-        { "type": "generic", "path": "deploy/charts/apus-platform/Chart.yaml" }
+        {
+          "type": "generic",
+          "path": "build.gradle.kts"
+        },
+        {
+          "type": "generic",
+          "path": "deploy/charts/apus-operator/Chart.yaml"
+        },
+        {
+          "type": "generic",
+          "path": "deploy/charts/apus-platform/Chart.yaml"
+        }
       ]
     },
     "telemetry-addon": {
       "package-name": "telemetry-addon",
       "changelog-path": "CHANGELOG.md",
       "extra-files": [
-        { "type": "generic", "path": "build.gradle.kts" }
+        {
+          "type": "generic",
+          "path": "build.gradle.kts"
+        }
       ]
     },
     "paper-worldpush": {
       "package-name": "paper-worldpush",
       "changelog-path": "CHANGELOG.md",
       "extra-files": [
-        { "type": "generic", "path": "build.gradle.kts" }
+        {
+          "type": "generic",
+          "path": "build.gradle.kts"
+        }
       ]
     }
   }
