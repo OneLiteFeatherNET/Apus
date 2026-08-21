@@ -404,7 +404,9 @@ jobs:
   sbom:
     name: Attach SBOM to release
     needs: release-please
-    if: needs.release-please.outputs.release_created == 'true'
+    # This repo funnels the release signal through its own resolve step, and its
+    # root tag carries the component prefix (include-component-in-tag).
+    if: ${{ !cancelled() && needs.release-please.outputs.root-released == 'true' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -412,7 +414,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          ref: ${{ needs.release-please.outputs.tag_name }}
+          ref: apus-v${{ needs.release-please.outputs.root-version }}
 
       - name: Generate CycloneDX SBOM
         uses: aquasecurity/trivy-action@v0.36.0
@@ -426,5 +428,5 @@ jobs:
       - name: Attach SBOM to the release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ needs.release-please.outputs.tag_name }}
+          TAG: apus-v${{ needs.release-please.outputs.root-version }}
         run: gh release upload "$TAG" bom.json --clobber
