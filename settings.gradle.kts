@@ -74,7 +74,7 @@ dependencyResolutionManagement {
             // 5.1.0 is the newest io.micronaut.test:micronaut-test-bom release and is the one
             // the io.micronaut.platform:micronaut-platform:5.1.0 BOM (already cross-checked
             // above for the other Micronaut coordinates) pins for this major.
-            version("micronaut-test", "5.1.0")
+            version("micronaut-test", "5.1.1")
 
             library("micronaut.core.bom", "io.micronaut", "micronaut-core-bom").versionRef("micronaut")
             library("micronaut.inject.java", "io.micronaut", "micronaut-inject-java").withoutVersion()
