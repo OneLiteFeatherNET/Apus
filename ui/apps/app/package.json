@@ -23,11 +23,11 @@
     "@nuxt/test-utils": "4.1.0",
     "@types/node": "26.2.0",
     "@vue/test-utils": "2.4.11",
-    "happy-dom": "20.11.2",
+    "happy-dom": "20.11.15",
     "nuxt": "4.5.2",
     "typescript": "6.0.3",
-    "vitest": "4.1.10",
-    "vue": "3.5.41",
-    "vue-tsc": "3.3.9"
+    "vitest": "4.1.11",
+    "vue": "3.5.43",
+    "vue-tsc": "3.3.12"
   }
 }
