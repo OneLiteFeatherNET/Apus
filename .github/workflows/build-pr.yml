@@ -41,7 +41,7 @@ jobs:
       # There is no root package.json; packageManager lives in ui/package.json, and
       # `defaults.run.working-directory` does not apply to action inputs, so the action
       # has to be told where to read the pnpm version from.
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v5
         with:
           package_json_file: ui/package.json
       - uses: actions/setup-node@v5
