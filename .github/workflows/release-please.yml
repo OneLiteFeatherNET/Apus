@@ -97,7 +97,7 @@ jobs:
   build-context:
     needs: release-please
     if: needs.release-please.outputs.root-released == 'true'
-    uses: OneLiteFeatherNET/workflows/.github/workflows/gradle-docker-context.yml@v2.8.1
+    uses: OneLiteFeatherNET/workflows/.github/workflows/gradle-docker-context.yml@v2.8.2
     with:
       java-version: "25"
       version: ${{ needs.release-please.outputs.root-version }}
@@ -126,7 +126,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: OneLiteFeatherNET/workflows/.github/workflows/docker-publish.yml@v2.8.1
+    uses: OneLiteFeatherNET/workflows/.github/workflows/docker-publish.yml@v2.8.2
     with:
       image-name: "apus/runner"
       version: ${{ needs.release-please.outputs.root-version }}
@@ -141,7 +141,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: OneLiteFeatherNET/workflows/.github/workflows/docker-publish.yml@v2.8.1
+    uses: OneLiteFeatherNET/workflows/.github/workflows/docker-publish.yml@v2.8.2
     with:
       image-name: "apus/ingest"
       version: ${{ needs.release-please.outputs.root-version }}
@@ -158,7 +158,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: OneLiteFeatherNET/workflows/.github/workflows/docker-publish.yml@v2.8.1
+    uses: OneLiteFeatherNET/workflows/.github/workflows/docker-publish.yml@v2.8.2
     with:
       image-name: "apus/hosting"
       version: ${{ needs.release-please.outputs.root-version }}
@@ -172,7 +172,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: OneLiteFeatherNET/workflows/.github/workflows/docker-publish.yml@v2.8.1
+    uses: OneLiteFeatherNET/workflows/.github/workflows/docker-publish.yml@v2.8.2
     with:
       image-name: "apus/operator"
       version: ${{ needs.release-please.outputs.root-version }}
@@ -187,7 +187,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: OneLiteFeatherNET/workflows/.github/workflows/docker-publish.yml@v2.8.1
+    uses: OneLiteFeatherNET/workflows/.github/workflows/docker-publish.yml@v2.8.2
     with:
       image-name: "apus/api"
       version: ${{ needs.release-please.outputs.root-version }}
@@ -203,7 +203,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: OneLiteFeatherNET/workflows/.github/workflows/docker-publish.yml@v2.8.1
+    uses: OneLiteFeatherNET/workflows/.github/workflows/docker-publish.yml@v2.8.2
     with:
       image-name: "apus/ui"
       version: ${{ needs.release-please.outputs.root-version }}
@@ -220,7 +220,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: OneLiteFeatherNET/workflows/.github/workflows/docker-publish.yml@v2.8.1
+    uses: OneLiteFeatherNET/workflows/.github/workflows/docker-publish.yml@v2.8.2
     with:
       image-name: "apus/console"
       version: ${{ needs.release-please.outputs.root-version }}
@@ -380,7 +380,7 @@ jobs:
     # Maven publish actually needs, matching the six Docker jobs.
     permissions:
       contents: read
-    uses: OneLiteFeatherNET/workflows/.github/workflows/gradle-publish.yml@v2.8.1
+    uses: OneLiteFeatherNET/workflows/.github/workflows/gradle-publish.yml@v2.8.2
     with:
       java-version: "25"
       java-distribution: "temurin"
@@ -393,7 +393,7 @@ jobs:
     if: needs.release-please.outputs.paper-released == 'true'
     permissions:
       contents: read
-    uses: OneLiteFeatherNET/workflows/.github/workflows/gradle-publish.yml@v2.8.1
+    uses: OneLiteFeatherNET/workflows/.github/workflows/gradle-publish.yml@v2.8.2
     with:
       java-version: "25"
       java-distribution: "temurin"
