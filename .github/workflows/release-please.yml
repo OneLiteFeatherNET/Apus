@@ -45,7 +45,7 @@ jobs:
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         # Only the dispatch path needs a working tree, to read the manifest fallback below.
         # release-please-action works purely through the API and needs no checkout.
         if: github.event_name == 'workflow_dispatch'
@@ -241,7 +241,7 @@ jobs:
       # returns 403 and the sign step fails. Same grant the six image jobs already carry.
       id-token: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: azure/setup-helm@v4
         with:
           # Same pin, same reason as build-pr.yml (see the comment there): the chart that ships
