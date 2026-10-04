@@ -29,7 +29,7 @@ dependencyResolutionManagement {
             // 2.20+ pins jackson-annotations to a patch-less "2.22" version, by design (see the
             // bom's own POM comment) -- only jackson-databind itself needs a version("jackson")
             // reference here.
-            version("jackson", "2.22.1")
+            version("jackson", "2.22.2")
             // AWS SDK v2, not the MinIO Java client: runner/vendor/BlueMapS3Storage.jar (the
             // BlueMap storage addon the render container already uses) is itself built on
             // software.amazon.nio.spi.s3, which wraps this same SDK. Using it here too keeps
