@@ -37,7 +37,7 @@ dependencyResolutionManagement {
             // instead of two competing ones, and it works against any S3-compatible endpoint
             // (Rook/Ceph, MinIO, R2, ...) via endpoint override + path-style access -- nothing
             // MinIO-specific is needed. Version verified against Maven Central on 2026-08-08.
-            version("aws-sdk", "2.46.7")
+            version("aws-sdk", "2.46.8")
 
             // cron-utils: parses/evaluates the Cron expression in WorldSourceSpec.poll
             // (phase 2b, task 6). Chosen over hand-rolling a parser (an explicitly named
