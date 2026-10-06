@@ -14,7 +14,7 @@
     "oidc-client-ts": "3.5.0"
   },
   "devDependencies": {
-    "happy-dom": "20.11.2",
-    "vitest": "4.1.10"
+    "happy-dom": "20.11.15",
+    "vitest": "4.1.11"
   }
 }
