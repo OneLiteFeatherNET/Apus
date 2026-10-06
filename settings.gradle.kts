@@ -14,7 +14,7 @@ dependencyResolutionManagement {
         create("libs") {
             version("bluemap", "5.26")
             version("bluemap-api", "2.8.0")
-            version("junit", "6.1.1")
+            version("junit", "6.1.2")
             version("testcontainers", "1.20.5")
             version("spotless", "8.4.0")
             version("shadow", "9.3.2")
