@@ -170,7 +170,7 @@ dependencyResolutionManagement {
             // the console -- that is what `kubectl logs` shows -- while the OpenTelemetry appender
             // ships the same event through OTLP. Nothing scrapes stdout for ingestion; the console
             // is for humans, OTLP is for the pipeline.
-            version("slf4j", "2.0.17")
+            version("slf4j", "2.0.18")
             version("logback", "1.5.23")
             library("slf4j.api", "org.slf4j", "slf4j-api").versionRef("slf4j")
             library("logback.classic", "ch.qos.logback", "logback-classic").versionRef("logback")
