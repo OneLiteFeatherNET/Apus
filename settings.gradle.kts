@@ -68,7 +68,7 @@ dependencyResolutionManagement {
             // Micronaut 5 is the current major; there is no newer 4.x release to prefer over it.
             version("micronaut", "5.1.15")
             version("micronaut-security", "5.3.1")
-            version("micronaut-serde", "3.2.1")
+            version("micronaut-serde", "3.2.2")
             // Test-only (phase 5a consolidation, part 2): micronaut-test-junit5 versions
             // independently of micronaut-core -- verified against Maven Central on 2026-08-09,
             // 5.1.0 is the newest io.micronaut.test:micronaut-test-bom release and is the one
