@@ -72,7 +72,7 @@ jobs:
           # after 3.18.4. An older Helm would fail these checks with a misleading
           # message even though the schema is fine. setup-helm's own fallback
           # version is 3.18.3, so "latest" is not safe to rely on here.
-          version: v4.2.4
+          version: v4.3.0
       - name: Lint charts
         run: |
           helm lint deploy/charts/apus-operator --set bundles.s3Endpoint=http://example

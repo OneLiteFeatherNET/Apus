@@ -246,7 +246,7 @@ jobs:
         with:
           # Same pin, same reason as build-pr.yml (see the comment there): the chart that ships
           # must be packaged by the exact Helm version the PR job linted and rendered it with.
-          version: v4.2.4
+          version: v4.3.0
       - name: Install Cosign
         # Installed before the push, not after it: a cosign install that fails would
         # otherwise leave two charts published in the registry that nothing ever signs.
