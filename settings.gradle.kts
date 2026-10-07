@@ -171,7 +171,7 @@ dependencyResolutionManagement {
             // ships the same event through OTLP. Nothing scrapes stdout for ingestion; the console
             // is for humans, OTLP is for the pipeline.
             version("slf4j", "2.0.19")
-            version("logback", "1.5.23")
+            version("logback", "1.5.24")
             library("slf4j.api", "org.slf4j", "slf4j-api").versionRef("slf4j")
             library("logback.classic", "ch.qos.logback", "logback-classic").versionRef("logback")
 
