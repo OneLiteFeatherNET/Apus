@@ -15,7 +15,7 @@ dependencyResolutionManagement {
             version("bluemap", "5.27")
             version("bluemap-api", "2.8.1")
             version("junit", "6.1.3")
-            version("testcontainers", "1.20.6")
+            version("testcontainers", "1.21.0")
             version("spotless", "8.5.1")
             version("shadow", "9.4.0")
             version("josdk", "5.6.2")
