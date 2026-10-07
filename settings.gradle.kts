@@ -176,7 +176,7 @@ dependencyResolutionManagement {
             library("logback.classic", "ch.qos.logback", "logback-classic").versionRef("logback")
 
             // The stable OTel BOM covers the API, SDK, autoconfigure and the OTLP exporter.
-            version("opentelemetry", "1.52.0")
+            version("opentelemetry", "1.53.0")
             library("opentelemetry.bom", "io.opentelemetry", "opentelemetry-bom").versionRef("opentelemetry")
             library("opentelemetry.api", "io.opentelemetry", "opentelemetry-api").withoutVersion()
             library("opentelemetry.sdk", "io.opentelemetry", "opentelemetry-sdk").withoutVersion()
