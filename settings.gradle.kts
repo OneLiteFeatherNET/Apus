@@ -17,7 +17,7 @@ dependencyResolutionManagement {
             version("junit", "6.1.3")
             version("testcontainers", "1.20.6")
             version("spotless", "8.5.1")
-            version("shadow", "9.4.0")
+            version("shadow", "9.4.1")
             version("josdk", "5.6.2")
             version("fabric8", "7.9.0")
             // Jackson: not a new dependency family for the project -- fabric8's kubernetes-client
