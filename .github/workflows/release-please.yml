@@ -242,7 +242,7 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@v6
-      - uses: azure/setup-helm@v4
+      - uses: azure/setup-helm@v5
         with:
           # Same pin, same reason as build-pr.yml (see the comment there): the chart that ships
           # must be packaged by the exact Helm version the PR job linted and rendered it with.

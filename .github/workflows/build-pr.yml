@@ -65,7 +65,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: azure/setup-helm@v4
+      - uses: azure/setup-helm@v5
         with:
           # Pinned on purpose: the schema checks below grep for JSON-Pointer paths
           # (/auth/issuer), which Helm only emits since it moved to jsonschema/v6
