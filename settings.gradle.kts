@@ -66,7 +66,7 @@ dependencyResolutionManagement {
             // which pins exactly this combination (micronaut.core.version=5.1.10,
             // micronaut.security.version=5.3.1, micronaut.serialization.version=3.1.0) --
             // Micronaut 5 is the current major; there is no newer 4.x release to prefer over it.
-            version("micronaut", "5.2.11")
+            version("micronaut", "5.2.12")
             version("micronaut-security", "5.4.0")
             version("micronaut-serde", "3.2.4")
             // Test-only (phase 5a consolidation, part 2): micronaut-test-junit5 versions
