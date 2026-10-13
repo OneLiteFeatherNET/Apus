@@ -12,7 +12,7 @@ dependencyResolutionManagement {
     }
     versionCatalogs {
         create("libs") {
-            version("bluemap", "5.28")
+            version("bluemap", "5.29")
             version("bluemap-api", "2.8.2")
             version("junit", "6.1.3")
             version("testcontainers", "1.21.0")
