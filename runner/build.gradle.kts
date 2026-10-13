@@ -9,7 +9,7 @@ dependencies {
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.minio)
 
-    testImplementation("org.slf4j:slf4j-simple:2.0.16")
+    testImplementation("org.slf4j:slf4j-simple:2.0.17")
 
     // IngestRenderContractTest drives the real net.onelitefeather.apus.ingest.IngestMain entry
     // point in-process (against the same MinIO Testcontainers instance the render half of that
