@@ -19,7 +19,7 @@ dependencyResolutionManagement {
             version("spotless", "8.5.1")
             version("shadow", "9.4.1")
             version("josdk", "5.6.2")
-            version("fabric8", "7.9.0")
+            version("fabric8", "8.0.0")
             // Jackson: not a new dependency family for the project -- fabric8's kubernetes-client
             // already pulls jackson-databind transitively for the operator module -- just the
             // first place it's declared explicitly, for the ingest module's BundleManifest
