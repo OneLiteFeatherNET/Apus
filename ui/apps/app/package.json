@@ -16,7 +16,7 @@
   "dependencies": {
     "@apus/ui-core": "workspace:*",
     "@apus/ui-design": "workspace:*",
-    "@nuxt/ui": "4.10.0"
+    "@nuxt/ui": "4.11.3"
   },
   "devDependencies": {
     "@nuxt/eslint": "1.17.0",
