@@ -400,3 +400,33 @@ jobs:
       build-task: ":paper-worldpush:build"
       publish-task: ":paper-worldpush:publish"
     secrets: inherit
+
+  sbom:
+    name: Attach SBOM to release
+    needs: release-please
+    # This repo funnels the release signal through its own resolve step, and its
+    # root tag carries the component prefix (include-component-in-tag).
+    if: ${{ !cancelled() && needs.release-please.outputs.root-released == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: apus-v${{ needs.release-please.outputs.root-version }}
+
+      - name: Generate CycloneDX SBOM
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: cyclonedx
+          output: bom.json
+          exit-code: '0'
+
+      - name: Attach SBOM to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: apus-v${{ needs.release-please.outputs.root-version }}
+        run: gh release upload "$TAG" bom.json --clobber
