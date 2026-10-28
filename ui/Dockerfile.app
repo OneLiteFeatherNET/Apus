@@ -9,7 +9,7 @@
 # Stage 1: build the SPA
 ########################################
 # Version pinned to ui/.nvmrc (24); keep both in sync with the runtime stage below.
-FROM node:24-bookworm-slim AS build
+FROM node:26-bookworm-slim AS build
 
 RUN corepack enable
 
