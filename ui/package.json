@@ -22,7 +22,7 @@
     "@typescript-eslint/parser": "8.67.0",
     "eslint": "10.8.1",
     "eslint-plugin-vuejs-accessibility": "2.5.0",
-    "typescript": "6.0.3",
+    "typescript": "7.0.2",
     "vue-eslint-parser": "10.4.1"
   }
 }
