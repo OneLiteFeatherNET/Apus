@@ -36,6 +36,17 @@ jobs:
       telemetry-released: ${{ steps.release.outputs['telemetry-addon--release_created'] }}
       paper-released: ${{ steps.release.outputs['paper-worldpush--release_created'] }}
     steps:
+      # GITHUB_TOKEN-opened release PRs leave their checks in "action_required"
+      # until GitHub fails them after 30 days; the release bot app avoids that.
+      - name: Create release bot token
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ secrets.RELEASE_PLEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_PLEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+
       - id: release
         # Never on a manual dispatch: release-please would open or update a release PR for
         # the next version, which is the exact opposite of re-publishing an existing one.
@@ -43,6 +54,7 @@ jobs:
         if: github.event_name == 'push'
         uses: googleapis/release-please-action@v5
         with:
+          token: ${{ steps.app-token.outputs.token }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
       - uses: actions/checkout@v6
