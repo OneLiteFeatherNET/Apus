@@ -12,7 +12,7 @@
     "@apus/ui-core": "workspace:*",
     "@nuxt/ui": "4.10.0",
     "@vueuse/nuxt": "14.4.0",
-    "tailwindcss": "4.3.3",
-    "vue": "3.5.44"
+    "tailwindcss": "4.3.5",
+    "vue": "3.5.45"
   }
 }
