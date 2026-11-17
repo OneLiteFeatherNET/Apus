@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-FROM eclipse-temurin:25-jre-jammy
+FROM eclipse-temurin:25.0.5.1_1-jre-jammy
 
 # Non-root, same convention as runner/Dockerfile and ingest/Dockerfile. The operator writes
 # nothing to the filesystem at all -- it only talks to the Kubernetes API -- so it gets no

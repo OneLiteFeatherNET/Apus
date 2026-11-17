@@ -3,7 +3,7 @@
 ########################################
 # Stage 1: fetch the BlueMap CLI and the S3 storage addon
 ########################################
-FROM eclipse-temurin:25-jre-jammy AS fetch
+FROM eclipse-temurin:25.0.5.1_1-jre-jammy AS fetch
 
 ARG BLUEMAP_VERSION=5.23
 ARG BLUEMAP_S3_STORAGE_VERSION=1.5.1
@@ -26,7 +26,7 @@ RUN curl -fsSL -o bluemap-cli.jar \
 ########################################
 # Stage 2: runtime
 ########################################
-FROM eclipse-temurin:25-jre-jammy
+FROM eclipse-temurin:25.0.5.1_1-jre-jammy
 
 # Non-root: this pod only ever writes below /work (its BlueMap config copy and generated
 # webapp/data files); everything else is read-only image content.
