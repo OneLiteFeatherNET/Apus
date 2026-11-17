@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-FROM eclipse-temurin:25-jre-jammy
+FROM eclipse-temurin:25.0.5.1_1-jre-jammy
 
 # Non-root: the ingest job only ever writes below /work (its fetched source data lands in
 # /work/source; nothing else on the filesystem is touched). Same convention as runner/Dockerfile.
